@@ -1,0 +1,18 @@
+# Copy/paste the `analysis:` block into your experiment_config.yaml
+analysis:
+  split_source: marks
+  use_markers: true
+  marker_target_type: plant
+  marker_z_buffer_u: 2.0
+  markers_required: true
+  write_marker_pointcloud: true
+
+  normalize_rssi: true
+  # zscore mode here means phi-band z-score followed by exponential transform
+  rssi_norm_mode: zscore
+  rssi_norm_scope: scan_after_global_masks
+  use_rssi_filter: true
+  rssi_min: 0.7
+  rssi_max: 3.5
+
+  generate_pointclouds: true
