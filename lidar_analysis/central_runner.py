@@ -220,6 +220,7 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         o3d_sor_std_ratio=float(experiment_config.get("o3d_sor_std_ratio", 2.0)),
         use_o3d_voxel=bool(experiment_config.get("use_o3d_voxel", False)),
         o3d_voxel_size_mm=float(experiment_config.get("o3d_voxel_size_mm", 5.0)),
+        pointcloud_ops=experiment_config.get("pointcloud_ops", []),
         topo_min_persistence=float(experiment_config.get("topo_min_persistence", 0.35)),
         topo_background_cut=float(experiment_config.get("topo_background_cut", 0.0)),
         topo_x_bin_m=float(experiment_config.get("topo_x_bin_m", 0.01)),

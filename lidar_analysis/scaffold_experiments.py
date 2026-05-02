@@ -79,6 +79,7 @@ def default_experiment_config(experiment: str) -> dict:
             "o3d_sor_std_ratio": 2.0,
             "use_o3d_voxel": False,
             "o3d_voxel_size_mm": 5.0,
+            "pointcloud_ops": [],
             
             "run_lai": False,
             "run_height": False,

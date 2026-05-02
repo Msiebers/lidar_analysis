@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import Any, List
 
 @dataclass
 class AnalysisConfig:
@@ -66,6 +66,7 @@ class AnalysisConfig:
     o3d_sor_std_ratio: float = 2.0
     use_o3d_voxel: bool = True
     o3d_voxel_size_mm: float = 5.0
+    pointcloud_ops: List[dict[str, Any]] | None = None
 
     # Topology parameters
     topo_min_persistence: float = 0.35

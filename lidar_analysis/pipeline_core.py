@@ -15,6 +15,7 @@ try:
     from .fusion import fuse_by_time
     from .fusion_pps import fuse_by_pps
     from .topology import topology_stand_count
+    from .pointcloud_ops import apply_pointcloud_ops
     from .mark_splitting import (
         build_mark_segments,
         find_marker_file_for_scan,
@@ -27,6 +28,7 @@ except Exception:
     from fusion import fuse_by_time
     from fusion_pps import fuse_by_pps
     from topology import topology_stand_count
+    from pointcloud_ops import apply_pointcloud_ops
     from mark_splitting import (
         build_mark_segments,
         find_marker_file_for_scan,
@@ -425,9 +427,9 @@ class Plot:
         cols = ["X", "Y", "Z", "RSSI"]
         if arr_m.shape[1] >= 5:
             cols.append("rssi_norm")
-            df = pd.DataFrame(arr_m[:, :5], columns=cols)
-        else:
-            df = pd.DataFrame(arr_m[:, :4], columns=cols)
+        if arr_m.shape[1] >= 6:
+            cols.append("rssi_bilateral")
+        df = pd.DataFrame(arr_m[:, : len(cols)], columns=cols)
         df.to_csv(self.csv_out, index=False)
         if "rssi_norm" in df.columns and len(df) > 0:
             rn = pd.to_numeric(df["rssi_norm"], errors="coerce")
@@ -1334,6 +1336,9 @@ def process_scan(
         )
         if data.size == 0:
             return []
+
+    if rssi_scope != "per_target":
+        data = apply_pointcloud_ops(data, cfg)
 
     if rssi_scope != "per_target":
         data, keep_idx = apply_rssi_filter(

@@ -1,0 +1,28 @@
+analysis:
+  split_source: marks
+  use_markers: true
+  marker_target_type: plant
+  marker_z_buffer_u: 2.0
+  markers_required: true
+  write_marker_pointcloud: true
+
+  normalize_rssi: true
+  # zscore = phi-band z-score followed by exponential transform
+  rssi_norm_mode: zscore
+  rssi_norm_scope: scan_after_global_masks
+  use_rssi_filter: false
+  rssi_min: null
+  rssi_max: null
+
+  pointcloud_ops:
+    - name: bilateral_scalar
+      enabled: true
+      scalar: rssi_norm
+      output_scalar: rssi_bilateral
+      spatial_sigma_u: 0.05
+      scalar_sigma: 0.20
+      radius_u: 0.15
+      min_neighbors: 3
+
+  generate_pointclouds: true
+  # planned next ops (not implemented yet): scalar range filter, SOR, voxelization
