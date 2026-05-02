@@ -429,6 +429,14 @@ class Plot:
         else:
             df = pd.DataFrame(arr_m[:, :4], columns=cols)
         df.to_csv(self.csv_out, index=False)
+        if "rssi_norm" in df.columns and len(df) > 0:
+            rn = pd.to_numeric(df["rssi_norm"], errors="coerce")
+            print(
+                f"[WRITE] path={self.csv_out} shape={df.shape} columns={','.join(df.columns)} "
+                f"rssi_norm_min={float(np.nanmin(rn)):.6f} rssi_norm_max={float(np.nanmax(rn)):.6f}"
+            )
+        else:
+            print(f"[WRITE] path={self.csv_out} shape={df.shape} columns={','.join(df.columns)}")
 
     def _write_ply(self, arr_m):
         if arr_m.size == 0:
@@ -980,7 +988,7 @@ def analyze_plot(
 
     mask = z_mask & x_mask
 
-    p.cloud = np.empty((0, 4), dtype=np.float32)
+    p.cloud = np.empty((0, data.shape[1]), dtype=np.float32)
     n_points = 0
     height_m = float("nan")
     lai_even = float("nan")
@@ -1201,6 +1209,17 @@ def apply_rssi_normalization_after_masks(
         raise ValueError(f"Unknown rssi_norm_mode: {mode}")
 
     out[:, 4] = rssi_norm
+    vals = out[:, 4]
+    finite = np.isfinite(vals)
+    if np.any(finite):
+        v = vals[finite]
+        print(
+            f"[RSSI] after normalization: finite={int(finite.sum())}, "
+            f"min={float(np.nanmin(v)):.6f}, max={float(np.nanmax(v)):.6f}, "
+            f"mean={float(np.nanmean(v)):.6f}, std={float(np.nanstd(v)):.6f}"
+        )
+    else:
+        print("[RSSI] after normalization: finite=0, min=nan, max=nan, mean=nan, std=nan")
     print("[RSSI] raw RSSI preserved")
     print("[RSSI] rssi_norm column added")
     return out
