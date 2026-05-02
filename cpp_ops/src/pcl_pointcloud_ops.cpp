@@ -118,7 +118,7 @@ int main(int argc,char** argv){
     if(argc!=2) throw std::runtime_error("Usage: pcl_pointcloud_ops_batch <manifest.csv>");
     std::ifstream mf(argv[1]); if(!mf) throw std::runtime_error("Cannot open manifest");
     std::string line; if(!std::getline(mf,line)) throw std::runtime_error("Empty manifest");
-    std::vector<Job> jobs; while(std::getline(mf,line)){ if(line.empty()) continue; auto c=split_csv_line(line); if(c.size()!=4) throw std::runtime_error("Manifest row must have 4 columns"); jobs.push_back({c[0],c[1],c[2],c[3]}); }
+    std::vector<Job> jobs; while(std::getline(mf,line)){ if(line.empty()) continue; auto c=split_csv_line(line); if(c.size()!=4) throw std::runtime_error("Manifest row must have 4 columns"); jobs.push_back({trim(c[0]),trim(c[1]),trim(c[2]),trim(c[3])}); }
     for(size_t i=0;i<jobs.size();++i){ const auto& j=jobs[i]; std::cout<<"[pcl_ops] "<<(i+1)<<"/"<<jobs.size()<<" target="<<j.target_id<<"\n"; auto csv=read_csv(j.input_csv); Table t=to_table(csv); auto ops=parse_ops_json(j.ops_config_path);
       for(const auto& op:ops){ if(!op.kv.count("enabled")||!to_b(op.kv.at("enabled"))) continue; auto name=unquote(op.kv.at("name")); if(name=="scalar_range_filter") op_scalar_range(t,op); else if(name=="bilateral_scalar_filter") op_bilateral(t,op); else if(name=="sor_filter") op_sor(t,op); else if(name=="voxel_grid") op_voxel(t,op); else throw std::runtime_error("Unknown op: "+name); }
       write_csv(j.output_csv, from_table(t));
