@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import time
 from typing import Any
 
 import numpy as np
@@ -43,9 +44,28 @@ def _op_bilateral_scalar(data: np.ndarray, cfg, op: dict[str, Any]) -> np.ndarra
     scalar = str(op.get("scalar", "rssi_norm")).strip().lower()
     output_scalar = str(op.get("output_scalar", "rssi_bilateral")).strip().lower()
     spatial_sigma_mm = _unit_to_mm(float(op.get("spatial_sigma_u", 0.05)), cfg.dim_units)
-    radius_mm = _unit_to_mm(float(op.get("radius_u", 0.15)), cfg.dim_units)
+    radius_u = op.get("radius_u", None)
+    if radius_u is None:
+        radius_mm = 3.0 * spatial_sigma_mm
+    else:
+        radius_mm = _unit_to_mm(float(radius_u), cfg.dim_units)
     scalar_sigma = float(op.get("scalar_sigma", 0.20))
     min_neighbors = int(op.get("min_neighbors", 3))
+    max_neighbors = int(op.get("max_neighbors", 64))
+    max_points = op.get("max_points", None)
+    if max_points is not None and data.shape[0] > int(max_points):
+        raise RuntimeError(
+            f"bilateral_scalar cloud has {data.shape[0]} points which exceeds max_points={int(max_points)}"
+        )
+    if data.shape[0] > 500_000:
+        print(
+            f"[pointcloud_ops][WARN] bilateral_scalar on {data.shape[0]} points may be slow; "
+            "consider smaller radius_u or max_neighbors."
+        )
+    print(
+        f"[pointcloud_ops] bilateral_scalar radius_mm={radius_mm:.3f} spatial_sigma_mm={spatial_sigma_mm:.3f} "
+        f"scalar_sigma={scalar_sigma} min_neighbors={min_neighbors} max_neighbors={max_neighbors}"
+    )
 
     scalar_map = {"rssi": 3, "rssi_norm": 4, "rssi_bilateral": 5}
     if scalar not in scalar_map:
@@ -65,12 +85,17 @@ def _op_bilateral_scalar(data: np.ndarray, cfg, op: dict[str, Any]) -> np.ndarra
     out_s = data[:, dst_col].astype(np.float64, copy=True)
     tree = cKDTree(xyz)
 
+    last_log = time.time()
     for i in range(data.shape[0]):
         si = s[i]
         if not np.isfinite(si):
             out_s[i] = si
             continue
         idx = tree.query_ball_point(xyz[i], r=radius_mm)
+        if len(idx) > max_neighbors:
+            dsel = np.linalg.norm(xyz[np.asarray(idx, dtype=np.int64)] - xyz[i], axis=1)
+            take = np.argsort(dsel)[:max_neighbors]
+            idx = list(np.asarray(idx, dtype=np.int64)[take])
         if len(idx) < min_neighbors:
             out_s[i] = si
             continue
@@ -88,6 +113,9 @@ def _op_bilateral_scalar(data: np.ndarray, cfg, op: dict[str, Any]) -> np.ndarra
         w = sw * rw
         denom = np.sum(w)
         out_s[i] = float(np.sum(w * sj) / denom) if denom > 0 else si
+        if (i + 1) % 100_000 == 0 or (time.time() - last_log) > 3.0:
+            print(f"[pointcloud_ops] bilateral_scalar {i + 1}/{data.shape[0]} points")
+            last_log = time.time()
 
     data[:, dst_col] = out_s.astype(np.float32)
     return data

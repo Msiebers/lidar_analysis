@@ -19,10 +19,14 @@ analysis:
       enabled: true
       scalar: rssi_norm
       output_scalar: rssi_bilateral
-      spatial_sigma_u: 0.05
+      spatial_sigma_u: 0.02
       scalar_sigma: 0.20
-      radius_u: 0.15
+      radius_u: 0.04
       min_neighbors: 3
+      max_neighbors: 64
+      max_points: null
 
   generate_pointclouds: true
+  # Bilateral filtering can be expensive on full-resolution LiDAR scans.
+  # Start with cropped/downsampled examples or small radius_u.
   # planned next ops (not implemented yet): scalar range filter, SOR, voxelization
