@@ -15,20 +15,26 @@ try:
     from .fusion import fuse_by_time
     from .fusion_pps import fuse_by_pps
     from .topology import topology_stand_count
+    from .pointcloud_ops import apply_pointcloud_ops, run_pcl_batch_on_csvs
     from .mark_splitting import (
         build_mark_segments,
         find_marker_file_for_scan,
+        load_markers,
         marker_buffer_mm,
+        marker_count_to_z_mm,
     )
 except Exception:
     from config import AnalysisConfig
     from fusion import fuse_by_time
     from fusion_pps import fuse_by_pps
     from topology import topology_stand_count
+    from pointcloud_ops import apply_pointcloud_ops, run_pcl_batch_on_csvs
     from mark_splitting import (
         build_mark_segments,
         find_marker_file_for_scan,
+        load_markers,
         marker_buffer_mm,
+        marker_count_to_z_mm,
     )
 
 # ----------------------
@@ -418,8 +424,21 @@ class Plot:
         return (left & (self.row == left_row)) | (right & (self.row == right_row))
 
     def _write_csv(self, arr_m):
-        df = pd.DataFrame(arr_m[:, :4], columns=["X", "Y", "Z", "RSSI"])
+        cols = ["X", "Y", "Z", "RSSI"]
+        if arr_m.shape[1] >= 5:
+            cols.append("rssi_norm")
+        if arr_m.shape[1] >= 6:
+            cols.append("rssi_bilateral")
+        df = pd.DataFrame(arr_m[:, : len(cols)], columns=cols)
         df.to_csv(self.csv_out, index=False)
+        if "rssi_norm" in df.columns and len(df) > 0:
+            rn = pd.to_numeric(df["rssi_norm"], errors="coerce")
+            print(
+                f"[WRITE] path={self.csv_out} shape={df.shape} columns={','.join(df.columns)} "
+                f"rssi_norm_min={float(np.nanmin(rn)):.6f} rssi_norm_max={float(np.nanmax(rn)):.6f}"
+            )
+        else:
+            print(f"[WRITE] path={self.csv_out} shape={df.shape} columns={','.join(df.columns)}")
 
     def _write_ply(self, arr_m):
         if arr_m.size == 0:
@@ -681,7 +700,8 @@ def reconstruct_world_points(
     lidar_center_world = cart_translation + lidar_offset_world
     world_pts = lidar_center_world + beam_pts_world_rel
 
-    data = np.column_stack([world_pts, rssi_used]).astype(np.float32, copy=False)
+    rssi_norm = np.full_like(rssi_used, np.nan, dtype=np.float32)
+    data = np.column_stack([world_pts, rssi_used, rssi_norm]).astype(np.float32, copy=False)
     return data, keep_idx
 
 
@@ -906,6 +926,48 @@ def write_scan_outputs(scan_base: str, cfg: AnalysisConfig, plot: Plot) -> None:
         )
 
 
+def write_marker_pointcloud_csv(
+    marker_path: str,
+    out_dir: str,
+    scan_base: str,
+    *,
+    step_mm: float,
+    lidar_wheel_offset_mm: float,
+) -> None:
+    df = load_markers(marker_path).copy()
+    if df.empty:
+        return
+
+    df["z_mm"] = df["_encoder_count"].apply(
+        lambda c: marker_count_to_z_mm(c, step_mm=step_mm, lidar_wheel_offset_mm=lidar_wheel_offset_mm)
+    )
+    marker_order = pd.to_numeric(df.get("marker_idx"), errors="coerce")
+    if marker_order.isna().all():
+        marker_order = pd.to_numeric(df.get("target_number"), errors="coerce").fillna(0)
+    pcd = pd.DataFrame(
+        {
+            "x": 0.0,
+            "y": 0.0,
+            "z": df["z_mm"] / 1000.0,
+            "rssi": marker_order,
+        }
+    )
+    pcd_path = os.path.join(out_dir, f"{scan_base}_markers.csv")
+    pcd.to_csv(pcd_path, index=False)
+    print(f"[MARKS] wrote marker point cloud: {pcd_path}")
+
+    metadata_dir = os.path.join(os.path.dirname(out_dir), "scan_metadata")
+    os.makedirs(metadata_dir, exist_ok=True)
+    meta_cols = ["marker_idx", "target_type", "target_number", "mark_role", "encoder_count", "time_s"]
+    existing_meta_cols = [c for c in meta_cols if c in df.columns]
+    meta = df[existing_meta_cols].copy()
+    meta["z_mm"] = df["z_mm"]
+    meta["scan_base"] = scan_base
+    meta_path = os.path.join(metadata_dir, f"{scan_base}_markers_metadata.csv")
+    meta.to_csv(meta_path, index=False)
+    print(f"[MARKS] wrote marker metadata: {meta_path}")
+
+
 def analyze_plot(
     p: Plot,
     data: np.ndarray,
@@ -928,7 +990,7 @@ def analyze_plot(
 
     mask = z_mask & x_mask
 
-    p.cloud = np.empty((0, 4), dtype=np.float32)
+    p.cloud = np.empty((0, data.shape[1]), dtype=np.float32)
     n_points = 0
     height_m = float("nan")
     lai_even = float("nan")
@@ -948,6 +1010,16 @@ def analyze_plot(
     else:
         goto_open3d = True
         p.cloud = data[mask]
+        if cfg.normalize_rssi and str(getattr(cfg, "rssi_norm_scope", "scan_after_global_masks")).strip().lower() == "per_target":
+            p.cloud = apply_rssi_normalization_after_masks(
+                data=p.cloud,
+                keep_idx=keep_idx[mask],
+                fused_np=fused_np,
+                cfg=cfg,
+            )
+            if cfg.use_rssi_filter:
+                temp_idx = keep_idx[mask]
+                p.cloud, temp_idx = apply_rssi_filter(p.cloud, temp_idx, cfg)
         n_points = int(p.cloud.shape[0])
         if cfg.run_height:
             height_m = height_from_world_y(p.cloud, alpha=0.01)
@@ -1106,8 +1178,14 @@ def apply_rssi_normalization_after_masks(
 
     out = np.array(data, copy=True)
 
-    if not np.any(valid):
-        out[:, 3] = 0.0
+    n_used = int(np.sum(valid))
+    print("[RSSI] normalize_rssi=true")
+    print(f"[RSSI] rssi_norm_mode={str(cfg.rssi_norm_mode).strip().lower()}")
+    print(f"[RSSI] rssi_norm_scope={str(getattr(cfg, 'rssi_norm_scope', 'scan_after_global_masks')).strip().lower()}")
+    print(f"[RSSI] points used for normalization={n_used}")
+
+    if n_used == 0:
+        out[:, 4] = 0.0
         return out
 
     mode = str(cfg.rssi_norm_mode).strip().lower()
@@ -1122,7 +1200,7 @@ def apply_rssi_normalization_after_masks(
         ).astype(np.float32, copy=False)
 
     elif mode == "zscore":
-        print("[RSSI_NORM] using PHI-only zscore")
+        print("[RSSI] zscore mode uses phi-band z-score plus exponential transform")
         rssi_norm[valid] = normalize_rssi_by_phi_zscore(
             phi_kept[valid],
             rssi_kept[valid],
@@ -1132,7 +1210,20 @@ def apply_rssi_normalization_after_masks(
     else:
         raise ValueError(f"Unknown rssi_norm_mode: {mode}")
 
-    out[:, 3] = rssi_norm
+    out[:, 4] = rssi_norm
+    vals = out[:, 4]
+    finite = np.isfinite(vals)
+    if np.any(finite):
+        v = vals[finite]
+        print(
+            f"[RSSI] after normalization: finite={int(finite.sum())}, "
+            f"min={float(np.nanmin(v)):.6f}, max={float(np.nanmax(v)):.6f}, "
+            f"mean={float(np.nanmean(v)):.6f}, std={float(np.nanstd(v)):.6f}"
+        )
+    else:
+        print("[RSSI] after normalization: finite=0, min=nan, max=nan, mean=nan, std=nan")
+    print("[RSSI] raw RSSI preserved")
+    print("[RSSI] rssi_norm column added")
     return out
 
 
@@ -1144,7 +1235,9 @@ def apply_rssi_filter(
     if data.size == 0 or not cfg.use_rssi_filter:
         return data, keep_idx
 
-    rssi_vals = data[:, 3]
+    use_norm = bool(cfg.normalize_rssi) and data.shape[1] >= 5 and np.any(np.isfinite(data[:, 4]))
+    scalar_name = "rssi_norm" if use_norm else "RSSI"
+    rssi_vals = data[:, 4] if use_norm else data[:, 3]
     mask = np.ones(rssi_vals.shape[0], dtype=bool)
 
     if cfg.rssi_min is not None:
@@ -1154,7 +1247,7 @@ def apply_rssi_filter(
         mask &= rssi_vals <= float(cfg.rssi_max)
 
     print(
-        f"[RSSI_FILTER] min={cfg.rssi_min} max={cfg.rssi_max} "
+        f"[RSSI_FILTER] scalar={scalar_name} min={cfg.rssi_min} max={cfg.rssi_max} "
         f"kept={int(mask.sum())}/{int(mask.size)}"
     )
 
@@ -1209,6 +1302,18 @@ def process_scan(
         print(f"[Warning] No points reconstructed for {scan_base}")
         return []
 
+    rssi_scope = str(getattr(cfg, "rssi_norm_scope", "scan_after_global_masks")).strip().lower()
+    if rssi_scope not in ("scan_after_global_masks", "per_target", "raw_scan"):
+        raise ValueError(f"Unknown rssi_norm_scope: {rssi_scope}")
+
+    if rssi_scope == "raw_scan":
+        data = apply_rssi_normalization_after_masks(
+            data=data,
+            keep_idx=keep_idx,
+            fused_np=fused_np,
+            cfg=cfg,
+        )
+
     data, keep_idx = apply_global_filters(
         scan_base,
         data,
@@ -1222,22 +1327,34 @@ def process_scan(
     if data.size == 0:
         return []
 
-    data = apply_rssi_normalization_after_masks(
-        data=data,
-        keep_idx=keep_idx,
-        fused_np=fused_np,
-        cfg=cfg,
-    )
-    if data.size == 0:
-        return []
+    if rssi_scope == "scan_after_global_masks":
+        data = apply_rssi_normalization_after_masks(
+            data=data,
+            keep_idx=keep_idx,
+            fused_np=fused_np,
+            cfg=cfg,
+        )
+        if data.size == 0:
+            return []
 
-    data, keep_idx = apply_rssi_filter(
-        data=data,
-        keep_idx=keep_idx,
-        cfg=cfg,
-    )
-    if data.size == 0:
-        return []
+    if rssi_scope != "per_target":
+        has_enabled_python_ops = any(
+            isinstance(op, dict)
+            and bool(op.get("enabled", True))
+            and str(op.get("backend", "python")).lower() == "python"
+            for op in (getattr(cfg, "pointcloud_ops", None) or [])
+        )
+        if has_enabled_python_ops:
+            data = apply_pointcloud_ops(data, cfg)
+
+    if rssi_scope != "per_target":
+        data, keep_idx = apply_rssi_filter(
+            data=data,
+            keep_idx=keep_idx,
+            cfg=cfg,
+        )
+        if data.size == 0:
+            return []
 
     z0 = float(np.nanmin(data[:, 2]))
     zmax = float(np.nanmax(data[:, 2]))
@@ -1255,9 +1372,14 @@ def process_scan(
         h99_m = height_from_world_y(data, alpha=0.01)
         print(f"[Height] Scan={scan_base}, 99th percentile height = {h99_m:.3f} m")
 
-    split_source = str(getattr(cfg, "split_source", "distance")).strip().lower()
-    if split_source not in ("distance", "marks"):
-        raise ValueError(f"Unknown split_source={split_source!r}; use 'distance' or 'marks'.")
+    split_source_cfg = str(getattr(cfg, "split_source", "distance")).strip().lower()
+    use_markers = bool(getattr(cfg, "use_markers", False))
+    if split_source_cfg not in ("distance", "marks"):
+        raise ValueError(f"Unknown split_source={split_source_cfg!r}; use 'distance' or 'marks'.")
+    if split_source_cfg == "marks" or use_markers:
+        split_source = "marks"
+    else:
+        split_source = "distance"
 
     if split_source == "marks":
         raw_dir = os.path.dirname(lidar_path)
@@ -1269,7 +1391,12 @@ def process_scan(
         )
 
         if marker_path is None:
-            missing_mode = str(getattr(cfg, "missing_mark_file", "error")).strip().lower()
+            if use_markers:
+                raise FileNotFoundError(f"[MARKS][ERROR] use_markers=true but no marker file found for {scan_base}")
+            markers_required = bool(getattr(cfg, "markers_required", False))
+            missing_mode = "error" if markers_required else "distance"
+            if hasattr(cfg, "missing_mark_file"):
+                missing_mode = str(getattr(cfg, "missing_mark_file", missing_mode)).strip().lower()
 
             if missing_mode == "distance":
                 print(f"[MARKS][WARN] No marker file for {scan_base}; falling back to distance splitting.")
@@ -1284,23 +1411,57 @@ def process_scan(
                 )
 
     if split_source == "marks":
-        z_buffer_mm = marker_buffer_mm(
-            getattr(cfg, "mark_z_buffer_u", 0.0),
-            cfg.dim_units,
-        )
+        marker_target_type = str(getattr(cfg, "marker_target_type", "auto")).strip().lower()
+        mark_target_type = str(getattr(cfg, "mark_target_type", marker_target_type)).strip().lower()
+        if marker_target_type != "auto" and mark_target_type != "auto" and marker_target_type != mark_target_type:
+            raise ValueError(
+                f"Conflicting marker target types: marker_target_type={marker_target_type!r}, "
+                f"mark_target_type={mark_target_type!r}"
+            )
+        if marker_target_type == "auto":
+            marker_target_type = mark_target_type
+
+        marker_buf = float(getattr(cfg, "marker_z_buffer_u", 0.0))
+        mark_buf = float(getattr(cfg, "mark_z_buffer_u", marker_buf))
+        plant_buf = float(getattr(cfg, "plant_marker_buffer_u", marker_buf))
+        plot_buf = float(getattr(cfg, "plot_marker_buffer_u", marker_buf))
+        if marker_target_type == "plant":
+            zbuf_u = marker_buf if marker_buf != 0.0 else (plant_buf if plant_buf != 0.0 else mark_buf)
+        elif marker_target_type == "plot":
+            zbuf_u = marker_buf if marker_buf != 0.0 else (plot_buf if plot_buf != 0.0 else mark_buf)
+        else:
+            zbuf_u = marker_buf if marker_buf != 0.0 else mark_buf
+        provided = {"marker_z_buffer_u": marker_buf, "mark_z_buffer_u": mark_buf, "plant_marker_buffer_u": plant_buf, "plot_marker_buffer_u": plot_buf}
+        nonzero = {k: v for k, v in provided.items() if abs(v) > 0}
+        if len(set(nonzero.values())) > 1:
+            print(f"[MARKS][WARN] Multiple marker buffer keys disagree: {nonzero}; using marker_z_buffer_u fallback chain => {zbuf_u}")
+        z_buffer_mm = marker_buffer_mm(zbuf_u, cfg.dim_units)
+        print("[MARKS] marker splitting active")
+        print(f"[MARKS] target_type={marker_target_type}")
+        print(f"[MARKS] marker_z_buffer_u={zbuf_u} {cfg.dim_units}")
 
         segments = build_mark_segments(
             marker_path=marker_path,
             step_mm=step_mm,
             lidar_wheel_offset_mm=lidar_wheel_offset_mm,
             z_buffer_mm=z_buffer_mm,
-            target_type=str(getattr(cfg, "mark_target_type", "auto")),
+            target_type=marker_target_type,
             zmax_clip=zmax,
         )
+
+        if bool(getattr(cfg, "write_marker_pointcloud", False)) and marker_path is not None:
+            write_marker_pointcloud_csv(
+                str(marker_path),
+                out_dir,
+                scan_base,
+                step_mm=step_mm,
+                lidar_wheel_offset_mm=lidar_wheel_offset_mm,
+            )
 
         if len(segments) == 0:
             print(f"[MARKS][WARN] No usable marker segments for {scan_base}; skipping.")
             return []
+        print(f"[MARKS] built {len(segments)} marker windows")
 
         print(
             f"[MARKS] {scan_base}: using {len(segments)} segment(s) "
@@ -1366,6 +1527,7 @@ def process_scan(
         )
 
     trait_records = []
+    written_csvs: list[str] = []
     for p in plots:
         rec = analyze_plot(
             p,
@@ -1380,6 +1542,11 @@ def process_scan(
         )
         trait_records.append(rec)
         write_scan_outputs(scan_base, cfg, p)
+        if cfg.make_point_cloud:
+            written_csvs.append(p.csv_out)
+
+    if written_csvs:
+        run_pcl_batch_on_csvs(written_csvs, cfg)
 
     print(f"Scan {scan_base} completed")
     return trait_records

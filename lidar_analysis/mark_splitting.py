@@ -141,6 +141,11 @@ def _load_markers(marker_path: str | Path) -> pd.DataFrame:
     return df
 
 
+def load_markers(marker_path: str | Path) -> pd.DataFrame:
+    """Public marker loader for callers needing marker rows/metadata."""
+    return _load_markers(marker_path)
+
+
 def build_mark_segments(
     marker_path: str | Path,
     *,

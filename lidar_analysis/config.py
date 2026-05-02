@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import Any, List
 
 @dataclass
 class AnalysisConfig:
@@ -11,12 +11,19 @@ class AnalysisConfig:
 
     # Splitting source
     split_source: str = "distance"      # "distance" or "marks"
+    use_markers: bool = False
 
     # Marker splitting
     mark_target_type: str = "auto"      # "auto", "plot", or "plant"
+    marker_target_type: str = "auto"    # alias for mark_target_type
+    marker_z_buffer_u: float = 0.0
     mark_z_buffer_u: float = 0.0        # uses dim_units
+    plant_marker_buffer_u: float = 0.0
+    plot_marker_buffer_u: float = 0.0
     markers_dirname: str = "markers"
     missing_mark_file: str = "error"    # "error", "distance", or "skip"
+    markers_required: bool = False
+    write_marker_pointcloud: bool = False
 
     # Output / processing switches
     make_point_cloud: bool = False
@@ -33,6 +40,7 @@ class AnalysisConfig:
     
     normalize_rssi: bool = True
     rssi_norm_mode: str = "percentile" # or "zscore"
+    rssi_norm_scope: str = "scan_after_global_masks"  # scan_after_global_masks|per_target|raw_scan
     use_rssi_filter: bool = False
     rssi_min: float | None = None
     rssi_max: float | None = None
@@ -58,6 +66,8 @@ class AnalysisConfig:
     o3d_sor_std_ratio: float = 2.0
     use_o3d_voxel: bool = True
     o3d_voxel_size_mm: float = 5.0
+    pointcloud_ops: List[dict[str, Any]] | None = None
+    pcl_backend: dict[str, Any] | None = None
 
     # Topology parameters
     topo_min_persistence: float = 0.35
