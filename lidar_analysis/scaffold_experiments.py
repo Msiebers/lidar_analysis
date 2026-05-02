@@ -34,6 +34,16 @@ def default_experiment_config(experiment: str) -> dict:
         "analysis": {
             
             "fusion_method": "interp",
+            "split_source": "distance",
+            "use_markers": False,
+            "marker_target_type": "auto",
+            "mark_target_type": "auto",
+            "marker_z_buffer_u": 0.0,
+            "plant_marker_buffer_u": 0.0,
+            "plot_marker_buffer_u": 0.0,
+            "mark_z_buffer_u": 0.0,
+            "markers_required": False,
+            "write_marker_pointcloud": False,
 
             "dim_units": "ft",
             
@@ -53,7 +63,8 @@ def default_experiment_config(experiment: str) -> dict:
             "heading_sign": 1.0,
 
             "normalize_rssi": True,
-            "rssi_norm_mode": "zscore",
+            "rssi_norm_mode": "zscore",  # phi-band z-score + exponential transform
+            "rssi_norm_scope": "scan_after_global_masks",
             "use_rssi_filter": False,
             "rssi_min": None,
             "rssi_max": None,
@@ -68,6 +79,14 @@ def default_experiment_config(experiment: str) -> dict:
             "o3d_sor_std_ratio": 2.0,
             "use_o3d_voxel": False,
             "o3d_voxel_size_mm": 5.0,
+            "pointcloud_ops": [],
+            "pcl_backend": {
+                "enabled": False,
+                "executable": None,
+                "work_dir": None,
+                "keep_intermediate": True,
+                "fail_if_missing": True,
+            },
             
             "run_lai": False,
             "run_height": False,

@@ -1,0 +1,23 @@
+analysis:
+  split_source: marks
+  use_markers: true
+  marker_target_type: plant
+  marker_z_buffer_u: 2.0
+  markers_required: true
+  write_marker_pointcloud: true
+
+  normalize_rssi: true
+  rssi_norm_mode: zscore
+  rssi_norm_scope: scan_after_global_masks
+  use_rssi_filter: false
+  rssi_min: null
+  rssi_max: null
+
+  generate_pointclouds: true
+  pcl_backend:
+    enabled: false
+    executable: null
+    work_dir: null
+    keep_intermediate: true
+    fail_if_missing: true
+  pointcloud_ops: []
