@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local C++ build outputs
+cpp_ops/build/
+
+# Local editor / temp files
+*.bak
+*.swp
+*~
+
+# Large local data that should not accidentally be committed
+data/
+raw_data/
+*_full*.csv
+*_through_pps*.csv
+*_every10.csv
+*_every20.csv
