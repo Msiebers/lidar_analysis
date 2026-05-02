@@ -64,6 +64,7 @@ def default_experiment_config(experiment: str) -> dict:
 
             "normalize_rssi": True,
             "rssi_norm_mode": "zscore",
+            "rssi_norm_scope": "scan_after_global_masks",
             "use_rssi_filter": False,
             "rssi_min": None,
             "rssi_max": None,

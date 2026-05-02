@@ -190,6 +190,7 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
 
         normalize_rssi=bool(experiment_config.get("normalize_rssi", False)),
         rssi_norm_mode=str(experiment_config.get("rssi_norm_mode", "percentile")),
+        rssi_norm_scope=str(experiment_config.get("rssi_norm_scope", "scan_after_global_masks")),
         use_rssi_filter=bool(experiment_config.get("use_rssi_filter", False)),
         rssi_min=experiment_config.get("rssi_min"),
         rssi_max=experiment_config.get("rssi_max"),

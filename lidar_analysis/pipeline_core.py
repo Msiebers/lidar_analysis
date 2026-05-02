@@ -994,6 +994,13 @@ def analyze_plot(
     else:
         goto_open3d = True
         p.cloud = data[mask]
+        if cfg.normalize_rssi and str(getattr(cfg, "rssi_norm_scope", "scan_after_global_masks")).strip().lower() == "per_target":
+            p.cloud = apply_rssi_normalization_after_masks(
+                data=p.cloud,
+                keep_idx=keep_idx[mask],
+                fused_np=fused_np,
+                cfg=cfg,
+            )
         n_points = int(p.cloud.shape[0])
         if cfg.run_height:
             height_m = height_from_world_y(p.cloud, alpha=0.01)
@@ -1152,7 +1159,13 @@ def apply_rssi_normalization_after_masks(
 
     out = np.array(data, copy=True)
 
-    if not np.any(valid):
+    n_used = int(np.sum(valid))
+    print("[RSSI] normalize_rssi=true")
+    print(f"[RSSI] rssi_norm_mode={str(cfg.rssi_norm_mode).strip().lower()}")
+    print(f"[RSSI] rssi_norm_scope={str(getattr(cfg, 'rssi_norm_scope', 'scan_after_global_masks')).strip().lower()}")
+    print(f"[RSSI] points used for normalization={n_used}")
+
+    if n_used == 0:
         out[:, 3] = 0.0
         return out
 
@@ -1255,6 +1268,18 @@ def process_scan(
         print(f"[Warning] No points reconstructed for {scan_base}")
         return []
 
+    rssi_scope = str(getattr(cfg, "rssi_norm_scope", "scan_after_global_masks")).strip().lower()
+    if rssi_scope not in ("scan_after_global_masks", "per_target", "raw_scan"):
+        raise ValueError(f"Unknown rssi_norm_scope: {rssi_scope}")
+
+    if rssi_scope == "raw_scan":
+        data = apply_rssi_normalization_after_masks(
+            data=data,
+            keep_idx=keep_idx,
+            fused_np=fused_np,
+            cfg=cfg,
+        )
+
     data, keep_idx = apply_global_filters(
         scan_base,
         data,
@@ -1268,14 +1293,15 @@ def process_scan(
     if data.size == 0:
         return []
 
-    data = apply_rssi_normalization_after_masks(
-        data=data,
-        keep_idx=keep_idx,
-        fused_np=fused_np,
-        cfg=cfg,
-    )
-    if data.size == 0:
-        return []
+    if rssi_scope == "scan_after_global_masks":
+        data = apply_rssi_normalization_after_masks(
+            data=data,
+            keep_idx=keep_idx,
+            fused_np=fused_np,
+            cfg=cfg,
+        )
+        if data.size == 0:
+            return []
 
     data, keep_idx = apply_rssi_filter(
         data=data,

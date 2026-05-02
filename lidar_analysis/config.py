@@ -40,6 +40,7 @@ class AnalysisConfig:
     
     normalize_rssi: bool = True
     rssi_norm_mode: str = "percentile" # or "zscore"
+    rssi_norm_scope: str = "scan_after_global_masks"  # scan_after_global_masks|per_target|raw_scan
     use_rssi_filter: bool = False
     rssi_min: float | None = None
     rssi_max: float | None = None
