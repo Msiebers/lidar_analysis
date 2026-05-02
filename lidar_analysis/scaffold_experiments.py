@@ -34,6 +34,15 @@ def default_experiment_config(experiment: str) -> dict:
         "analysis": {
             
             "fusion_method": "interp",
+            "split_source": "distance",
+            "use_markers": False,
+            "marker_target_type": "auto",
+            "mark_target_type": "auto",
+            "plant_marker_buffer_u": 0.0,
+            "plot_marker_buffer_u": 0.0,
+            "mark_z_buffer_u": 0.0,
+            "markers_required": False,
+            "write_marker_pointcloud": False,
 
             "dim_units": "ft",
             

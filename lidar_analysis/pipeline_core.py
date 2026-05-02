@@ -1282,8 +1282,12 @@ def process_scan(
         h99_m = height_from_world_y(data, alpha=0.01)
         print(f"[Height] Scan={scan_base}, 99th percentile height = {h99_m:.3f} m")
 
+    split_source_cfg = str(getattr(cfg, "split_source", "distance")).strip().lower()
     use_markers = bool(getattr(cfg, "use_markers", False))
-    split_source = "marks" if use_markers else str(getattr(cfg, "split_source", "distance")).strip().lower()
+    if split_source_cfg in ("distance", "marks"):
+        split_source = split_source_cfg
+    else:
+        split_source = "marks" if use_markers else "distance"
     if split_source not in ("distance", "marks"):
         raise ValueError(f"Unknown split_source={split_source!r}; use 'distance' or 'marks'.")
 
