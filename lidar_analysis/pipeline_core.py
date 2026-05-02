@@ -422,7 +422,12 @@ class Plot:
         return (left & (self.row == left_row)) | (right & (self.row == right_row))
 
     def _write_csv(self, arr_m):
-        df = pd.DataFrame(arr_m[:, :4], columns=["X", "Y", "Z", "RSSI"])
+        cols = ["X", "Y", "Z", "RSSI"]
+        if arr_m.shape[1] >= 5:
+            cols.append("rssi_norm")
+            df = pd.DataFrame(arr_m[:, :5], columns=cols)
+        else:
+            df = pd.DataFrame(arr_m[:, :4], columns=cols)
         df.to_csv(self.csv_out, index=False)
 
     def _write_ply(self, arr_m):
@@ -685,7 +690,8 @@ def reconstruct_world_points(
     lidar_center_world = cart_translation + lidar_offset_world
     world_pts = lidar_center_world + beam_pts_world_rel
 
-    data = np.column_stack([world_pts, rssi_used]).astype(np.float32, copy=False)
+    rssi_norm = np.full_like(rssi_used, np.nan, dtype=np.float32)
+    data = np.column_stack([world_pts, rssi_used, rssi_norm]).astype(np.float32, copy=False)
     return data, keep_idx
 
 
@@ -1001,6 +1007,9 @@ def analyze_plot(
                 fused_np=fused_np,
                 cfg=cfg,
             )
+            if cfg.use_rssi_filter:
+                temp_idx = keep_idx[mask]
+                p.cloud, temp_idx = apply_rssi_filter(p.cloud, temp_idx, cfg)
         n_points = int(p.cloud.shape[0])
         if cfg.run_height:
             height_m = height_from_world_y(p.cloud, alpha=0.01)
@@ -1166,7 +1175,7 @@ def apply_rssi_normalization_after_masks(
     print(f"[RSSI] points used for normalization={n_used}")
 
     if n_used == 0:
-        out[:, 3] = 0.0
+        out[:, 4] = 0.0
         return out
 
     mode = str(cfg.rssi_norm_mode).strip().lower()
@@ -1181,7 +1190,7 @@ def apply_rssi_normalization_after_masks(
         ).astype(np.float32, copy=False)
 
     elif mode == "zscore":
-        print("[RSSI_NORM] using PHI-only zscore")
+        print("[RSSI] zscore mode uses phi-band z-score plus exponential transform")
         rssi_norm[valid] = normalize_rssi_by_phi_zscore(
             phi_kept[valid],
             rssi_kept[valid],
@@ -1191,7 +1200,9 @@ def apply_rssi_normalization_after_masks(
     else:
         raise ValueError(f"Unknown rssi_norm_mode: {mode}")
 
-    out[:, 3] = rssi_norm
+    out[:, 4] = rssi_norm
+    print("[RSSI] raw RSSI preserved")
+    print("[RSSI] rssi_norm column added")
     return out
 
 
@@ -1203,7 +1214,9 @@ def apply_rssi_filter(
     if data.size == 0 or not cfg.use_rssi_filter:
         return data, keep_idx
 
-    rssi_vals = data[:, 3]
+    use_norm = bool(cfg.normalize_rssi) and data.shape[1] >= 5 and np.any(np.isfinite(data[:, 4]))
+    scalar_name = "rssi_norm" if use_norm else "RSSI"
+    rssi_vals = data[:, 4] if use_norm else data[:, 3]
     mask = np.ones(rssi_vals.shape[0], dtype=bool)
 
     if cfg.rssi_min is not None:
@@ -1213,7 +1226,7 @@ def apply_rssi_filter(
         mask &= rssi_vals <= float(cfg.rssi_max)
 
     print(
-        f"[RSSI_FILTER] min={cfg.rssi_min} max={cfg.rssi_max} "
+        f"[RSSI_FILTER] scalar={scalar_name} min={cfg.rssi_min} max={cfg.rssi_max} "
         f"kept={int(mask.sum())}/{int(mask.size)}"
     )
 
@@ -1303,13 +1316,14 @@ def process_scan(
         if data.size == 0:
             return []
 
-    data, keep_idx = apply_rssi_filter(
-        data=data,
-        keep_idx=keep_idx,
-        cfg=cfg,
-    )
-    if data.size == 0:
-        return []
+    if rssi_scope != "per_target":
+        data, keep_idx = apply_rssi_filter(
+            data=data,
+            keep_idx=keep_idx,
+            cfg=cfg,
+        )
+        if data.size == 0:
+            return []
 
     z0 = float(np.nanmin(data[:, 2]))
     zmax = float(np.nanmax(data[:, 2]))
@@ -1329,14 +1343,12 @@ def process_scan(
 
     split_source_cfg = str(getattr(cfg, "split_source", "distance")).strip().lower()
     use_markers = bool(getattr(cfg, "use_markers", False))
+    if split_source_cfg not in ("distance", "marks"):
+        raise ValueError(f"Unknown split_source={split_source_cfg!r}; use 'distance' or 'marks'.")
     if split_source_cfg == "marks" or use_markers:
         split_source = "marks"
-    elif split_source_cfg == "distance":
-        split_source = "distance"
     else:
         split_source = "distance"
-    if split_source not in ("distance", "marks"):
-        raise ValueError(f"Unknown split_source={split_source!r}; use 'distance' or 'marks'.")
 
     if split_source == "marks":
         raw_dir = os.path.dirname(lidar_path)
@@ -1348,6 +1360,8 @@ def process_scan(
         )
 
         if marker_path is None:
+            if use_markers:
+                raise FileNotFoundError(f"[MARKS][ERROR] use_markers=true but no marker file found for {scan_base}")
             markers_required = bool(getattr(cfg, "markers_required", False))
             missing_mode = "error" if markers_required else "distance"
             if hasattr(cfg, "missing_mark_file"):

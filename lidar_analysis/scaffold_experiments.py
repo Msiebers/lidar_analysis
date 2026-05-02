@@ -63,7 +63,7 @@ def default_experiment_config(experiment: str) -> dict:
             "heading_sign": 1.0,
 
             "normalize_rssi": True,
-            "rssi_norm_mode": "zscore",
+            "rssi_norm_mode": "zscore",  # phi-band z-score + exponential transform
             "rssi_norm_scope": "scan_after_global_masks",
             "use_rssi_filter": False,
             "rssi_min": None,
