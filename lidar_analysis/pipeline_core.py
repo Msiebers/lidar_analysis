@@ -18,7 +18,9 @@ try:
     from .mark_splitting import (
         build_mark_segments,
         find_marker_file_for_scan,
+        load_markers,
         marker_buffer_mm,
+        marker_count_to_z_mm,
     )
 except Exception:
     from config import AnalysisConfig
@@ -28,7 +30,9 @@ except Exception:
     from mark_splitting import (
         build_mark_segments,
         find_marker_file_for_scan,
+        load_markers,
         marker_buffer_mm,
+        marker_count_to_z_mm,
     )
 
 # ----------------------
@@ -906,6 +910,29 @@ def write_scan_outputs(scan_base: str, cfg: AnalysisConfig, plot: Plot) -> None:
         )
 
 
+def write_marker_pointcloud_csv(
+    marker_path: str,
+    out_dir: str,
+    scan_base: str,
+    *,
+    step_mm: float,
+    lidar_wheel_offset_mm: float,
+) -> None:
+    df = load_markers(marker_path).copy()
+    if df.empty:
+        return
+
+    df["X"] = 0.0
+    df["Y"] = 0.0
+    df["Z"] = df["_encoder_count"].apply(
+        lambda c: marker_count_to_z_mm(c, step_mm=step_mm, lidar_wheel_offset_mm=lidar_wheel_offset_mm) / 1000.0
+    )
+    keep_cols = [c for c in ["marker_idx", "target_type", "target_number", "mark_role", "encoder_count", "time_s"] if c in df.columns]
+    out_cols = ["X", "Y", "Z"] + keep_cols
+    out_path = os.path.join(out_dir, f"{scan_base}_markers_pointcloud.csv")
+    df[out_cols].to_csv(out_path, index=False)
+
+
 def analyze_plot(
     p: Plot,
     data: np.ndarray,
@@ -1255,7 +1282,8 @@ def process_scan(
         h99_m = height_from_world_y(data, alpha=0.01)
         print(f"[Height] Scan={scan_base}, 99th percentile height = {h99_m:.3f} m")
 
-    split_source = str(getattr(cfg, "split_source", "distance")).strip().lower()
+    use_markers = bool(getattr(cfg, "use_markers", False))
+    split_source = "marks" if use_markers else str(getattr(cfg, "split_source", "distance")).strip().lower()
     if split_source not in ("distance", "marks"):
         raise ValueError(f"Unknown split_source={split_source!r}; use 'distance' or 'marks'.")
 
@@ -1269,7 +1297,10 @@ def process_scan(
         )
 
         if marker_path is None:
-            missing_mode = str(getattr(cfg, "missing_mark_file", "error")).strip().lower()
+            markers_required = bool(getattr(cfg, "markers_required", False))
+            missing_mode = "error" if markers_required else "distance"
+            if hasattr(cfg, "missing_mark_file"):
+                missing_mode = str(getattr(cfg, "missing_mark_file", missing_mode)).strip().lower()
 
             if missing_mode == "distance":
                 print(f"[MARKS][WARN] No marker file for {scan_base}; falling back to distance splitting.")
@@ -1284,19 +1315,33 @@ def process_scan(
                 )
 
     if split_source == "marks":
-        z_buffer_mm = marker_buffer_mm(
-            getattr(cfg, "mark_z_buffer_u", 0.0),
-            cfg.dim_units,
-        )
+        marker_target_type = str(getattr(cfg, "marker_target_type", getattr(cfg, "mark_target_type", "auto")))
+        if marker_target_type == "auto":
+            # handled by build_mark_segments based on file content
+            marker_target_type = "auto"
+        if marker_target_type == "plant":
+            zbuf_u = float(getattr(cfg, "plant_marker_buffer_u", getattr(cfg, "mark_z_buffer_u", 0.0)))
+        else:
+            zbuf_u = float(getattr(cfg, "plot_marker_buffer_u", getattr(cfg, "mark_z_buffer_u", 0.0)))
+        z_buffer_mm = marker_buffer_mm(zbuf_u, cfg.dim_units)
 
         segments = build_mark_segments(
             marker_path=marker_path,
             step_mm=step_mm,
             lidar_wheel_offset_mm=lidar_wheel_offset_mm,
             z_buffer_mm=z_buffer_mm,
-            target_type=str(getattr(cfg, "mark_target_type", "auto")),
+            target_type=marker_target_type,
             zmax_clip=zmax,
         )
+
+        if bool(getattr(cfg, "write_marker_pointcloud", False)) and marker_path is not None:
+            write_marker_pointcloud_csv(
+                str(marker_path),
+                out_dir,
+                scan_base,
+                step_mm=step_mm,
+                lidar_wheel_offset_mm=lidar_wheel_offset_mm,
+            )
 
         if len(segments) == 0:
             print(f"[MARKS][WARN] No usable marker segments for {scan_base}; skipping.")

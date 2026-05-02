@@ -11,12 +11,18 @@ class AnalysisConfig:
 
     # Splitting source
     split_source: str = "distance"      # "distance" or "marks"
+    use_markers: bool = False
 
     # Marker splitting
     mark_target_type: str = "auto"      # "auto", "plot", or "plant"
+    marker_target_type: str = "auto"    # alias for mark_target_type
     mark_z_buffer_u: float = 0.0        # uses dim_units
+    plant_marker_buffer_u: float = 0.0
+    plot_marker_buffer_u: float = 0.0
     markers_dirname: str = "markers"
     missing_mark_file: str = "error"    # "error", "distance", or "skip"
+    markers_required: bool = False
+    write_marker_pointcloud: bool = False
 
     # Output / processing switches
     make_point_cloud: bool = False
