@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(pcl_pointcloud_ops_batch LANGUAGES CXX)
+project(pcl_pointcloud_ops_batch LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
