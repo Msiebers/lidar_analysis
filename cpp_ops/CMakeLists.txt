@@ -4,7 +4,7 @@ project(pcl_pointcloud_ops_batch LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(PCL REQUIRED)
+find_package(PCL REQUIRED COMPONENTS common filters io)
 
 add_executable(pcl_pointcloud_ops_batch
   src/pcl_pointcloud_ops.cpp
