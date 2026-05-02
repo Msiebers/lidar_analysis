@@ -16,6 +16,7 @@ class AnalysisConfig:
     # Marker splitting
     mark_target_type: str = "auto"      # "auto", "plot", or "plant"
     marker_target_type: str = "auto"    # alias for mark_target_type
+    marker_z_buffer_u: float = 0.0
     mark_z_buffer_u: float = 0.0        # uses dim_units
     plant_marker_buffer_u: float = 0.0
     plot_marker_buffer_u: float = 0.0

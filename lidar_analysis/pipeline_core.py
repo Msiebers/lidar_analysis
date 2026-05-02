@@ -922,15 +922,34 @@ def write_marker_pointcloud_csv(
     if df.empty:
         return
 
-    df["X"] = 0.0
-    df["Y"] = 0.0
-    df["Z"] = df["_encoder_count"].apply(
-        lambda c: marker_count_to_z_mm(c, step_mm=step_mm, lidar_wheel_offset_mm=lidar_wheel_offset_mm) / 1000.0
+    df["z_mm"] = df["_encoder_count"].apply(
+        lambda c: marker_count_to_z_mm(c, step_mm=step_mm, lidar_wheel_offset_mm=lidar_wheel_offset_mm)
     )
-    keep_cols = [c for c in ["marker_idx", "target_type", "target_number", "mark_role", "encoder_count", "time_s"] if c in df.columns]
-    out_cols = ["X", "Y", "Z"] + keep_cols
-    out_path = os.path.join(out_dir, f"{scan_base}_markers_pointcloud.csv")
-    df[out_cols].to_csv(out_path, index=False)
+    marker_order = pd.to_numeric(df.get("marker_idx"), errors="coerce")
+    if marker_order.isna().all():
+        marker_order = pd.to_numeric(df.get("target_number"), errors="coerce").fillna(0)
+    pcd = pd.DataFrame(
+        {
+            "x": 0.0,
+            "y": 0.0,
+            "z": df["z_mm"] / 1000.0,
+            "rssi": marker_order,
+        }
+    )
+    pcd_path = os.path.join(out_dir, f"{scan_base}_markers.csv")
+    pcd.to_csv(pcd_path, index=False)
+    print(f"[MARKS] wrote marker point cloud: {pcd_path}")
+
+    metadata_dir = os.path.join(os.path.dirname(out_dir), "scan_metadata")
+    os.makedirs(metadata_dir, exist_ok=True)
+    meta_cols = ["marker_idx", "target_type", "target_number", "mark_role", "encoder_count", "time_s"]
+    existing_meta_cols = [c for c in meta_cols if c in df.columns]
+    meta = df[existing_meta_cols].copy()
+    meta["z_mm"] = df["z_mm"]
+    meta["scan_base"] = scan_base
+    meta_path = os.path.join(metadata_dir, f"{scan_base}_markers_metadata.csv")
+    meta.to_csv(meta_path, index=False)
+    print(f"[MARKS] wrote marker metadata: {meta_path}")
 
 
 def analyze_plot(
@@ -1284,10 +1303,12 @@ def process_scan(
 
     split_source_cfg = str(getattr(cfg, "split_source", "distance")).strip().lower()
     use_markers = bool(getattr(cfg, "use_markers", False))
-    if split_source_cfg in ("distance", "marks"):
-        split_source = split_source_cfg
+    if split_source_cfg == "marks" or use_markers:
+        split_source = "marks"
+    elif split_source_cfg == "distance":
+        split_source = "distance"
     else:
-        split_source = "marks" if use_markers else "distance"
+        split_source = "distance"
     if split_source not in ("distance", "marks"):
         raise ValueError(f"Unknown split_source={split_source!r}; use 'distance' or 'marks'.")
 
@@ -1319,15 +1340,34 @@ def process_scan(
                 )
 
     if split_source == "marks":
-        marker_target_type = str(getattr(cfg, "marker_target_type", getattr(cfg, "mark_target_type", "auto")))
+        marker_target_type = str(getattr(cfg, "marker_target_type", "auto")).strip().lower()
+        mark_target_type = str(getattr(cfg, "mark_target_type", marker_target_type)).strip().lower()
+        if marker_target_type != "auto" and mark_target_type != "auto" and marker_target_type != mark_target_type:
+            raise ValueError(
+                f"Conflicting marker target types: marker_target_type={marker_target_type!r}, "
+                f"mark_target_type={mark_target_type!r}"
+            )
         if marker_target_type == "auto":
-            # handled by build_mark_segments based on file content
-            marker_target_type = "auto"
+            marker_target_type = mark_target_type
+
+        marker_buf = float(getattr(cfg, "marker_z_buffer_u", 0.0))
+        mark_buf = float(getattr(cfg, "mark_z_buffer_u", marker_buf))
+        plant_buf = float(getattr(cfg, "plant_marker_buffer_u", marker_buf))
+        plot_buf = float(getattr(cfg, "plot_marker_buffer_u", marker_buf))
         if marker_target_type == "plant":
-            zbuf_u = float(getattr(cfg, "plant_marker_buffer_u", getattr(cfg, "mark_z_buffer_u", 0.0)))
+            zbuf_u = marker_buf if marker_buf != 0.0 else (plant_buf if plant_buf != 0.0 else mark_buf)
+        elif marker_target_type == "plot":
+            zbuf_u = marker_buf if marker_buf != 0.0 else (plot_buf if plot_buf != 0.0 else mark_buf)
         else:
-            zbuf_u = float(getattr(cfg, "plot_marker_buffer_u", getattr(cfg, "mark_z_buffer_u", 0.0)))
+            zbuf_u = marker_buf if marker_buf != 0.0 else mark_buf
+        provided = {"marker_z_buffer_u": marker_buf, "mark_z_buffer_u": mark_buf, "plant_marker_buffer_u": plant_buf, "plot_marker_buffer_u": plot_buf}
+        nonzero = {k: v for k, v in provided.items() if abs(v) > 0}
+        if len(set(nonzero.values())) > 1:
+            print(f"[MARKS][WARN] Multiple marker buffer keys disagree: {nonzero}; using marker_z_buffer_u fallback chain => {zbuf_u}")
         z_buffer_mm = marker_buffer_mm(zbuf_u, cfg.dim_units)
+        print("[MARKS] marker splitting active")
+        print(f"[MARKS] target_type={marker_target_type}")
+        print(f"[MARKS] marker_z_buffer_u={zbuf_u} {cfg.dim_units}")
 
         segments = build_mark_segments(
             marker_path=marker_path,
@@ -1350,6 +1390,7 @@ def process_scan(
         if len(segments) == 0:
             print(f"[MARKS][WARN] No usable marker segments for {scan_base}; skipping.")
             return []
+        print(f"[MARKS] built {len(segments)} marker windows")
 
         print(
             f"[MARKS] {scan_base}: using {len(segments)} segment(s) "

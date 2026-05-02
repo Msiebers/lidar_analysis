@@ -200,6 +200,7 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         use_markers=bool(experiment_config.get("use_markers", False)),
         mark_target_type=str(experiment_config.get("mark_target_type", experiment_config.get("marker_target_type", "auto"))),
         marker_target_type=str(experiment_config.get("marker_target_type", experiment_config.get("mark_target_type", "auto"))),
+        marker_z_buffer_u=float(experiment_config.get("marker_z_buffer_u", experiment_config.get("mark_z_buffer_u", 0.0))),
         mark_z_buffer_u=float(experiment_config.get("mark_z_buffer_u", 0.0)),
         plant_marker_buffer_u=float(experiment_config.get("plant_marker_buffer_u", experiment_config.get("mark_z_buffer_u", 0.0))),
         plot_marker_buffer_u=float(experiment_config.get("plot_marker_buffer_u", experiment_config.get("mark_z_buffer_u", 0.0))),

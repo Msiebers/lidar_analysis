@@ -38,6 +38,7 @@ def default_experiment_config(experiment: str) -> dict:
             "use_markers": False,
             "marker_target_type": "auto",
             "mark_target_type": "auto",
+            "marker_z_buffer_u": 0.0,
             "plant_marker_buffer_u": 0.0,
             "plot_marker_buffer_u": 0.0,
             "mark_z_buffer_u": 0.0,
