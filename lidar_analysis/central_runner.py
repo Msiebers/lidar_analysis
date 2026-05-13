@@ -174,10 +174,56 @@ def read_calibration_from_cart_config(cart_config_path: Path) -> dict:
 
 
 def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: Path) -> AnalysisConfig:
+    marks_cfg = experiment_config.get("marks", {}) or {}
+
+    split_source = experiment_config.get("split_source")
+    if split_source is None:
+        split_source = "marks" if bool(experiment_config.get("use_markers", False)) else "distance"
+
+    mark_target_type = (
+        marks_cfg.get("target_type")
+        or experiment_config.get("mark_target_type")
+        or experiment_config.get("marker_target_type")
+        or "auto"
+    )
+
+    mark_z_buffer_u = (
+        marks_cfg.get("buffer_u")
+        if marks_cfg.get("buffer_u") is not None
+        else experiment_config.get("mark_z_buffer_u")
+        if experiment_config.get("mark_z_buffer_u") is not None
+        else experiment_config.get("marker_z_buffer_u")
+        if experiment_config.get("marker_z_buffer_u") is not None
+        else 0.0
+    )
+
+    missing_mark_file = marks_cfg.get("missing_file")
+    if missing_mark_file is None:
+        missing_mark_file = experiment_config.get("missing_mark_file")
+    if missing_mark_file is None and "markers_required" in experiment_config:
+        missing_mark_file = "error" if bool(experiment_config.get("markers_required")) else "distance"
+    if missing_mark_file is None:
+        missing_mark_file = "error"
+
+    write_marker_pointcloud = (
+        marks_cfg.get("write_pointcloud")
+        if marks_cfg.get("write_pointcloud") is not None
+        else experiment_config.get("write_marker_pointcloud")
+        if experiment_config.get("write_marker_pointcloud") is not None
+        else False
+    )
+
     return AnalysisConfig(
         data_dirs=[data_dir],
         calibration_dir=data_dir,
         cart_id=cart_id,
+        split_source=str(split_source),
+        mark_target_type=str(mark_target_type),
+        mark_z_buffer_u=float(mark_z_buffer_u),
+        markers_dirname=str(experiment_config.get("markers_dirname", "markers")),
+        missing_mark_file=str(missing_mark_file),
+        write_marker_pointcloud=bool(write_marker_pointcloud),
+
         make_point_cloud=bool(experiment_config.get("generate_pointclouds", True)),
         overwrite_outputs=bool(experiment_config.get("overwrite_pointclouds", True)),
         reprocess_scans=force,

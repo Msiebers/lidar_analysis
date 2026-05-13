@@ -46,9 +46,9 @@ analysis:
   # Core pipeline behavior
   fusion_method: interp
   dim_units: ft
-  row_width_u: 5
-  start_u: 3.0
-  split_u: 5
+  row_width_u: null
+  start_u: null
+  split_u: null
   n_plots: null
   end_buffer_u: 0.0
   max_y_u: null
@@ -67,6 +67,7 @@ analysis:
   # RSSI options
   normalize_rssi: false
   rssi_norm_mode: zscore
+  rssi_norm_scope: scan_after_global_masks
   use_rssi_filter: false
   rssi_min: null
   rssi_max: null

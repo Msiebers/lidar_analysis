@@ -4,26 +4,44 @@ config_reviewed: true
 config_note: Example template for Additional_Scans marker-based plant splitting with side split and PCL post-processing.
 
 analysis:
-  # Additional_Scans / marker splitting
   split_source: marks
+  marks:
+    target_type: plant
+    buffer_u: 0.0
+    missing_file: error
+    write_pointcloud: true
+
+  # Backward-compatible aliases (optional in old configs)
   use_markers: true
-  marker_target_type: plant
   mark_target_type: plant
+  marker_target_type: plant
+  mark_z_buffer_u: 0.0
+  marker_z_buffer_u: 0.0
   markers_required: true
   write_marker_pointcloud: true
 
-  # Side split by reconstructed X sign
   additional_scan_side_split: true
   additional_scan_side_axis: x
   additional_scan_positive_side_label: right
   additional_scan_negative_side_label: left
 
-  # Pointcloud processing chain (PCL backend)
   pointcloud_ops:
-    - bilateral_scalar_filter
-    - scalar_range_filter
-    - sor_filter
-    - voxel_grid
+    - op: bilateral_scalar_filter
+      field: z
+      sigma_s: 2.0
+      sigma_r: 0.05
+      radius: 0.10
+    - op: scalar_range_filter
+      field: y
+      min: -5.0
+      max: 5.0
+    - op: sor_filter
+      mean_k: 12
+      stddev_mul: 1.0
+    - op: voxel_grid
+      leaf_x: 0.005
+      leaf_y: 0.005
+      leaf_z: 0.005
 
   pcl_backend:
     enabled: true
