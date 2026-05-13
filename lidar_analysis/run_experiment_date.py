@@ -18,7 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", help="Optional explicit local experiment_config.yaml override")
     parser.add_argument("--cart-id")
     parser.add_argument("--force", action="store_true")
-    parser.add_argument("--fusion", default="interp", choices=["interp", "pps"])
+    parser.add_argument("--fusion", default="interp", choices=["interp", "imu_interp", "pps"])
     return parser.parse_args()
 
 

@@ -47,7 +47,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--config", help="Optional explicit experiment config YAML path")
     p.add_argument("--cart-id", help="Optional cart id override")
     p.add_argument("--force", action="store_true", help="Reprocess scans even when outputs already exist")
-    p.add_argument("--fusion", default="interp", choices=["interp", "pps"], help="Fusion method")
+    p.add_argument("--fusion", default="interp", choices=["interp", "imu_interp", "pps"], help="Fusion method")
     return p.parse_args()
 
 def resolve_config_path(input_dir: Path, explicit_config: str | None) -> Path:

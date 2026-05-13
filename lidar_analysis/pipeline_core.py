@@ -14,6 +14,7 @@ try:
     from .config import AnalysisConfig
     from .fusion import fuse_by_time
     from .fusion_pps import fuse_by_pps
+    from .fusion_imu_interp import fuse_by_imu_interp
     from .topology import topology_stand_count
     from .mark_splitting import (
         build_mark_segments,
@@ -24,6 +25,7 @@ except Exception:
     from config import AnalysisConfig
     from fusion import fuse_by_time
     from fusion_pps import fuse_by_pps
+    from fusion_imu_interp import fuse_by_imu_interp
     from topology import topology_stand_count
     from mark_splitting import (
         build_mark_segments,
@@ -374,12 +376,15 @@ def load_files_from_paths(lidar_path, pico_path):
     # Pico CSV columns (Euler, degrees)
     # time_s,count,roll_deg,pitch_deg,yaw_deg,pps
     pico_cols = ["time_s", "count", "roll_deg", "pitch_deg", "yaw_deg", "pps"]
+    pico_cols_with_imu = pico_cols + ["imu_time_s"]
     pico_dtypes = {
         "time_s": np.float64, "count": np.int32,
         "roll_deg": np.float32, "pitch_deg": np.float32, "yaw_deg": np.float32,
-        "pps": np.int32
+        "pps": np.int32, "imu_time_s": np.float64
     }
-    pico_np = load_csv(pico_path, usecols=pico_cols, dtypes=pico_dtypes)
+    pico_np = load_csv(pico_path, usecols=pico_cols_with_imu, dtypes=pico_dtypes)
+    if pico_np.size == 0:
+        pico_np = load_csv(pico_path, usecols=pico_cols, dtypes=pico_dtypes)
     return lidar_np, pico_np
 
 # ======================================================================
@@ -555,6 +560,15 @@ def choose_fusion_method(cfg: AnalysisConfig, lidar_np: np.ndarray, pico_np: np.
             pico_np,
             lidar_ts_col=0,
             pico_ts_col=0,
+            trim_to_overlap=False,
+        ).astype(np.float32, copy=False)
+    if cfg.fusion_method == "imu_interp":
+        return fuse_by_imu_interp(
+            lidar_np,
+            pico_np,
+            lidar_ts_col=0,
+            pico_ts_col=0,
+            pico_imu_ts_col=6,
             trim_to_overlap=False,
         ).astype(np.float32, copy=False)
     raise ValueError(f"Unknown fusion_method: {cfg.fusion_method}")
