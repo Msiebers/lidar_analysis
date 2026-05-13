@@ -900,12 +900,18 @@ def build_plot_objects_from_mark_segments(
 
 
 def write_scan_outputs(scan_base: str, cfg: AnalysisConfig, plot: Plot) -> None:
-    if cfg.make_point_cloud:
+    should_write = bool(cfg.make_point_cloud)
+    if (not should_write) and getattr(plot, "split_source", "distance") == "marks":
+        should_write = bool(getattr(cfg, "write_marker_pointcloud", False))
+
+    if should_write:
         plot.write(
-            make_point_cloud=cfg.make_point_cloud,
+            make_point_cloud=should_write,
             overwrite_outputs=cfg.overwrite_outputs,
             write_o3d_ply=cfg.write_o3d_ply,
         )
+        if getattr(plot, "split_source", "distance") == "marks" and bool(getattr(cfg, "write_marker_pointcloud", False)):
+            print(f"[MARKS] wrote marker pointcloud: {plot.csv_out}")
 
 def is_additional_scan_name(scan_base: str) -> bool:
     s = str(scan_base).strip().lower()
@@ -1408,6 +1414,7 @@ def process_scan(
         )
 
     trait_records = []
+    marker_base_plots = list(plots)
     additional_side_split = (
         bool(getattr(cfg, "additional_scan_side_split", False))
         and str(getattr(cfg, "additional_scan_side_axis", "x")).strip().lower() == "x"
@@ -1421,6 +1428,21 @@ def process_scan(
             sided_plots.append(with_side_suffix(p, pos_label, "positive"))
             sided_plots.append(with_side_suffix(p, neg_label, "negative"))
         plots = sided_plots
+
+    if bool(getattr(cfg, "write_marker_pointcloud", False)) and split_source == "marks" and additional_side_split:
+        for mp in marker_base_plots:
+            _ = analyze_plot(
+                mp,
+                data,
+                keep_idx,
+                fused_np,
+                scan_base,
+                cfg,
+                row_options,
+                lidar_height_mm,
+                step_mm,
+            )
+            write_scan_outputs(scan_base, cfg, mp)
 
     for p in plots:
         rec = analyze_plot(
