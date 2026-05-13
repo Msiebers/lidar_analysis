@@ -404,6 +404,8 @@ class Plot:
         self.csv_out = os.path.join(self.out_dir, f"{file_stem}.csv")
         self.ply_out = os.path.join(self.out_dir, f"{file_stem}.ply")
         self.cloud = []
+        self.side_label = None
+        self.side_sign = None
 
     def range_match(self, z):
         return (z > self.min_z) & (z < self.max_z)
@@ -905,6 +907,33 @@ def write_scan_outputs(scan_base: str, cfg: AnalysisConfig, plot: Plot) -> None:
             write_o3d_ply=cfg.write_o3d_ply,
         )
 
+def is_additional_scan_name(scan_base: str) -> bool:
+    s = str(scan_base).strip().lower()
+    return s.startswith("scan_")
+
+
+def with_side_suffix(plot: Plot, side_label: str, side_sign: str) -> Plot:
+    p2 = Plot(
+        row=plot.row,
+        letter=plot.letter,
+        z_bounds=(plot.min_z, plot.max_z),
+        out_dir=plot.out_dir,
+        scan_base=plot.scan_base,
+    )
+    p2.split_source = getattr(plot, "split_source", "distance")
+    p2.target_type = getattr(plot, "target_type", "plot")
+    p2.target_number = getattr(plot, "target_number", plot.letter)
+    p2.side_label = side_label
+    p2.side_sign = side_sign
+
+    if is_additional_scan_name(str(plot.scan_base)):
+        file_stem = f"{plot.scan_base}_{side_label}"
+    else:
+        file_stem = os.path.splitext(os.path.basename(p2.csv_out))[0] + f"_{side_label}"
+    p2.csv_out = os.path.join(p2.out_dir, f"{file_stem}.csv")
+    p2.ply_out = os.path.join(p2.out_dir, f"{file_stem}.ply")
+    return p2
+
 
 def analyze_plot(
     p: Plot,
@@ -927,6 +956,11 @@ def analyze_plot(
         x_mask = p.row_match(data[:, 0], row_options)
 
     mask = z_mask & x_mask
+
+    if getattr(p, "side_sign", None) == "positive":
+        mask = mask & (data[:, 0] > 0)
+    elif getattr(p, "side_sign", None) == "negative":
+        mask = mask & (data[:, 0] < 0)
 
     p.cloud = np.empty((0, 4), dtype=np.float32)
     n_points = 0
@@ -1044,7 +1078,7 @@ def analyze_plot(
             stand_topo_right_count = float("nan")
 
     result = {
-        "scan": scan_base,
+        "scan": scan_base if not getattr(p, "side_label", None) else f"{scan_base}_{p.side_label}",
         "row": p.row,
         "plot": p.letter,
         "split_source": getattr(p, "split_source", "distance"),
@@ -1366,6 +1400,20 @@ def process_scan(
         )
 
     trait_records = []
+    additional_side_split = (
+        bool(getattr(cfg, "additional_scan_side_split", False))
+        and str(getattr(cfg, "additional_scan_side_axis", "x")).strip().lower() == "x"
+        and is_additional_scan_name(scan_base)
+    )
+    if additional_side_split:
+        pos_label = str(getattr(cfg, "additional_scan_positive_side_label", "right")).strip() or "right"
+        neg_label = str(getattr(cfg, "additional_scan_negative_side_label", "left")).strip() or "left"
+        sided_plots: list[Plot] = []
+        for p in plots:
+            sided_plots.append(with_side_suffix(p, pos_label, "positive"))
+            sided_plots.append(with_side_suffix(p, neg_label, "negative"))
+        plots = sided_plots
+
     for p in plots:
         rec = analyze_plot(
             p,

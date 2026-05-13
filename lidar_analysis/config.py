@@ -17,6 +17,10 @@ class AnalysisConfig:
     mark_z_buffer_u: float = 0.0        # uses dim_units
     markers_dirname: str = "markers"
     missing_mark_file: str = "error"    # "error", "distance", or "skip"
+    additional_scan_side_split: bool = False
+    additional_scan_side_axis: str = "x"
+    additional_scan_positive_side_label: str = "right"
+    additional_scan_negative_side_label: str = "left"
 
     # Output / processing switches
     make_point_cloud: bool = False

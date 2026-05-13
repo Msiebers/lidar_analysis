@@ -220,6 +220,10 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         run_topology=bool(experiment_config.get("run_topology", True)),
         run_o3d_metrics=bool(experiment_config.get("run_o3d_metrics", False)),
         write_lidar_per_plot=bool(experiment_config.get("write_lidar_per_plot", True)),
+        additional_scan_side_split=bool(experiment_config.get("additional_scan_side_split", False)),
+        additional_scan_side_axis=str(experiment_config.get("additional_scan_side_axis", "x")),
+        additional_scan_positive_side_label=str(experiment_config.get("additional_scan_positive_side_label", "right")),
+        additional_scan_negative_side_label=str(experiment_config.get("additional_scan_negative_side_label", "left")),
     )
 
 
