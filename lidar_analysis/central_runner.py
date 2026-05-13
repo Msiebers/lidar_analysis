@@ -212,6 +212,16 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         if experiment_config.get("write_marker_pointcloud") is not None
         else False
     )
+    write_reference_points = (
+        marks_cfg.get("write_reference_points")
+        if marks_cfg.get("write_reference_points") is not None
+        else bool(write_marker_pointcloud)
+    )
+    write_window_pointcloud = (
+        marks_cfg.get("write_window_pointcloud")
+        if marks_cfg.get("write_window_pointcloud") is not None
+        else False
+    )
     free_marks_as = (
         marks_cfg.get("free_marks_as")
         if marks_cfg.get("free_marks_as") is not None
@@ -237,6 +247,8 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         markers_dirname=str(experiment_config.get("markers_dirname", "markers")),
         missing_mark_file=str(missing_mark_file),
         write_marker_pointcloud=bool(write_marker_pointcloud),
+        write_reference_points=bool(write_reference_points),
+        write_window_pointcloud=bool(write_window_pointcloud),
         free_marks_as=str(free_marks_as),
         empty_mark_file=str(empty_mark_file),
 

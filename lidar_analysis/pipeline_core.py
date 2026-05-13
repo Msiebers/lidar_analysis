@@ -902,7 +902,7 @@ def build_plot_objects_from_mark_segments(
 def write_scan_outputs(scan_base: str, cfg: AnalysisConfig, plot: Plot) -> None:
     should_write = bool(cfg.make_point_cloud)
     if (not should_write) and getattr(plot, "split_source", "distance") == "marks":
-        should_write = bool(getattr(cfg, "write_marker_pointcloud", False))
+        should_write = bool(getattr(cfg, "write_window_pointcloud", False))
 
     if should_write:
         plot.write(
@@ -910,8 +910,47 @@ def write_scan_outputs(scan_base: str, cfg: AnalysisConfig, plot: Plot) -> None:
             overwrite_outputs=cfg.overwrite_outputs,
             write_o3d_ply=cfg.write_o3d_ply,
         )
-        if getattr(plot, "split_source", "distance") == "marks" and bool(getattr(cfg, "write_marker_pointcloud", False)):
-            print(f"[MARKS] wrote marker pointcloud: {plot.csv_out}")
+        if getattr(plot, "split_source", "distance") == "marks" and bool(getattr(cfg, "write_window_pointcloud", False)):
+            print(f"[MARKS] wrote marker window pointcloud: {plot.csv_out}")
+
+
+def write_marker_reference_points(scan_base: str, marker_path: str, out_dir: str, step_mm: float, lidar_wheel_offset_mm: float) -> None:
+    try:
+        df = pd.read_csv(marker_path)
+    except pd.errors.EmptyDataError:
+        print(f"[MARKS][WARN] Empty marker file for {scan_base}; no marker reference points written.")
+        return
+
+    df = df.rename(columns={c: str(c).strip() for c in df.columns})
+    required = ["marker_idx", "target_type", "target_number", "mark_role", "encoder_count", "time_s"]
+    for c in required:
+        if c not in df.columns:
+            if c == "marker_idx":
+                df[c] = np.arange(1, len(df) + 1)
+            else:
+                df[c] = ""
+
+    if df.empty:
+        print(f"[MARKS][WARN] Empty marker rows for {scan_base}; no marker reference points written.")
+        return
+
+    enc = pd.to_numeric(df["encoder_count"], errors="coerce")
+    z_mm = enc.apply(lambda c: marker_count_to_z_mm(c, step_mm=step_mm, lidar_wheel_offset_mm=lidar_wheel_offset_mm))
+    out = pd.DataFrame({
+        "scan_id": scan_base,
+        "marker_idx": df["marker_idx"],
+        "target_type": df["target_type"],
+        "target_number": df["target_number"],
+        "mark_role": df["mark_role"],
+        "encoder_count": df["encoder_count"],
+        "time_s": df["time_s"],
+        "X": 0.0,
+        "Y": 0.0,
+        "Z": z_mm / 1000.0,
+    })
+    out_path = os.path.join(out_dir, f"{scan_base}_marker_points.csv")
+    out.to_csv(out_path, index=False)
+    print(f"[MARKS] wrote marker reference points: {out_path}")
 
 def is_additional_scan_name(scan_base: str) -> bool:
     s = str(scan_base).strip().lower()
@@ -1414,7 +1453,6 @@ def process_scan(
         )
 
     trait_records = []
-    marker_base_plots = list(plots)
     additional_side_split = (
         bool(getattr(cfg, "additional_scan_side_split", False))
         and str(getattr(cfg, "additional_scan_side_axis", "x")).strip().lower() == "x"
@@ -1429,20 +1467,14 @@ def process_scan(
             sided_plots.append(with_side_suffix(p, neg_label, "negative"))
         plots = sided_plots
 
-    if bool(getattr(cfg, "write_marker_pointcloud", False)) and split_source == "marks" and additional_side_split:
-        for mp in marker_base_plots:
-            _ = analyze_plot(
-                mp,
-                data,
-                keep_idx,
-                fused_np,
-                scan_base,
-                cfg,
-                row_options,
-                lidar_height_mm,
-                step_mm,
-            )
-            write_scan_outputs(scan_base, cfg, mp)
+    if bool(getattr(cfg, "write_reference_points", False)) and split_source == "marks" and marker_path is not None:
+        write_marker_reference_points(
+            scan_base=scan_base,
+            marker_path=str(marker_path),
+            out_dir=out_dir,
+            step_mm=step_mm,
+            lidar_wheel_offset_mm=lidar_wheel_offset_mm,
+        )
 
     for p in plots:
         rec = analyze_plot(

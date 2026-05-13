@@ -17,7 +17,9 @@ class AnalysisConfig:
     mark_z_buffer_u: float = 0.0        # uses dim_units
     markers_dirname: str = "markers"
     missing_mark_file: str = "error"    # "error", "distance", or "skip"
-    write_marker_pointcloud: bool = False
+    write_marker_pointcloud: bool = False  # legacy alias
+    write_reference_points: bool = False
+    write_window_pointcloud: bool = False
     free_marks_as: str = "none"         # "none" or "plant"
     empty_mark_file: str = "skip"       # "error", "distance", or "skip"
     additional_scan_side_split: bool = False
