@@ -1329,12 +1329,20 @@ def process_scan(
             lidar_wheel_offset_mm=lidar_wheel_offset_mm,
             z_buffer_mm=z_buffer_mm,
             target_type=str(getattr(cfg, "mark_target_type", "auto")),
+            free_marks_as=str(getattr(cfg, "free_marks_as", "none")),
             zmax_clip=zmax,
         )
 
         if len(segments) == 0:
-            print(f"[MARKS][WARN] No usable marker segments for {scan_base}; skipping.")
-            return []
+            empty_mode = str(getattr(cfg, "empty_mark_file", "skip")).strip().lower()
+            if empty_mode == "distance":
+                print(f"[MARKS][WARN] No usable marker segments for {scan_base}; falling back to distance splitting.")
+                split_source = "distance"
+            elif empty_mode == "error":
+                raise ValueError(f"No usable marker segments for {scan_base} from {marker_path}")
+            else:
+                print(f"[MARKS][WARN] No usable marker segments for {scan_base}; skipping.")
+                return []
 
         print(
             f"[MARKS] {scan_base}: using {len(segments)} segment(s) "
@@ -1352,7 +1360,7 @@ def process_scan(
             out_dir=out_dir,
         )
 
-    else:
+    if split_source == "distance":
         expected_plot_count = None
         try:
             expected_plot_count = expected_plot_count_from_scan(scan_base)

@@ -18,6 +18,8 @@ class AnalysisConfig:
     markers_dirname: str = "markers"
     missing_mark_file: str = "error"    # "error", "distance", or "skip"
     write_marker_pointcloud: bool = False
+    free_marks_as: str = "none"         # "none" or "plant"
+    empty_mark_file: str = "skip"       # "error", "distance", or "skip"
     additional_scan_side_split: bool = False
     additional_scan_side_axis: str = "x"
     additional_scan_positive_side_label: str = "right"
