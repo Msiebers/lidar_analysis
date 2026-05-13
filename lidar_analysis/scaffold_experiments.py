@@ -22,7 +22,9 @@ def save_yaml(path: Path, data: dict) -> None:
 def default_experiment_config(experiment: str) -> dict:
     return {
         "experiment_name": experiment,
-        "processing_mode": "local", #off, local or auto_publish
+        "processing_mode": "off", #off, local or auto_publish
+        "config_reviewed": False,
+        "config_note": "Template only. Review and edit this config before enabling processing.",
         "raw_data_path": f"/mnt/cartcity/raw_data/{experiment}",
         "output_path": f"/mnt/cartcity/experiments/{experiment}",
         "sharing": {
@@ -46,13 +48,13 @@ def default_experiment_config(experiment: str) -> dict:
             "x_min_u": None,
             "min_radius_u": 0.1,
 
-            "apply_imu": True,
+            "apply_imu": False,
             "imu_zero_mode": "dense_median",
             "imu_zero_fraction": 0.5,
             "use_heading": False,
             "heading_sign": 1.0,
 
-            "normalize_rssi": True,
+            "normalize_rssi": False,
             "rssi_norm_mode": "zscore",
             "use_rssi_filter": False,
             "rssi_min": None,
@@ -80,6 +82,14 @@ def default_experiment_config(experiment: str) -> dict:
             "topo_z_bin_m": 0.01,
             "roll_sign": 1.0,
             "pitch_sign": -1.0,
+            "pointcloud_ops": [],
+            "pcl_backend": {
+                "enabled": False,
+                "executable": "/home/central/Documents/lidar_analysis/cpp_ops/build/pcl_pointcloud_ops_batch",
+                "work_dir": None,
+                "keep_intermediate": True,
+                "fail_if_missing": False,
+            },
         },
     }
 

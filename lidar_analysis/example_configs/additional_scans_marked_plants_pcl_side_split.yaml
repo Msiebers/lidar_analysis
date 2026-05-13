@@ -1,0 +1,33 @@
+experiment_name: example_additional_scans
+processing_mode: local
+config_reviewed: true
+config_note: Example template for Additional_Scans marker-based plant splitting with side split and PCL post-processing.
+
+analysis:
+  # Additional_Scans / marker splitting
+  split_source: marks
+  use_markers: true
+  marker_target_type: plant
+  mark_target_type: plant
+  markers_required: true
+  write_marker_pointcloud: true
+
+  # Side split by reconstructed X sign
+  additional_scan_side_split: true
+  additional_scan_side_axis: x
+  additional_scan_positive_side_label: right
+  additional_scan_negative_side_label: left
+
+  # Pointcloud processing chain (PCL backend)
+  pointcloud_ops:
+    - bilateral_scalar_filter
+    - scalar_range_filter
+    - sor_filter
+    - voxel_grid
+
+  pcl_backend:
+    enabled: true
+    executable: /home/central/Documents/lidar_analysis/cpp_ops/build/pcl_pointcloud_ops_batch
+    work_dir: null
+    keep_intermediate: true
+    fail_if_missing: false
