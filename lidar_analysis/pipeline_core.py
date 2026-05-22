@@ -4,7 +4,6 @@ import sys
 from warnings import warn
 
 import numpy as np
-import open3d as o3d
 import pandas as pd
 import yaml
 from scipy import stats
@@ -15,23 +14,25 @@ try:
     from .fusion import fuse_by_time
     from .fusion_pps import fuse_by_pps
     from .fusion_imu_interp import fuse_by_imu_interp
-    from .topology import topology_stand_count
     from .mark_splitting import (
         build_mark_segments,
         find_marker_file_for_scan,
         marker_buffer_mm,
     )
+    from .pointcloud_ops import apply_pointcloud_ops
+    from .analysis_target import AnalysisTarget
 except Exception:
     from config import AnalysisConfig
     from fusion import fuse_by_time
     from fusion_pps import fuse_by_pps
     from fusion_imu_interp import fuse_by_imu_interp
-    from topology import topology_stand_count
     from mark_splitting import (
         build_mark_segments,
         find_marker_file_for_scan,
         marker_buffer_mm,
     )
+    from pointcloud_ops import apply_pointcloud_ops
+    from analysis_target import AnalysisTarget
 
 # ----------------------
 # Load calibration file (STRICT)
@@ -411,6 +412,7 @@ class Plot:
         self.cloud = []
         self.side_label = None
         self.side_sign = None
+        self.analysis_target = None
 
     def range_match(self, z):
         return (z > self.min_z) & (z < self.max_z)
@@ -424,52 +426,39 @@ class Plot:
 
         return (left & (self.row == left_row)) | (right & (self.row == right_row))
 
-    def _write_csv(self, arr_m):
-        df = pd.DataFrame(arr_m[:, :4], columns=["X", "Y", "Z", "RSSI"])
-        df.to_csv(self.csv_out, index=False)
+    def _write_csv(self, df_m: pd.DataFrame):
+        df_m.to_csv(self.csv_out, index=False)
 
     def _write_ply(self, arr_m):
-        if arr_m.size == 0:
-            return
-        pts = o3d.geometry.PointCloud()
-        pts.points = o3d.utility.Vector3dVector(arr_m[:, :3])
-        if arr_m.shape[1] >= 4:
-            rssi = arr_m[:, 3].astype(np.float32)
-            if rssi.size:
-                rmin = np.nanmin(rssi)
-                rmax = np.nanmax(rssi)
-                span = (rmax - rmin) if (rmax > rmin) else 1.0
-                gray = ((rssi - rmin) / span).clip(0, 1)
-                rgb = np.stack([gray, gray, gray], axis=1)
-                pts.colors = o3d.utility.Vector3dVector(rgb)
-        o3d.io.write_point_cloud(self.ply_out, pts, write_ascii=True)
+        return
 
     def write(self, make_point_cloud: bool, overwrite_outputs: bool, write_o3d_ply: bool):
-        """
-        Write per-plot CSV (and optional PLY) if enabled.
-
-        - make_point_cloud: master on/off
-        - overwrite_outputs: overwrite existing files or skip
-        - write_o3d_ply: also write a PLY file
-        """
-        if not make_point_cloud or len(self.cloud) == 0:
+        if not make_point_cloud:
+            return
+        if (not overwrite_outputs) and os.path.exists(self.csv_out):
             return
 
+        if self.analysis_target is not None:
+            df = self.analysis_target.current_points.copy()
+            if df.empty:
+                return
+            for c in ["X", "Y", "Z", "RSSI"]:
+                if c not in df.columns:
+                    raise ValueError(f"analysis_target.current_points missing required column {c!r}")
+            df.loc[:, ["X", "Y", "Z"]] = df[["X", "Y", "Z"]] / 1000.0
+            self._write_csv(df)
+            return
+
+        if len(self.cloud) == 0:
+            return
         arr = np.array(self.cloud)
         if arr.ndim != 2 or arr.shape[1] < 4:
             print(f"[Warning] Bad cloud shape: {arr.shape} in {self.name}")
             return
-
-        # Convert mm -> m for output
         arr_m = arr.copy()
         arr_m[:, :3] /= 1000.0
-
-        if (not overwrite_outputs) and os.path.exists(self.csv_out):
-            return
-
-        self._write_csv(arr_m)
-        if write_o3d_ply:
-            self._write_ply(arr_m)
+        df = pd.DataFrame(arr_m[:, :4], columns=["X", "Y", "Z", "RSSI"])
+        self._write_csv(df)
 
 
 # ======================================================================
@@ -493,8 +482,7 @@ def normalize_rssi_by_phi_zscore(phi: np.ndarray, rssi: np.ndarray, decimals: in
 
     phi_key = np.round(phi, decimals=decimals)
 
-    EXP_ALPHA = 1.0   # try 0.75, 1.0, or 1.25
-    Z_CLIP = 4.0      # prevents huge blowups
+    EXP_ALPHA = 1.0
 
     for ph in np.unique(phi_key):
         m = (phi_key == ph)
@@ -511,7 +499,6 @@ def normalize_rssi_by_phi_zscore(phi: np.ndarray, rssi: np.ndarray, decimals: in
         else:
             z = ((vals - mu) / sd).astype(np.float32)
 
-        z = np.clip(z, -Z_CLIP, Z_CLIP)
         out[m] = np.exp(EXP_ALPHA * z).astype(np.float32)
 
     return out
@@ -1051,9 +1038,50 @@ def analyze_plot(
     else:
         goto_open3d = True
         p.cloud = data[mask]
-        n_points = int(p.cloud.shape[0])
+
+        ops_cfg = getattr(cfg, "pointcloud_ops", None) or []
+        if ops_cfg:
+            cloud_df = pd.DataFrame(p.cloud[:, :4], columns=["X", "Y", "Z", "RSSI"])
+            if p.cloud.shape[1] > 4:
+                cloud_df["rssi_norm"] = p.cloud[:, 4]
+            target = AnalysisTarget.from_points(
+                target_id=p.name,
+                target_type=str(getattr(p, "target_type", "plot")),
+                scan_id=scan_base,
+                points_df=cloud_df,
+                source_indices=keep_idx[mask],
+                row=p.row,
+                plot=p.letter,
+                side=getattr(p, "side_label", None),
+            )
+            target = apply_pointcloud_ops(
+                target,
+                ops_cfg,
+                default_backend="scipy",
+                context={"pcl_backend_name": ((getattr(cfg, "pcl_backend", {}) or {}).get("name"))},
+            )
+            op_traits = dict(target.traits)
+            p.analysis_target = target
+            p.cloud = target.current_points[["X", "Y", "Z", "RSSI"]].to_numpy(dtype=np.float32, copy=False)
+            op_diag = dict(target.diagnostics.get("pointcloud_ops", {}))
+            print(f"[PC_OPS] target={target.target_id} before={op_diag.get('points_before_ops')} after={op_diag.get('points_after_ops')} order={op_diag.get('operation_order')} scalars_before={op_diag.get('available_scalar_columns_before')} scalars_after={op_diag.get('available_scalar_columns_after')}")
+        else:
+            op_traits = {}
+            p.analysis_target = AnalysisTarget.from_points(
+                target_id=p.name,
+                target_type=str(getattr(p, "target_type", "plot")),
+                scan_id=scan_base,
+                points_df=pd.DataFrame(p.cloud[:, :4], columns=["X", "Y", "Z", "RSSI"]),
+                source_indices=keep_idx[mask],
+                row=p.row,
+                plot=p.letter,
+                side=getattr(p, "side_label", None),
+            )
+
+        n_points = int(p.analysis_target.current_points.shape[0])
         if cfg.run_height:
-            height_m = height_from_world_y(p.cloud, alpha=0.01)
+            h_arr = p.analysis_target.current_points[["X", "Y", "Z", "RSSI"]].to_numpy(dtype=np.float32, copy=False)
+            height_m = height_from_world_y(h_arr, alpha=0.01)
         plot_idx = keep_idx[mask]
         lidar_dict = _lidar_dict_from_plot_indices(fused_np, plot_idx, lidar_height_mm)
         if cfg.run_lai and lidar_dict is not None:
@@ -1090,61 +1118,9 @@ def analyze_plot(
         area_m2 = float("nan")
     density = n_points / area_m2 if (np.isfinite(area_m2) and area_m2 > 0) else float("nan")
 
-    if (not cfg.run_topology) or topo_input.size == 0:
-        stand_topo_per_m = float("nan")
-        stand_topo_left_count = float("nan")
-        stand_topo_right_count = float("nan")
-    else:
-        try:
-            is_two_row_scan = row_options[0] != row_options[1]
-
-            if is_two_row_scan:
-                left_input = topo_input[topo_input[:, 0] >= 0]
-                right_input = topo_input[topo_input[:, 0] < 0]
-                stand_topo_left_per_m = float("nan")
-                stand_topo_right_per_m = float("nan")
-
-                if left_input.size > 0:
-                    topo_left = topology_stand_count(
-                        left_input, step_mm,
-                        min_persistence=cfg.topo_min_persistence,
-                        background_cut=cfg.topo_background_cut,
-                        x_bin_m=cfg.topo_x_bin_m,
-                        z_bin_m=cfg.topo_z_bin_m,
-                    )
-                    stand_topo_left_count = float(topo_left.get("count_raw", float("nan")))
-                    stand_topo_left_per_m = float(topo_left.get("count", float("nan")))
-
-                if right_input.size > 0:
-                    topo_right = topology_stand_count(
-                        right_input, step_mm,
-                        min_persistence=cfg.topo_min_persistence,
-                        background_cut=cfg.topo_background_cut,
-                        x_bin_m=cfg.topo_x_bin_m,
-                        z_bin_m=cfg.topo_z_bin_m,
-                    )
-                    stand_topo_right_count = float(topo_right.get("count_raw", float("nan")))
-                    stand_topo_right_per_m = float(topo_right.get("count", float("nan")))
-
-                vals = [stand_topo_left_per_m, stand_topo_right_per_m]
-                stand_topo_per_m = float("nan") if np.all(np.isnan(vals)) else float(np.nansum(vals))
-            else:
-                topo_total = topology_stand_count(
-                    topo_input, step_mm,
-                    min_persistence=cfg.topo_min_persistence,
-                    background_cut=cfg.topo_background_cut,
-                    x_bin_m=cfg.topo_x_bin_m,
-                    z_bin_m=cfg.topo_z_bin_m,
-                )
-                stand_topo_per_m = float(topo_total.get("count", float("nan")))
-                total_raw = float(topo_total.get("count_raw", float("nan")))
-                stand_topo_left_count = total_raw
-                stand_topo_right_count = float("nan")
-        except Exception as e:
-            print(f"[Topology][ERROR] scan={scan_base} plot={p.name}: {e}")
-            stand_topo_per_m = float("nan")
-            stand_topo_left_count = float("nan")
-            stand_topo_right_count = float("nan")
+    stand_topo_per_m = float("nan")
+    stand_topo_left_count = float("nan")
+    stand_topo_right_count = float("nan")
 
     result = {
         "scan": scan_base if not getattr(p, "side_label", None) else f"{scan_base}_{p.side_label}",
@@ -1169,6 +1145,7 @@ def analyze_plot(
         "stand_topo_right_count": stand_topo_right_count,
         "o3d_points": n_points_o3d,
         "o3d_voxels": voxel_count_o3d,
+        "voxel_count": op_traits.get("voxel_count", float("nan")),
     }
 
     print(
@@ -1235,7 +1212,11 @@ def apply_rssi_normalization_after_masks(
     else:
         raise ValueError(f"Unknown rssi_norm_mode: {mode}")
 
-    out[:, 3] = rssi_norm
+    # Preserve raw RSSI in column 3; add normalized scalar as column 4
+    if out.shape[1] == 4:
+        out = np.concatenate([out, rssi_norm.reshape(-1, 1)], axis=1)
+    else:
+        out[:, 4] = rssi_norm
     return out
 
 
