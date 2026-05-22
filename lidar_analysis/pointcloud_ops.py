@@ -91,36 +91,68 @@ def _voxel_count(df: pd.DataFrame, op_cfg: dict[str, Any]) -> int:
 
 def _bilateral_scalar_filter(df: pd.DataFrame, op_cfg: dict[str, Any]) -> tuple[pd.DataFrame, str]:
     field = _require_scalar(df, _resolve_scalar_name(op_cfg), "bilateral_scalar_filter")
+
     sigma_s = float(op_cfg.get("sigma_spatial", op_cfg.get("spatial_sigma_m", 0.03)))
     sigma_r = float(op_cfg.get("sigma_range", op_cfg.get("scalar_sigma", 2.5)))
     radius = float(op_cfg.get("radius", op_cfg.get("radius_m", sigma_s * 2.0)))
+
+    min_neighbors = int(op_cfg.get("min_neighbors", 1))
+    max_neighbors = int(op_cfg.get("max_neighbors", 256))
+
+    if sigma_s <= 0:
+        raise ValueError(f"spatial sigma must be > 0; got {sigma_s}")
+    if sigma_r <= 0:
+        raise ValueError(f"scalar sigma must be > 0; got {sigma_r}")
+    if radius <= 0:
+        raise ValueError(f"radius must be > 0; got {radius}")
+
+    if len(df) == 0:
+        return df.copy(), field
+
     xyz = df[["X", "Y", "Z"]].to_numpy(dtype=float, copy=False)
     vals = df[field].to_numpy(dtype=float, copy=False)
-    if len(df) == 0:
-        return df.copy()
+
     tree = cKDTree(xyz)
     out_vals = vals.copy()
+
+    spatial_denom = max(2.0 * sigma_s * sigma_s, 1e-12)
+    scalar_denom = max(2.0 * sigma_r * sigma_r, 1e-12)
+
     for i, p in enumerate(xyz):
         nbr_idx = tree.query_ball_point(p, r=radius)
-        if not nbr_idx:
+
+        if len(nbr_idx) < min_neighbors:
             continue
+
+        if max_neighbors > 0 and len(nbr_idx) > max_neighbors:
+            nbr_idx = nbr_idx[:max_neighbors]
+
         nbr_idx = np.asarray(nbr_idx, dtype=int)
+
         d2 = np.sum((xyz[nbr_idx] - p) ** 2, axis=1)
-        ds = np.exp(-d2 / max(2.0 * sigma_s * sigma_s, 1e-12))
-        dr = np.exp(-((vals[nbr_idx] - vals[i]) ** 2) / max(2.0 * sigma_r * sigma_r, 1e-12))
-        w = ds * dr
-        wsum = float(np.sum(w))
-        if wsum > 0:
-            out_vals[i] = float(np.sum(w * vals[nbr_idx]) / wsum)
+        spatial_w = np.exp(-d2 / spatial_denom)
+
+        scalar_d2 = (vals[nbr_idx] - vals[i]) ** 2
+        scalar_w = np.exp(-scalar_d2 / scalar_denom)
+
+        weights = spatial_w * scalar_w
+        weight_sum = float(np.sum(weights))
+
+        if weight_sum > 0:
+            out_vals[i] = float(np.sum(weights * vals[nbr_idx]) / weight_sum)
+
     replace_scalar = bool(op_cfg.get("replace_scalar", True))
     output_scalar = op_cfg.get("output_scalar")
+
     out = df.copy()
-    if output_scalar and (not replace_scalar):
-        out[str(output_scalar)] = out_vals
+
+    if output_scalar and not replace_scalar:
         used = str(output_scalar)
+        out[used] = out_vals
     else:
-        out[field] = out_vals
         used = field
+        out[field] = out_vals
+
     return out, used
 
 
