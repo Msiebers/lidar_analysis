@@ -93,3 +93,7 @@ class AnalysisConfig:
 
     # Optional output
     write_lidar_per_plot: bool = True
+
+    # Python pointcloud operations (behavior-preserving replacement for standalone C++ path)
+    pointcloud_ops: list[dict] | None = None
+    pcl_backend: dict | None = None

@@ -21,6 +21,7 @@ try:
         find_marker_file_for_scan,
         marker_buffer_mm,
     )
+    from .pointcloud_ops import apply_pointcloud_ops
 except Exception:
     from config import AnalysisConfig
     from fusion import fuse_by_time
@@ -32,6 +33,7 @@ except Exception:
         find_marker_file_for_scan,
         marker_buffer_mm,
     )
+    from pointcloud_ops import apply_pointcloud_ops
 
 # ----------------------
 # Load calibration file (STRICT)
@@ -1051,6 +1053,20 @@ def analyze_plot(
     else:
         goto_open3d = True
         p.cloud = data[mask]
+
+        ops_cfg = getattr(cfg, "pointcloud_ops", None) or []
+        if ops_cfg:
+            cloud_df = pd.DataFrame(p.cloud[:, :4], columns=["X", "Y", "Z", "RSSI"])
+            cloud_df, op_traits, _op_diag = apply_pointcloud_ops(
+                cloud_df,
+                ops_cfg,
+                default_backend="scipy",
+                context={"pcl_backend_name": ((getattr(cfg, "pcl_backend", {}) or {}).get("name"))},
+            )
+            p.cloud = cloud_df[["X", "Y", "Z", "RSSI"]].to_numpy(dtype=np.float32, copy=False)
+        else:
+            op_traits = {}
+
         n_points = int(p.cloud.shape[0])
         if cfg.run_height:
             height_m = height_from_world_y(p.cloud, alpha=0.01)
@@ -1169,6 +1185,7 @@ def analyze_plot(
         "stand_topo_right_count": stand_topo_right_count,
         "o3d_points": n_points_o3d,
         "o3d_voxels": voxel_count_o3d,
+        "voxel_count": op_traits.get("voxel_count", float("nan")),
     }
 
     print(
