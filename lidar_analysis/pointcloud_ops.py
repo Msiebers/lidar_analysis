@@ -110,8 +110,16 @@ def _bilateral_scalar_filter(df: pd.DataFrame, op_cfg: dict[str, Any]) -> pd.Dat
     return out
 
 
-def apply_pointcloud_ops(points_df, ops_config, *, default_backend=None, context=None):
-    df = _as_df(points_df)
+def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=None):
+    from .analysis_target import AnalysisTarget
+
+    if isinstance(target, AnalysisTarget):
+        df = _as_df(target.current_points)
+        target_obj = target
+    else:
+        # backward compatibility for internal helpers/tests
+        df = _as_df(target)
+        target_obj = None
     ops = ops_config or []
     resolver = _BackendResolver(default_backend=default_backend or "scipy")
     legacy_backend = None
@@ -155,4 +163,10 @@ def apply_pointcloud_ops(points_df, ops_config, *, default_backend=None, context
         diagnostics["points_after_each_op"].append({"op": op, "points": int(len(df))})
 
     diagnostics["points_after_ops"] = int(len(df))
-    return df, traits, diagnostics
+    if target_obj is None:
+        return df, traits, diagnostics
+    target_obj.current_points = df
+    target_obj.traits.update(traits)
+    target_obj.diagnostics["pointcloud_ops"] = diagnostics
+    target_obj.op_history.extend(diagnostics["backend_used"])
+    return target_obj

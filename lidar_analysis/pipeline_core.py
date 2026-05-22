@@ -4,7 +4,6 @@ import sys
 from warnings import warn
 
 import numpy as np
-import open3d as o3d
 import pandas as pd
 import yaml
 from scipy import stats
@@ -15,25 +14,25 @@ try:
     from .fusion import fuse_by_time
     from .fusion_pps import fuse_by_pps
     from .fusion_imu_interp import fuse_by_imu_interp
-    from .topology import topology_stand_count
     from .mark_splitting import (
         build_mark_segments,
         find_marker_file_for_scan,
         marker_buffer_mm,
     )
     from .pointcloud_ops import apply_pointcloud_ops
+    from .analysis_target import AnalysisTarget
 except Exception:
     from config import AnalysisConfig
     from fusion import fuse_by_time
     from fusion_pps import fuse_by_pps
     from fusion_imu_interp import fuse_by_imu_interp
-    from topology import topology_stand_count
     from mark_splitting import (
         build_mark_segments,
         find_marker_file_for_scan,
         marker_buffer_mm,
     )
     from pointcloud_ops import apply_pointcloud_ops
+    from analysis_target import AnalysisTarget
 
 # ----------------------
 # Load calibration file (STRICT)
@@ -431,20 +430,7 @@ class Plot:
         df.to_csv(self.csv_out, index=False)
 
     def _write_ply(self, arr_m):
-        if arr_m.size == 0:
-            return
-        pts = o3d.geometry.PointCloud()
-        pts.points = o3d.utility.Vector3dVector(arr_m[:, :3])
-        if arr_m.shape[1] >= 4:
-            rssi = arr_m[:, 3].astype(np.float32)
-            if rssi.size:
-                rmin = np.nanmin(rssi)
-                rmax = np.nanmax(rssi)
-                span = (rmax - rmin) if (rmax > rmin) else 1.0
-                gray = ((rssi - rmin) / span).clip(0, 1)
-                rgb = np.stack([gray, gray, gray], axis=1)
-                pts.colors = o3d.utility.Vector3dVector(rgb)
-        o3d.io.write_point_cloud(self.ply_out, pts, write_ascii=True)
+        return
 
     def write(self, make_point_cloud: bool, overwrite_outputs: bool, write_o3d_ply: bool):
         """
@@ -1057,13 +1043,24 @@ def analyze_plot(
         ops_cfg = getattr(cfg, "pointcloud_ops", None) or []
         if ops_cfg:
             cloud_df = pd.DataFrame(p.cloud[:, :4], columns=["X", "Y", "Z", "RSSI"])
-            cloud_df, op_traits, _op_diag = apply_pointcloud_ops(
-                cloud_df,
+            target = AnalysisTarget.from_points(
+                target_id=p.name,
+                target_type=str(getattr(p, "target_type", "plot")),
+                scan_id=scan_base,
+                points_df=cloud_df,
+                source_indices=keep_idx[mask],
+                row=p.row,
+                plot=p.letter,
+                side=getattr(p, "side_label", None),
+            )
+            target = apply_pointcloud_ops(
+                target,
                 ops_cfg,
                 default_backend="scipy",
                 context={"pcl_backend_name": ((getattr(cfg, "pcl_backend", {}) or {}).get("name"))},
             )
-            p.cloud = cloud_df[["X", "Y", "Z", "RSSI"]].to_numpy(dtype=np.float32, copy=False)
+            op_traits = dict(target.traits)
+            p.cloud = target.current_points[["X", "Y", "Z", "RSSI"]].to_numpy(dtype=np.float32, copy=False)
         else:
             op_traits = {}
 
@@ -1106,61 +1103,9 @@ def analyze_plot(
         area_m2 = float("nan")
     density = n_points / area_m2 if (np.isfinite(area_m2) and area_m2 > 0) else float("nan")
 
-    if (not cfg.run_topology) or topo_input.size == 0:
-        stand_topo_per_m = float("nan")
-        stand_topo_left_count = float("nan")
-        stand_topo_right_count = float("nan")
-    else:
-        try:
-            is_two_row_scan = row_options[0] != row_options[1]
-
-            if is_two_row_scan:
-                left_input = topo_input[topo_input[:, 0] >= 0]
-                right_input = topo_input[topo_input[:, 0] < 0]
-                stand_topo_left_per_m = float("nan")
-                stand_topo_right_per_m = float("nan")
-
-                if left_input.size > 0:
-                    topo_left = topology_stand_count(
-                        left_input, step_mm,
-                        min_persistence=cfg.topo_min_persistence,
-                        background_cut=cfg.topo_background_cut,
-                        x_bin_m=cfg.topo_x_bin_m,
-                        z_bin_m=cfg.topo_z_bin_m,
-                    )
-                    stand_topo_left_count = float(topo_left.get("count_raw", float("nan")))
-                    stand_topo_left_per_m = float(topo_left.get("count", float("nan")))
-
-                if right_input.size > 0:
-                    topo_right = topology_stand_count(
-                        right_input, step_mm,
-                        min_persistence=cfg.topo_min_persistence,
-                        background_cut=cfg.topo_background_cut,
-                        x_bin_m=cfg.topo_x_bin_m,
-                        z_bin_m=cfg.topo_z_bin_m,
-                    )
-                    stand_topo_right_count = float(topo_right.get("count_raw", float("nan")))
-                    stand_topo_right_per_m = float(topo_right.get("count", float("nan")))
-
-                vals = [stand_topo_left_per_m, stand_topo_right_per_m]
-                stand_topo_per_m = float("nan") if np.all(np.isnan(vals)) else float(np.nansum(vals))
-            else:
-                topo_total = topology_stand_count(
-                    topo_input, step_mm,
-                    min_persistence=cfg.topo_min_persistence,
-                    background_cut=cfg.topo_background_cut,
-                    x_bin_m=cfg.topo_x_bin_m,
-                    z_bin_m=cfg.topo_z_bin_m,
-                )
-                stand_topo_per_m = float(topo_total.get("count", float("nan")))
-                total_raw = float(topo_total.get("count_raw", float("nan")))
-                stand_topo_left_count = total_raw
-                stand_topo_right_count = float("nan")
-        except Exception as e:
-            print(f"[Topology][ERROR] scan={scan_base} plot={p.name}: {e}")
-            stand_topo_per_m = float("nan")
-            stand_topo_left_count = float("nan")
-            stand_topo_right_count = float("nan")
+    stand_topo_per_m = float("nan")
+    stand_topo_left_count = float("nan")
+    stand_topo_right_count = float("nan")
 
     result = {
         "scan": scan_base if not getattr(p, "side_label", None) else f"{scan_base}_{p.side_label}",
