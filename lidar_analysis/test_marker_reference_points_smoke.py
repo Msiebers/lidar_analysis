@@ -20,7 +20,8 @@ def main() -> None:
         out = root / 'scan_001_marker_points.csv'
         rows = read_rows(out)
         assert len(rows) == 1
-        assert set(['X','Y','Z','marker_idx','target_type','target_number','mark_role','encoder_count','time_s','scan_id']).issubset(rows[0].keys())
+        # Marker reference file is now exactly three columns: X, Y, Z.
+        assert set(rows[0].keys()) == {'X', 'Y', 'Z'}
 
         m2 = root / 'scan_002_markers.csv'
         m2.write_text('marker_idx,target_type,target_number,mark_role,encoder_count,time_s\n1,free,,mark,100,1.0\n2,free,,mark,200,2.0\n', encoding='utf-8')

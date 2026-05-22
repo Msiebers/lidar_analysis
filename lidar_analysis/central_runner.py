@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import dataclasses as _dc
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -173,12 +174,65 @@ def read_calibration_from_cart_config(cart_config_path: Path) -> dict:
     }
 
 
-def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: Path) -> AnalysisConfig:
-    marks_cfg = experiment_config.get("marks", {}) or {}
+# ---------------------------------------------------------------------------
+# Canonical marker / splitting resolution
+#
+# Going forward there is ONE marker decision in an experiment config:
+#
+#     splitting_style: distance | plant | plot
+#
+#   distance : no markers; split by distance (split_u / n_plots).
+#   plant    : markers required; each mark is one plant.
+#              window = mark_z +/- buffer_u  (symmetric, both sides).
+#   plot     : markers required; start/stop mark pairs bound each plot.
+#              window = start_z + buffer_u .. stop_z - buffer_u  (inset).
+#
+# `buffer_u` is a single key (in dim_units). Its dual meaning (symmetric for
+# plant, inset for plot) is applied downstream in
+# mark_splitting.build_mark_segments; it is NOT a separate toggle.
+#
+# Choosing `plant` or `plot` implies markers are required. If markers are
+# missing the run is allowed to fail hard (that is intended, not an error to
+# paper over).
+#
+# Legacy keys (split_source, use_markers, marks.target_type,
+# mark_target_type, marker_target_type, marks.buffer_u, mark_z_buffer_u,
+# marker_z_buffer_u) are still accepted for backward compatibility and are
+# resolved below. No deprecation warnings yet, by design.
+# ---------------------------------------------------------------------------
 
+_VALID_SPLITTING_STYLES = ("distance", "plant", "plot")
+
+
+def resolve_splitting_style(experiment_config: dict) -> tuple[str, str]:
+    """
+    Resolve the single canonical marker decision into the internal
+    (split_source, mark_target_type) pair the rest of the pipeline uses:
+
+        distance -> ("distance", "auto")
+        plant    -> ("marks", "plant")
+        plot     -> ("marks", "plot")
+
+    If the canonical `splitting_style` key is absent, fall back to the
+    legacy keys so existing configs keep working unchanged.
+    """
+    style = experiment_config.get("splitting_style")
+    if style is not None:
+        style = str(style).strip().lower()
+        if style not in _VALID_SPLITTING_STYLES:
+            raise ValueError(
+                f"splitting_style must be one of {_VALID_SPLITTING_STYLES}; got {style!r}"
+            )
+        if style == "distance":
+            return "distance", "auto"
+        return "marks", style
+
+    # ---- legacy fallback (silent, behavior-preserving) ----
+    marks_cfg = experiment_config.get("marks", {}) or {}
     split_source = experiment_config.get("split_source")
     if split_source is None:
         split_source = "marks" if bool(experiment_config.get("use_markers", False)) else "distance"
+    split_source = str(split_source).strip().lower()
 
     mark_target_type = (
         marks_cfg.get("target_type")
@@ -186,16 +240,34 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         or experiment_config.get("marker_target_type")
         or "auto"
     )
+    mark_target_type = str(mark_target_type).strip().lower()
+    return split_source, mark_target_type
 
-    mark_z_buffer_u = (
-        marks_cfg.get("buffer_u")
-        if marks_cfg.get("buffer_u") is not None
-        else experiment_config.get("mark_z_buffer_u")
-        if experiment_config.get("mark_z_buffer_u") is not None
-        else experiment_config.get("marker_z_buffer_u")
-        if experiment_config.get("marker_z_buffer_u") is not None
-        else 0.0
-    )
+
+def resolve_buffer_u(experiment_config: dict) -> float:
+    """
+    Single canonical key: `buffer_u` (in dim_units).
+
+    Legacy aliases accepted silently; first present value wins:
+        buffer_u, marks.buffer_u, mark_z_buffer_u, marker_z_buffer_u
+    """
+    marks_cfg = experiment_config.get("marks", {}) or {}
+    for value in (
+        experiment_config.get("buffer_u"),
+        marks_cfg.get("buffer_u"),
+        experiment_config.get("mark_z_buffer_u"),
+        experiment_config.get("marker_z_buffer_u"),
+    ):
+        if value is not None:
+            return float(value)
+    return 0.0
+
+
+def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: Path) -> AnalysisConfig:
+    marks_cfg = experiment_config.get("marks", {}) or {}
+
+    split_source, mark_target_type = resolve_splitting_style(experiment_config)
+    mark_z_buffer_u = resolve_buffer_u(experiment_config)
 
     missing_mark_file = marks_cfg.get("missing_file")
     if missing_mark_file is None:
@@ -237,6 +309,17 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         else "skip"
     )
 
+    # Defaults come from the AnalysisConfig dataclass (single source of truth).
+    # `pick` reads the YAML value if present, else the dataclass default, and
+    # applies the same type coercion the old inline literals used (including
+    # the same failure behavior on bad values).
+    _DEFAULTS = {f.name: f.default for f in _dc.fields(AnalysisConfig)
+                 if f.default is not _dc.MISSING}
+
+    def pick(yaml_key: str, field: str, cast=None):
+        value = experiment_config.get(yaml_key, _DEFAULTS[field])
+        return cast(value) if cast is not None else value
+
     return AnalysisConfig(
         data_dirs=[data_dir],
         calibration_dir=data_dir,
@@ -244,7 +327,7 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         split_source=str(split_source),
         mark_target_type=str(mark_target_type),
         mark_z_buffer_u=float(mark_z_buffer_u),
-        markers_dirname=str(experiment_config.get("markers_dirname", "markers")),
+        markers_dirname=pick("markers_dirname", "markers_dirname", str),
         missing_mark_file=str(missing_mark_file),
         write_marker_pointcloud=bool(write_marker_pointcloud),
         write_reference_points=bool(write_reference_points),
@@ -252,52 +335,52 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         free_marks_as=str(free_marks_as),
         empty_mark_file=str(empty_mark_file),
 
-        make_point_cloud=bool(experiment_config.get("generate_pointclouds", True)),
-        overwrite_outputs=bool(experiment_config.get("overwrite_pointclouds", True)),
+        make_point_cloud=pick("generate_pointclouds", "make_point_cloud", bool),
+        overwrite_outputs=pick("overwrite_pointclouds", "overwrite_outputs", bool),
         reprocess_scans=force,
 
-        use_imu=bool(experiment_config.get("apply_imu", False)),
-        imu_zero_mode=str(experiment_config.get("imu_zero_mode", "dense_median")),
-        imu_zero_fraction=float(experiment_config.get("imu_zero_fraction", 0.5)),
-        use_heading=bool(experiment_config.get("use_heading", False)),
-        heading_sign=float(experiment_config.get("heading_sign", 1.0)),
+        use_imu=pick("apply_imu", "use_imu", bool),
+        imu_zero_mode=pick("imu_zero_mode", "imu_zero_mode", str),
+        imu_zero_fraction=pick("imu_zero_fraction", "imu_zero_fraction", float),
+        use_heading=pick("use_heading", "use_heading", bool),
+        heading_sign=pick("heading_sign", "heading_sign", float),
 
-        normalize_rssi=bool(experiment_config.get("normalize_rssi", False)),
-        rssi_norm_mode=str(experiment_config.get("rssi_norm_mode", "percentile")),
-        use_rssi_filter=bool(experiment_config.get("use_rssi_filter", False)),
-        rssi_min=experiment_config.get("rssi_min"),
-        rssi_max=experiment_config.get("rssi_max"),
+        normalize_rssi=pick("normalize_rssi", "normalize_rssi", bool),
+        rssi_norm_mode=pick("rssi_norm_mode", "rssi_norm_mode", str),
+        use_rssi_filter=pick("use_rssi_filter", "use_rssi_filter", bool),
+        rssi_min=pick("rssi_min", "rssi_min"),
+        rssi_max=pick("rssi_max", "rssi_max"),
 
-        write_o3d_ply=bool(experiment_config.get("write_o3d_ply", False)),
-        fusion_method=str(experiment_config.get("fusion_method", "interp")),
-        dim_units=str(experiment_config.get("dim_units", "m")),
-        row_width_u=float(experiment_config.get("row_width_u", 5.0)),
-        start_u=experiment_config.get("start_u", 0.0),
-        split_u=float(experiment_config.get("split_u", 0.0)),
-        end_buffer_u=float(experiment_config.get("end_buffer_u", 0.5)),
-        max_y_u=experiment_config.get("max_y_u"),
-        x_min_u=experiment_config.get("x_min_u"),
-        min_radius_u=experiment_config.get("min_radius_u"),
-        use_o3d_sor=bool(experiment_config.get("use_o3d_sor", False)),
-        o3d_sor_nb_neighbors=int(experiment_config.get("o3d_sor_nb_neighbors", 5)),
-        o3d_sor_std_ratio=float(experiment_config.get("o3d_sor_std_ratio", 2.0)),
-        use_o3d_voxel=bool(experiment_config.get("use_o3d_voxel", False)),
-        o3d_voxel_size_mm=float(experiment_config.get("o3d_voxel_size_mm", 5.0)),
-        topo_min_persistence=float(experiment_config.get("topo_min_persistence", 0.35)),
-        topo_background_cut=float(experiment_config.get("topo_background_cut", 0.0)),
-        topo_x_bin_m=float(experiment_config.get("topo_x_bin_m", 0.01)),
-        topo_z_bin_m=float(experiment_config.get("topo_z_bin_m", 0.01)),
-        roll_sign=float(experiment_config.get("roll_sign", -1.0)),
-        pitch_sign=float(experiment_config.get("pitch_sign", -1.0)),
-        run_lai=bool(experiment_config.get("run_lai", False)),
-        run_height=bool(experiment_config.get("run_height", False)),
-        run_topology=bool(experiment_config.get("run_topology", True)),
-        run_o3d_metrics=bool(experiment_config.get("run_o3d_metrics", False)),
-        write_lidar_per_plot=bool(experiment_config.get("write_lidar_per_plot", True)),
-        additional_scan_side_split=bool(experiment_config.get("additional_scan_side_split", False)),
-        additional_scan_side_axis=str(experiment_config.get("additional_scan_side_axis", "x")),
-        additional_scan_positive_side_label=str(experiment_config.get("additional_scan_positive_side_label", "right")),
-        additional_scan_negative_side_label=str(experiment_config.get("additional_scan_negative_side_label", "left")),
+        write_o3d_ply=pick("write_o3d_ply", "write_o3d_ply", bool),
+        fusion_method=pick("fusion_method", "fusion_method", str),
+        dim_units=pick("dim_units", "dim_units", str),
+        row_width_u=pick("row_width_u", "row_width_u", float),
+        start_u=pick("start_u", "start_u"),
+        split_u=pick("split_u", "split_u", float),
+        end_buffer_u=pick("end_buffer_u", "end_buffer_u", float),
+        max_y_u=pick("max_y_u", "max_y_u"),
+        x_min_u=pick("x_min_u", "x_min_u"),
+        min_radius_u=pick("min_radius_u", "min_radius_u"),
+        use_o3d_sor=pick("use_o3d_sor", "use_o3d_sor", bool),
+        o3d_sor_nb_neighbors=pick("o3d_sor_nb_neighbors", "o3d_sor_nb_neighbors", int),
+        o3d_sor_std_ratio=pick("o3d_sor_std_ratio", "o3d_sor_std_ratio", float),
+        use_o3d_voxel=pick("use_o3d_voxel", "use_o3d_voxel", bool),
+        o3d_voxel_size_mm=pick("o3d_voxel_size_mm", "o3d_voxel_size_mm", float),
+        topo_min_persistence=pick("topo_min_persistence", "topo_min_persistence", float),
+        topo_background_cut=pick("topo_background_cut", "topo_background_cut", float),
+        topo_x_bin_m=pick("topo_x_bin_m", "topo_x_bin_m", float),
+        topo_z_bin_m=pick("topo_z_bin_m", "topo_z_bin_m", float),
+        roll_sign=pick("roll_sign", "roll_sign", float),
+        pitch_sign=pick("pitch_sign", "pitch_sign", float),
+        run_lai=pick("run_lai", "run_lai", bool),
+        run_height=pick("run_height", "run_height", bool),
+        run_topology=pick("run_topology", "run_topology", bool),
+        run_o3d_metrics=pick("run_o3d_metrics", "run_o3d_metrics", bool),
+        write_lidar_per_plot=pick("write_lidar_per_plot", "write_lidar_per_plot", bool),
+        additional_scan_side_split=pick("additional_scan_side_split", "additional_scan_side_split", bool),
+        additional_scan_side_axis=pick("additional_scan_side_axis", "additional_scan_side_axis", str),
+        additional_scan_positive_side_label=pick("additional_scan_positive_side_label", "additional_scan_positive_side_label", str),
+        additional_scan_negative_side_label=pick("additional_scan_negative_side_label", "additional_scan_negative_side_label", str),
     )
 
 

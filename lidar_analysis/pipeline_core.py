@@ -928,6 +928,23 @@ def write_scan_outputs(scan_base: str, cfg: AnalysisConfig, plot: Plot) -> None:
             print(f"[MARKS] wrote marker window pointcloud: {plot.csv_out}")
 
 
+
+def marker_count_to_z_mm(encoder_count, *, step_mm: float, lidar_wheel_offset_mm: float) -> float:
+    """
+    Convert a marker encoder_count to world Z in mm using the same convention
+    used by marker splitting.
+
+    Encoder travel distance is count * step_mm. The LiDAR is offset from the
+    wheel reference, so subtract lidar_wheel_offset_mm to express the marker
+    in LiDAR/world Z coordinates.
+    """
+    try:
+        c = float(encoder_count)
+    except Exception:
+        return float("nan")
+    return (c * float(step_mm)) - float(lidar_wheel_offset_mm)
+
+
 def write_marker_reference_points(scan_base: str, marker_path: str, out_dir: str, step_mm: float, lidar_wheel_offset_mm: float) -> None:
     try:
         df = pd.read_csv(marker_path)
@@ -936,13 +953,13 @@ def write_marker_reference_points(scan_base: str, marker_path: str, out_dir: str
         return
 
     df = df.rename(columns={c: str(c).strip() for c in df.columns})
-    required = ["marker_idx", "target_type", "target_number", "mark_role", "encoder_count", "time_s"]
-    for c in required:
-        if c not in df.columns:
-            if c == "marker_idx":
-                df[c] = np.arange(1, len(df) + 1)
-            else:
-                df[c] = ""
+
+    # Only encoder_count is needed: marker Z is derived from it. The marker
+    # reference file is intentionally minimal -- exactly three columns
+    # (X, Y, Z), one row per mark. X = left/right (always 0 for a mark),
+    # Y = height (always 0), Z = encoder/travel distance in metres.
+    if "encoder_count" not in df.columns:
+        df["encoder_count"] = ""
 
     if df.empty:
         print(f"[MARKS][WARN] Empty marker rows for {scan_base}; no marker reference points written.")
@@ -951,13 +968,6 @@ def write_marker_reference_points(scan_base: str, marker_path: str, out_dir: str
     enc = pd.to_numeric(df["encoder_count"], errors="coerce")
     z_mm = enc.apply(lambda c: marker_count_to_z_mm(c, step_mm=step_mm, lidar_wheel_offset_mm=lidar_wheel_offset_mm))
     out = pd.DataFrame({
-        "scan_id": scan_base,
-        "marker_idx": df["marker_idx"],
-        "target_type": df["target_type"],
-        "target_number": df["target_number"],
-        "mark_role": df["mark_role"],
-        "encoder_count": df["encoder_count"],
-        "time_s": df["time_s"],
         "X": 0.0,
         "Y": 0.0,
         "Z": z_mm / 1000.0,

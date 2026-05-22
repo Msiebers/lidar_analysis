@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from .fusion import _lin_interp, _unwrap_deg, fuse_by_time
+try:
+    from .fusion import _lin_interp, _unwrap_deg, fuse_by_time
+except ImportError:
+    from fusion import _lin_interp, _unwrap_deg, fuse_by_time
 
 
 def fuse_by_imu_interp(
