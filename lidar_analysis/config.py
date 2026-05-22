@@ -50,13 +50,29 @@ class AnalysisConfig:
     run_lai: bool = False
     run_height: bool = False
     write_lidar_per_plot: bool = True
+
+    # Deprecated compatibility shims.
+    # These keep old pipeline_core references from crashing while O3D/topology
+    # code is being pruned. They must stay false and should not appear in new
+    # experiment configs.
+    write_o3d_ply: bool = False
+    run_o3d_metrics: bool = False
+    run_topology: bool = False
     pointcloud_ops: list[dict] | None = None
     pcl_backend: dict | None = None
 
 
 def default_analysis_yaml_dict() -> dict:
     d = asdict(AnalysisConfig(data_dirs=[], calibration_dir=Path('.'), cart_id='CART'))
-    for k in ["data_dirs","calibration_dir","cart_id","reprocess_scans"]:
+    for k in [
+        "data_dirs",
+        "calibration_dir",
+        "cart_id",
+        "reprocess_scans",
+        "write_o3d_ply",
+        "run_o3d_metrics",
+        "run_topology",
+    ]:
         d.pop(k,None)
     d["generate_pointclouds"] = d.pop("make_point_cloud")
     d["overwrite_pointclouds"] = d.pop("overwrite_outputs")
