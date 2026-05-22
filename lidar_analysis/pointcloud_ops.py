@@ -125,7 +125,10 @@ def _bilateral_scalar_filter(df: pd.DataFrame, op_cfg: dict[str, Any]) -> tuple[
 
 
 def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=None):
-    from .analysis_target import AnalysisTarget
+    try:
+        from .analysis_target import AnalysisTarget
+    except ImportError:
+        from analysis_target import AnalysisTarget
 
     if isinstance(target, AnalysisTarget):
         df = _as_df(target.current_points)

@@ -908,7 +908,7 @@ def write_scan_outputs(scan_base: str, cfg: AnalysisConfig, plot: Plot) -> None:
         plot.write(
             make_point_cloud=should_write,
             overwrite_outputs=cfg.overwrite_outputs,
-            write_o3d_ply=cfg.write_o3d_ply,
+            write_o3d_ply=False  # O3D/PLY output removed,
         )
         if getattr(plot, "split_source", "distance") == "marks" and bool(getattr(cfg, "write_window_pointcloud", False)):
             print(f"[MARKS] wrote marker window pointcloud: {plot.csv_out}")
@@ -1079,7 +1079,7 @@ def analyze_plot(
 
     topo_input = np.empty((0, 3), dtype=float)
     if goto_open3d:
-        if cfg.run_o3d_metrics:
+        if False:  # O3D metrics removed from active pipeline
             scan_index_plot = fused_np[plot_idx, 5].astype(np.float64)
             n_points_o3d = int(p.cloud.shape[0])
             voxel_count_o3d = float("nan")
@@ -1087,7 +1087,7 @@ def analyze_plot(
             n_points_o3d = 0
             voxel_count_o3d = float("nan")
 
-        if cfg.run_topology:
+        if False:  # topology removed from active pipeline
             topo_input = p.cloud[:, :3].astype(float, copy=False)
     else:
         n_points_o3d = 0
