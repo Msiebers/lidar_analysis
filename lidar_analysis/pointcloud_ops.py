@@ -15,8 +15,10 @@ class _BackendResolver:
     def resolve(self, op_cfg: dict[str, Any], legacy_backend: str | None = None) -> str:
         backend = op_cfg.get("backend") or legacy_backend or self.default_backend
         b = str(backend).strip().lower()
-        if b in {"scipy", "pcl", "pclpy", "python_pcl"}:
+        if b == "scipy":
             return b
+        if b in {"pcl", "pclpy", "python_pcl"}:
+            raise ValueError(f"Backend {b!r} requested but not implemented. Only 'scipy' is available.")
         raise ValueError(f"Unsupported pointcloud backend '{backend}' for op={op_cfg.get('op')}")
 
 
@@ -40,10 +42,18 @@ def _as_df(points_df: pd.DataFrame | np.ndarray) -> pd.DataFrame:
     return pd.DataFrame(arr, columns=cols[: arr.shape[1]])
 
 
+def _resolve_scalar_name(op_cfg: dict[str, Any]) -> str:
+    return str(op_cfg.get("scalar") or op_cfg.get("field") or op_cfg.get("input_scalar") or "").strip()
+
+def _require_scalar(df: pd.DataFrame, scalar: str, op_name: str) -> str:
+    if not scalar:
+        raise ValueError(f"{op_name} requires one of scalar/field/input_scalar")
+    if scalar not in df.columns:
+        raise ValueError(f"{op_name} scalar {scalar!r} not present. Available columns: {list(df.columns)}")
+    return scalar
+
 def _scalar_range_filter(df: pd.DataFrame, op_cfg: dict[str, Any]) -> pd.DataFrame:
-    field = op_cfg.get("field") or op_cfg.get("scalar") or "RSSI"
-    if field not in df.columns:
-        raise ValueError(f"scalar_range_filter field '{field}' not present")
+    field = _require_scalar(df, _resolve_scalar_name(op_cfg), "scalar_range_filter")
     m = pd.Series(True, index=df.index)
     if op_cfg.get("min") is not None:
         m &= df[field] >= float(op_cfg["min"])
@@ -79,14 +89,11 @@ def _voxel_count(df: pd.DataFrame, op_cfg: dict[str, Any]) -> int:
     return int(np.unique(idx, axis=0).shape[0])
 
 
-def _bilateral_scalar_filter(df: pd.DataFrame, op_cfg: dict[str, Any]) -> pd.DataFrame:
-    # TODO: if pcl/pclpy backend is enabled in environment, map this to PCL bilateral on intensity.
-    field = op_cfg.get("field") or op_cfg.get("scalar") or "RSSI"
-    if field not in df.columns:
-        raise ValueError(f"bilateral_scalar_filter field '{field}' not present")
-    sigma_s = float(op_cfg.get("sigma_spatial", 0.03))
-    sigma_r = float(op_cfg.get("sigma_range", 2.5))
-    radius = float(op_cfg.get("radius", sigma_s * 2.0))
+def _bilateral_scalar_filter(df: pd.DataFrame, op_cfg: dict[str, Any]) -> tuple[pd.DataFrame, str]:
+    field = _require_scalar(df, _resolve_scalar_name(op_cfg), "bilateral_scalar_filter")
+    sigma_s = float(op_cfg.get("sigma_spatial", op_cfg.get("spatial_sigma_m", 0.03)))
+    sigma_r = float(op_cfg.get("sigma_range", op_cfg.get("scalar_sigma", 2.5)))
+    radius = float(op_cfg.get("radius", op_cfg.get("radius_m", sigma_s * 2.0)))
     xyz = df[["X", "Y", "Z"]].to_numpy(dtype=float, copy=False)
     vals = df[field].to_numpy(dtype=float, copy=False)
     if len(df) == 0:
@@ -105,9 +112,16 @@ def _bilateral_scalar_filter(df: pd.DataFrame, op_cfg: dict[str, Any]) -> pd.Dat
         wsum = float(np.sum(w))
         if wsum > 0:
             out_vals[i] = float(np.sum(w * vals[nbr_idx]) / wsum)
+    replace_scalar = bool(op_cfg.get("replace_scalar", True))
+    output_scalar = op_cfg.get("output_scalar")
     out = df.copy()
-    out[field] = out_vals
-    return out
+    if output_scalar and (not replace_scalar):
+        out[str(output_scalar)] = out_vals
+        used = str(output_scalar)
+    else:
+        out[field] = out_vals
+        used = field
+    return out, used
 
 
 def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=None):
@@ -127,6 +141,7 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
         legacy_backend = context.get("pcl_backend_name")
 
     diagnostics = {
+        "available_scalar_columns_before": [c for c in df.columns if c not in {"X","Y","Z"}],
         "points_before_ops": int(len(df)),
         "points_after_each_op": [],
         "points_after_ops": None,
@@ -137,7 +152,10 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
     traits = {}
 
     for op_cfg in ops:
-        op = str(op_cfg.get("op", "")).strip().lower()
+        op_name = op_cfg.get("op", op_cfg.get("name", ""))
+        op = str(op_name).strip().lower()
+        if op_cfg.get("enabled", True) is False:
+            continue
         if op not in _SUPPORTED_OPS:
             raise ValueError(f"Unsupported pointcloud op '{op}'")
         backend = resolver.resolve(op_cfg, legacy_backend=legacy_backend)
@@ -145,7 +163,8 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
         diagnostics["backend_used"].append({"op": op, "backend": backend})
 
         if op == "scalar_range_filter":
-            diagnostics["scalar_fields_used"].append(op_cfg.get("field") or op_cfg.get("scalar") or "RSSI")
+            scalar = _resolve_scalar_name(op_cfg)
+            diagnostics["scalar_fields_used"].append({"op": op, "scalar": scalar})
             df = _scalar_range_filter(df, op_cfg)
         elif op == "sor_filter":
             df = _sor_filter(df, op_cfg)
@@ -157,12 +176,14 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
                 # behavior-preserving default: do not replace cloud unless explicitly requested.
                 pass
         elif op == "bilateral_scalar_filter":
-            diagnostics["scalar_fields_used"].append(op_cfg.get("field") or op_cfg.get("scalar") or "RSSI")
-            df = _bilateral_scalar_filter(df, op_cfg)
+            scalar = _resolve_scalar_name(op_cfg)
+            df, actual_scalar = _bilateral_scalar_filter(df, op_cfg)
+            diagnostics["scalar_fields_used"].append({"op": op, "scalar": scalar, "output_scalar": actual_scalar})
 
         diagnostics["points_after_each_op"].append({"op": op, "points": int(len(df))})
 
     diagnostics["points_after_ops"] = int(len(df))
+    diagnostics["available_scalar_columns_after"] = [c for c in df.columns if c not in {"X","Y","Z"}]
     if target_obj is None:
         return df, traits, diagnostics
     target_obj.current_points = df

@@ -481,8 +481,7 @@ def normalize_rssi_by_phi_zscore(phi: np.ndarray, rssi: np.ndarray, decimals: in
 
     phi_key = np.round(phi, decimals=decimals)
 
-    EXP_ALPHA = 1.0   # try 0.75, 1.0, or 1.25
-    Z_CLIP = 4.0      # prevents huge blowups
+    EXP_ALPHA = 1.0
 
     for ph in np.unique(phi_key):
         m = (phi_key == ph)
@@ -499,7 +498,6 @@ def normalize_rssi_by_phi_zscore(phi: np.ndarray, rssi: np.ndarray, decimals: in
         else:
             z = ((vals - mu) / sd).astype(np.float32)
 
-        z = np.clip(z, -Z_CLIP, Z_CLIP)
         out[m] = np.exp(EXP_ALPHA * z).astype(np.float32)
 
     return out
@@ -1043,6 +1041,8 @@ def analyze_plot(
         ops_cfg = getattr(cfg, "pointcloud_ops", None) or []
         if ops_cfg:
             cloud_df = pd.DataFrame(p.cloud[:, :4], columns=["X", "Y", "Z", "RSSI"])
+            if p.cloud.shape[1] > 4:
+                cloud_df["rssi_norm"] = p.cloud[:, 4]
             target = AnalysisTarget.from_points(
                 target_id=p.name,
                 target_type=str(getattr(p, "target_type", "plot")),
@@ -1197,7 +1197,11 @@ def apply_rssi_normalization_after_masks(
     else:
         raise ValueError(f"Unknown rssi_norm_mode: {mode}")
 
-    out[:, 3] = rssi_norm
+    # Preserve raw RSSI in column 3; add normalized scalar as column 4
+    if out.shape[1] == 4:
+        out = np.concatenate([out, rssi_norm.reshape(-1, 1)], axis=1)
+    else:
+        out[:, 4] = rssi_norm
     return out
 
 
