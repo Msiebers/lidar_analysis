@@ -14,6 +14,7 @@ try:
     from .config import AnalysisConfig
     from .fusion import fuse_by_time
     from .fusion_pps import fuse_by_pps
+    from .fusion_imu_interp import fuse_by_imu_interp
     from .topology import topology_stand_count
     from .mark_splitting import (
         build_mark_segments,
@@ -24,6 +25,7 @@ except Exception:
     from config import AnalysisConfig
     from fusion import fuse_by_time
     from fusion_pps import fuse_by_pps
+    from fusion_imu_interp import fuse_by_imu_interp
     from topology import topology_stand_count
     from mark_splitting import (
         build_mark_segments,
@@ -374,12 +376,15 @@ def load_files_from_paths(lidar_path, pico_path):
     # Pico CSV columns (Euler, degrees)
     # time_s,count,roll_deg,pitch_deg,yaw_deg,pps
     pico_cols = ["time_s", "count", "roll_deg", "pitch_deg", "yaw_deg", "pps"]
+    pico_cols_with_imu = pico_cols + ["imu_time_s"]
     pico_dtypes = {
         "time_s": np.float64, "count": np.int32,
         "roll_deg": np.float32, "pitch_deg": np.float32, "yaw_deg": np.float32,
-        "pps": np.int32
+        "pps": np.int32, "imu_time_s": np.float64
     }
-    pico_np = load_csv(pico_path, usecols=pico_cols, dtypes=pico_dtypes)
+    pico_np = load_csv(pico_path, usecols=pico_cols_with_imu, dtypes=pico_dtypes)
+    if pico_np.size == 0:
+        pico_np = load_csv(pico_path, usecols=pico_cols, dtypes=pico_dtypes)
     return lidar_np, pico_np
 
 # ======================================================================
@@ -404,6 +409,8 @@ class Plot:
         self.csv_out = os.path.join(self.out_dir, f"{file_stem}.csv")
         self.ply_out = os.path.join(self.out_dir, f"{file_stem}.ply")
         self.cloud = []
+        self.side_label = None
+        self.side_sign = None
 
     def range_match(self, z):
         return (z > self.min_z) & (z < self.max_z)
@@ -553,6 +560,15 @@ def choose_fusion_method(cfg: AnalysisConfig, lidar_np: np.ndarray, pico_np: np.
             pico_np,
             lidar_ts_col=0,
             pico_ts_col=0,
+            trim_to_overlap=False,
+        ).astype(np.float32, copy=False)
+    if cfg.fusion_method == "imu_interp":
+        return fuse_by_imu_interp(
+            lidar_np,
+            pico_np,
+            lidar_ts_col=0,
+            pico_ts_col=0,
+            pico_imu_ts_col=6,
             trim_to_overlap=False,
         ).astype(np.float32, copy=False)
     raise ValueError(f"Unknown fusion_method: {cfg.fusion_method}")
@@ -898,12 +914,94 @@ def build_plot_objects_from_mark_segments(
 
 
 def write_scan_outputs(scan_base: str, cfg: AnalysisConfig, plot: Plot) -> None:
-    if cfg.make_point_cloud:
+    should_write = bool(cfg.make_point_cloud)
+    if (not should_write) and getattr(plot, "split_source", "distance") == "marks":
+        should_write = bool(getattr(cfg, "write_window_pointcloud", False))
+
+    if should_write:
         plot.write(
-            make_point_cloud=cfg.make_point_cloud,
+            make_point_cloud=should_write,
             overwrite_outputs=cfg.overwrite_outputs,
             write_o3d_ply=cfg.write_o3d_ply,
         )
+        if getattr(plot, "split_source", "distance") == "marks" and bool(getattr(cfg, "write_window_pointcloud", False)):
+            print(f"[MARKS] wrote marker window pointcloud: {plot.csv_out}")
+
+
+
+def marker_count_to_z_mm(encoder_count, *, step_mm: float, lidar_wheel_offset_mm: float) -> float:
+    """
+    Convert a marker encoder_count to world Z in mm using the same convention
+    used by marker splitting.
+
+    Encoder travel distance is count * step_mm. The LiDAR is offset from the
+    wheel reference, so subtract lidar_wheel_offset_mm to express the marker
+    in LiDAR/world Z coordinates.
+    """
+    try:
+        c = float(encoder_count)
+    except Exception:
+        return float("nan")
+    return (c * float(step_mm)) - float(lidar_wheel_offset_mm)
+
+
+def write_marker_reference_points(scan_base: str, marker_path: str, out_dir: str, step_mm: float, lidar_wheel_offset_mm: float) -> None:
+    try:
+        df = pd.read_csv(marker_path)
+    except pd.errors.EmptyDataError:
+        print(f"[MARKS][WARN] Empty marker file for {scan_base}; no marker reference points written.")
+        return
+
+    df = df.rename(columns={c: str(c).strip() for c in df.columns})
+
+    # Only encoder_count is needed: marker Z is derived from it. The marker
+    # reference file is intentionally minimal -- exactly three columns
+    # (X, Y, Z), one row per mark. X = left/right (always 0 for a mark),
+    # Y = height (always 0), Z = encoder/travel distance in metres.
+    if "encoder_count" not in df.columns:
+        df["encoder_count"] = ""
+
+    if df.empty:
+        print(f"[MARKS][WARN] Empty marker rows for {scan_base}; no marker reference points written.")
+        return
+
+    enc = pd.to_numeric(df["encoder_count"], errors="coerce")
+    z_mm = enc.apply(lambda c: marker_count_to_z_mm(c, step_mm=step_mm, lidar_wheel_offset_mm=lidar_wheel_offset_mm))
+    out = pd.DataFrame({
+        "X": 0.0,
+        "Y": 0.0,
+        "Z": z_mm / 1000.0,
+    })
+    out_path = os.path.join(out_dir, f"{scan_base}_marker_points.csv")
+    out.to_csv(out_path, index=False)
+    print(f"[MARKS] wrote marker reference points: {out_path}")
+
+def is_additional_scan_name(scan_base: str) -> bool:
+    s = str(scan_base).strip().lower()
+    return s.startswith("scan_")
+
+
+def with_side_suffix(plot: Plot, side_label: str, side_sign: str) -> Plot:
+    p2 = Plot(
+        row=plot.row,
+        letter=plot.letter,
+        z_bounds=(plot.min_z, plot.max_z),
+        out_dir=plot.out_dir,
+        scan_base=plot.scan_base,
+    )
+    p2.split_source = getattr(plot, "split_source", "distance")
+    p2.target_type = getattr(plot, "target_type", "plot")
+    p2.target_number = getattr(plot, "target_number", plot.letter)
+    p2.side_label = side_label
+    p2.side_sign = side_sign
+
+    if is_additional_scan_name(str(plot.scan_base)):
+        file_stem = f"{plot.scan_base}_{side_label}"
+    else:
+        file_stem = os.path.splitext(os.path.basename(p2.csv_out))[0] + f"_{side_label}"
+    p2.csv_out = os.path.join(p2.out_dir, f"{file_stem}.csv")
+    p2.ply_out = os.path.join(p2.out_dir, f"{file_stem}.ply")
+    return p2
 
 
 def analyze_plot(
@@ -927,6 +1025,11 @@ def analyze_plot(
         x_mask = p.row_match(data[:, 0], row_options)
 
     mask = z_mask & x_mask
+
+    if getattr(p, "side_sign", None) == "positive":
+        mask = mask & (data[:, 0] > 0)
+    elif getattr(p, "side_sign", None) == "negative":
+        mask = mask & (data[:, 0] < 0)
 
     p.cloud = np.empty((0, 4), dtype=np.float32)
     n_points = 0
@@ -1044,7 +1147,7 @@ def analyze_plot(
             stand_topo_right_count = float("nan")
 
     result = {
-        "scan": scan_base,
+        "scan": scan_base if not getattr(p, "side_label", None) else f"{scan_base}_{p.side_label}",
         "row": p.row,
         "plot": p.letter,
         "split_source": getattr(p, "split_source", "distance"),
@@ -1295,12 +1398,20 @@ def process_scan(
             lidar_wheel_offset_mm=lidar_wheel_offset_mm,
             z_buffer_mm=z_buffer_mm,
             target_type=str(getattr(cfg, "mark_target_type", "auto")),
+            free_marks_as=str(getattr(cfg, "free_marks_as", "none")),
             zmax_clip=zmax,
         )
 
         if len(segments) == 0:
-            print(f"[MARKS][WARN] No usable marker segments for {scan_base}; skipping.")
-            return []
+            empty_mode = str(getattr(cfg, "empty_mark_file", "skip")).strip().lower()
+            if empty_mode == "distance":
+                print(f"[MARKS][WARN] No usable marker segments for {scan_base}; falling back to distance splitting.")
+                split_source = "distance"
+            elif empty_mode == "error":
+                raise ValueError(f"No usable marker segments for {scan_base} from {marker_path}")
+            else:
+                print(f"[MARKS][WARN] No usable marker segments for {scan_base}; skipping.")
+                return []
 
         print(
             f"[MARKS] {scan_base}: using {len(segments)} segment(s) "
@@ -1318,7 +1429,7 @@ def process_scan(
             out_dir=out_dir,
         )
 
-    else:
+    if split_source == "distance":
         expected_plot_count = None
         try:
             expected_plot_count = expected_plot_count_from_scan(scan_base)
@@ -1366,6 +1477,29 @@ def process_scan(
         )
 
     trait_records = []
+    additional_side_split = (
+        bool(getattr(cfg, "additional_scan_side_split", False))
+        and str(getattr(cfg, "additional_scan_side_axis", "x")).strip().lower() == "x"
+        and is_additional_scan_name(scan_base)
+    )
+    if additional_side_split:
+        pos_label = str(getattr(cfg, "additional_scan_positive_side_label", "right")).strip() or "right"
+        neg_label = str(getattr(cfg, "additional_scan_negative_side_label", "left")).strip() or "left"
+        sided_plots: list[Plot] = []
+        for p in plots:
+            sided_plots.append(with_side_suffix(p, pos_label, "positive"))
+            sided_plots.append(with_side_suffix(p, neg_label, "negative"))
+        plots = sided_plots
+
+    if bool(getattr(cfg, "write_reference_points", False)) and split_source == "marks" and marker_path is not None:
+        write_marker_reference_points(
+            scan_base=scan_base,
+            marker_path=str(marker_path),
+            out_dir=out_dir,
+            step_mm=step_mm,
+            lidar_wheel_offset_mm=lidar_wheel_offset_mm,
+        )
+
     for p in plots:
         rec = analyze_plot(
             p,

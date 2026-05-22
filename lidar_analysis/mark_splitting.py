@@ -113,7 +113,10 @@ def find_marker_file_for_scan(
 
 def _load_markers(marker_path: str | Path) -> pd.DataFrame:
     marker_path = Path(marker_path)
-    df = pd.read_csv(marker_path)
+    try:
+        df = pd.read_csv(marker_path)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
 
     df = df.rename(columns={c: str(c).strip().lower() for c in df.columns})
 
@@ -135,7 +138,6 @@ def _load_markers(marker_path: str | Path) -> pd.DataFrame:
         df["_sort"] = np.arange(len(df), dtype=float)
 
     df = df[np.isfinite(df["_encoder_count"])].copy()
-    df = df[df["_target_number"] != ""].copy()
     df = df.sort_values("_sort").reset_index(drop=True)
 
     return df
@@ -148,6 +150,7 @@ def build_mark_segments(
     lidar_wheel_offset_mm: float,
     z_buffer_mm: float,
     target_type: str = "auto",
+    free_marks_as: str = "none",
     zmax_clip: float | None = None,
 ) -> list[MarkSegment]:
     df = _load_markers(marker_path)
@@ -158,6 +161,19 @@ def build_mark_segments(
     target_type = str(target_type).strip().lower()
     if target_type not in ("auto", "plot", "plant"):
         raise ValueError(f"Unknown mark_target_type={target_type!r}")
+
+    free_mode = str(free_marks_as).strip().lower()
+    if free_mode == "plant" and target_type in ("auto", "plant"):
+        free_df = df[(df["_target_type"] == "free") & (df["_mark_role"].isin({"mark", "center", "point", "plant"}))].copy()
+        if not free_df.empty:
+            seq = 1
+            for idx, row in free_df.sort_values("_sort").iterrows():
+                if str(row["_target_number"]).strip() == "":
+                    df.at[idx, "_target_type"] = "plant"
+                    df.at[idx, "_target_number"] = str(seq)
+                    seq += 1
+                else:
+                    df.at[idx, "_target_type"] = "plant"
 
     if target_type != "auto":
         df = df[df["_target_type"] == target_type].copy()
