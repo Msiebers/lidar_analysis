@@ -81,11 +81,24 @@ def _sor_filter(df: pd.DataFrame, op_cfg: dict[str, Any]) -> pd.DataFrame:
 
 
 def _voxel_count(df: pd.DataFrame, op_cfg: dict[str, Any]) -> int:
-    size = float(op_cfg.get("voxel_size", op_cfg.get("leaf_size", op_cfg.get("voxel_size_m", 0.05))))
-    if size <= 0 or len(df) == 0:
+    size_m = float(
+        op_cfg.get(
+            "voxel_size_m",
+            op_cfg.get("voxel_size", op_cfg.get("leaf_size", 0.05)),
+        )
+    )
+
+    if size_m <= 0:
+        raise ValueError(f"voxel size must be > 0; got {size_m}")
+
+    if len(df) == 0:
         return 0
-    xyz = df[["X", "Y", "Z"]].to_numpy(dtype=float, copy=False)
-    idx = np.floor(xyz / size).astype(np.int64)
+
+    # pipeline_core stores X/Y/Z in millimeters.
+    # voxel_size_m is meters, so convert coordinates to meters.
+    xyz_m = df[["X", "Y", "Z"]].to_numpy(dtype=float, copy=False) / 1000.0
+
+    idx = np.floor(xyz_m / size_m).astype(np.int64)
     return int(np.unique(idx, axis=0).shape[0])
 
 
