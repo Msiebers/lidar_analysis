@@ -29,6 +29,7 @@ _SUPPORTED_OPS = {
     "voxel_grid",
     "voxel_count",
     "bilateral_scalar_filter",
+    "height_range_filter",
 }
 
 
@@ -78,6 +79,36 @@ def _sor_filter(df: pd.DataFrame, op_cfg: dict[str, Any]) -> pd.DataFrame:
     threshold = md_mean + std_mul * md_std
     keep = mean_dist <= threshold
     return df.loc[keep].copy()
+
+
+def _height_range_filter(df: pd.DataFrame, op_cfg: dict[str, Any]) -> tuple[pd.DataFrame, dict[str, Any]]:
+    axis = str(op_cfg.get("axis", "Y")).strip().upper() or "Y"
+    if axis not in {"X", "Y", "Z"}:
+        raise ValueError(f"height_range_filter axis must be one of X/Y/Z; got {axis!r}")
+
+    if axis not in df.columns:
+        raise ValueError(f"height_range_filter axis {axis!r} not present. Available columns: {list(df.columns)}")
+
+    min_m = op_cfg.get("min_m")
+    max_m = op_cfg.get("max_m")
+    min_mm = None if min_m is None else float(min_m) * 1000.0
+    max_mm = None if max_m is None else float(max_m) * 1000.0
+
+    m = pd.Series(True, index=df.index)
+    if min_mm is not None:
+        m &= df[axis] >= min_mm
+    if max_mm is not None:
+        m &= df[axis] <= max_mm
+
+    out = df.loc[m].copy()
+    diag = {
+        "axis": axis,
+        "min_m": min_m,
+        "max_m": max_m,
+        "points_before": int(len(df)),
+        "points_after": int(len(out)),
+    }
+    return out, diag
 
 
 def _voxel_count(df: pd.DataFrame, op_cfg: dict[str, Any]) -> int:
@@ -236,6 +267,9 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
             scalar = _resolve_scalar_name(op_cfg)
             df, actual_scalar = _bilateral_scalar_filter(df, op_cfg)
             diagnostics["scalar_fields_used"].append({"op": op, "scalar": scalar, "output_scalar": actual_scalar})
+        elif op == "height_range_filter":
+            df, hr_diag = _height_range_filter(df, op_cfg)
+            diagnostics.setdefault("height_range_filters", []).append(hr_diag)
 
         diagnostics["points_after_each_op"].append({"op": op, "points": int(len(df))})
 

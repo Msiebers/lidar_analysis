@@ -74,6 +74,38 @@ def test_voxel_count_uses_post_filter_current_points():
     assert out.traits["voxel_count"] == 2
 
 
+def test_height_range_filter_meter_bounds_converted_to_mm_and_diag():
+    df = pd.DataFrame({"X":[0.0,0.0,0.0],"Y":[10.0,30.0,60.0],"Z":[0.0,0.0,0.0],"RSSI":[1.0,2.0,3.0]})
+    out = apply_pointcloud_ops(_target(df), [{"op":"height_range_filter","axis":"Y","min_m":0.02,"max_m":0.04}])
+    assert list(out.current_points["Y"].to_numpy()) == [30.0]
+    hr = out.diagnostics["pointcloud_ops"]["height_range_filters"][0]
+    assert hr["axis"] == "Y"
+    assert hr["min_m"] == 0.02
+    assert hr["max_m"] == 0.04
+    assert hr["points_before"] == 3
+    assert hr["points_after"] == 1
+
+
+def test_height_range_filter_mutates_current_not_raw_points():
+    df = pd.DataFrame({"X":[0.0,0.0],"Y":[20.0,40.0],"Z":[0.0,0.0],"RSSI":[5.0,6.0]})
+    t = _target(df)
+    raw_before = t.raw_points.copy(deep=True)
+    out = apply_pointcloud_ops(t, [{"op":"height_range_filter","min_m":0.03}])
+    assert len(out.current_points) == 1
+    assert len(out.raw_points) == 2
+    pd.testing.assert_frame_equal(out.raw_points.reset_index(drop=True), raw_before.reset_index(drop=True))
+
+
+def test_voxel_count_after_height_range_filter_uses_filtered_points():
+    df = pd.DataFrame({"X":[0.0,0.0,0.0],"Y":[10.0,35.0,80.0],"Z":[0.0,100.0,200.0],"RSSI":[1.0,2.0,3.0]})
+    out = apply_pointcloud_ops(_target(df), [
+        {"op":"height_range_filter","axis":"Y","min_m":0.03,"max_m":0.06},
+        {"op":"voxel_count","voxel_size_m":0.01},
+    ])
+    assert len(out.current_points) == 1
+    assert out.traits["voxel_count"] == 1
+
+
 def test_zscore_no_clip_and_source_has_no_clip_call():
     phi = np.array([0,0,0,0],dtype=np.float32)
     rssi = np.array([1,1,1,10000],dtype=np.float32)
