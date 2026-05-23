@@ -41,6 +41,37 @@ def test_plot_write_uses_analysis_target_all_columns(tmp_path):
     written = pd.read_csv(plot.csv_out)
     assert list(written.columns) == ["X","Y","Z","RSSI","rssi_norm","rssi_norm_bilateral"]
     assert float(written.loc[0,'X']) == 1.0
+    assert float(written.loc[0,'Y']) == 2.0
+    assert float(written.loc[0,'Z']) == 3.0
+    assert float(written.loc[0,'RSSI']) == 4.0
+    assert float(written.loc[0,'rssi_norm']) == 1.2
+    assert float(written.loc[0,'rssi_norm_bilateral']) == 1.1
+
+
+def test_analysis_target_raw_unchanged_current_mutated_by_ops():
+    df = pd.DataFrame({"X":[0.0,100.0],"Y":[0.0,0.0],"Z":[0.0,0.0],"RSSI":[1.0,9.0],"rssi_norm":[0.0,2.0]})
+    t = _target(df)
+    raw_before = t.raw_points.copy(deep=True)
+    out = apply_pointcloud_ops(t, [{"op":"scalar_range_filter","input_scalar":"rssi_norm","min":1.0}])
+    assert len(out.current_points) == 1
+    assert len(out.raw_points) == 2
+    pd.testing.assert_frame_equal(out.raw_points.reset_index(drop=True), raw_before.reset_index(drop=True))
+
+
+def test_voxel_count_uses_post_filter_current_points():
+    df = pd.DataFrame({
+        "X":[0.0,10.0,20.0],
+        "Y":[0.0,0.0,0.0],
+        "Z":[0.0,0.0,0.0],
+        "RSSI":[1.0,2.0,3.0],
+        "rssi_norm":[0.1,1.1,2.1],
+    })
+    out = apply_pointcloud_ops(_target(df), [
+        {"op":"scalar_range_filter","input_scalar":"rssi_norm","min":1.0},
+        {"op":"voxel_count","voxel_size_m":0.001},
+    ])
+    assert len(out.current_points) == 2
+    assert out.traits["voxel_count"] == 2
 
 
 def test_zscore_no_clip_and_source_has_no_clip_call():
