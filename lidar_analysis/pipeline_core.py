@@ -1032,6 +1032,7 @@ def analyze_plot(
     n_points_o3d = 0
     voxel_count_o3d = float("nan")
     plot_idx = np.empty((0,), dtype=np.int32)
+    op_traits = {}
 
     if not np.any(mask):
         goto_open3d = False
@@ -1121,6 +1122,16 @@ def analyze_plot(
     stand_topo_per_m = float("nan")
     stand_topo_left_count = float("nan")
     stand_topo_right_count = float("nan")
+    if op_traits:
+        target_type = str(getattr(p, "target_type", "plot"))
+        if target_type == "row":
+            stand_topo_per_m = float(op_traits.get("topo_count", float("nan")))
+        else:
+            stand_topo_per_m = float(
+                op_traits.get("topo_count_whole", op_traits.get("topo_count", float("nan")))
+            )
+            stand_topo_left_count = float(op_traits.get("topo_count_left", float("nan")))
+            stand_topo_right_count = float(op_traits.get("topo_count_right", float("nan")))
 
     result = {
         "scan": scan_base if not getattr(p, "side_label", None) else f"{scan_base}_{p.side_label}",
