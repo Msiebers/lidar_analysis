@@ -1078,6 +1078,26 @@ def analyze_plot(
                 topo_d0 = topo_diags[0]
                 topo_object_points = list(topo_d0.get("topology_object_points_xyz", []) or [])
                 write_topology_objects = bool(topo_d0.get("write_topology_objects", False))
+                if write_topology_objects:
+                    obj_rows = []
+                    for pt in topo_object_points:
+                        if isinstance(pt, (list, tuple)) and len(pt) >= 3:
+                            obj_rows.append((float(pt[0]), float(pt[1]), float(pt[2])))
+                    obj_count = len(obj_rows)
+                    if obj_count > 0:
+                        base = str(scan_base)
+                        parts = base.split("_")
+                        if len(parts) >= 4:
+                            date_part = "_".join(parts[:3])
+                            exp_part = "_".join(parts[3:])
+                        else:
+                            date_part = base
+                            exp_part = "experiment"
+                        plot_id = str(p.name)
+                        topo_name = f"topology_count_{plot_id}_{obj_count}_{date_part}_{exp_part}.csv"
+                        topo_path = os.path.join(p.out_dir, topo_name)
+                        pd.DataFrame(obj_rows, columns=["X", "Y", "Z"]).to_csv(topo_path, index=False)
+                        print(f"[Topology] wrote counted objects: {topo_path}")
             print(f"[PC_OPS] target={target.target_id} before={op_diag.get('points_before_ops')} after={op_diag.get('points_after_ops')} order={op_diag.get('operation_order')} scalars_before={op_diag.get('available_scalar_columns_before')} scalars_after={op_diag.get('available_scalar_columns_after')}")
         else:
             op_traits = {}
@@ -1168,8 +1188,6 @@ def analyze_plot(
         "o3d_points": n_points_o3d,
         "o3d_voxels": voxel_count_o3d,
         "voxel_count": op_traits.get("voxel_count", float("nan")),
-        "_topology_objects_xyz_m": topo_object_points,
-        "_write_topology_objects": write_topology_objects,
     }
 
     print(
@@ -1621,27 +1639,6 @@ def run_for_directory(
         traits_path = os.path.join(dir_path, "lidar_traits_summary.csv")
         traits_df.to_csv(traits_path, index=False, na_rep="NA")
         print(f"[Traits] Wrote summary to {traits_path}")
-
-        should_write_topo_objects = any(bool(r.get("_write_topology_objects", False)) for r in all_trait_records)
-        if should_write_topo_objects:
-            pts = []
-            for r in all_trait_records:
-                for p in (r.get("_topology_objects_xyz_m", []) or []):
-                    if isinstance(p, (list, tuple)) and len(p) >= 3:
-                        pts.append((float(p[0]), float(p[1]), float(p[2])))
-            if pts:
-                base = os.path.basename(os.path.normpath(dir_path))
-                parts = base.split("_")
-                if len(parts) >= 4:
-                    date_part = "_".join(parts[:3])
-                    exp_part = "_".join(parts[3:])
-                else:
-                    date_part = base
-                    exp_part = "experiment"
-                topo_name = f"topology_count_{date_part}_{exp_part}.csv"
-                topo_path = os.path.join(out_dir, topo_name)
-                pd.DataFrame(pts, columns=["X", "Y", "Z"]).to_csv(topo_path, index=False)
-                print(f"[Topology] Wrote counted objects to {topo_path}")
 
 
 # ================================================================
