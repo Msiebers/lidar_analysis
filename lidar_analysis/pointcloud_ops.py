@@ -167,12 +167,19 @@ def _topology_trait(df: pd.DataFrame, op_cfg: dict[str, Any], target_obj) -> dic
 
     topo_res_whole = topology_stand_count(topo_df, min_persistence=min_persistence)
     topo_count_whole, pers_whole = _extract_count_and_points(topo_res_whole)
+    topo_raw_whole = float(topo_res_whole.get("count_raw", float("nan"))) if isinstance(topo_res_whole, dict) else float("nan")
     traits = {
         "topo_count": float("nan"),
         "topo_count_whole": topo_count_whole,
         "topo_count_left": float("nan"),
         "topo_count_right": float("nan"),
+        "topo_left_count": float("nan"),
+        "topo_right_count": float("nan"),
+        "topo_left_per_m": float("nan"),
+        "topo_right_per_m": float("nan"),
+        "topo_avg_per_m": float("nan"),
     }
+    object_points_xyz: list[tuple[float, float, float]] = []
 
     side_split_applied = False
     ignore_left = False
@@ -194,19 +201,29 @@ def _topology_trait(df: pd.DataFrame, op_cfg: dict[str, Any], target_obj) -> dic
             neg_label: neg_df,
         }
         if not ignore_left and "left" in side_map:
-            traits["topo_count_left"] = _extract_count_and_points(
-                topology_stand_count(side_map["left"], min_persistence=min_persistence)
-            )[0]
+            left_res = topology_stand_count(side_map["left"], min_persistence=min_persistence)
+            left_per_m, left_pts = _extract_count_and_points(left_res)
+            left_raw = float(left_res.get("count_raw", float("nan"))) if isinstance(left_res, dict) else float("nan")
+            traits["topo_count_left"] = left_per_m
+            traits["topo_left_per_m"] = left_per_m
+            traits["topo_left_count"] = left_raw
+            object_points_xyz.extend([(float(x), 0.0, float(z)) for (x, z) in left_pts])
         if not ignore_right and "right" in side_map:
-            traits["topo_count_right"] = _extract_count_and_points(
-                topology_stand_count(side_map["right"], min_persistence=min_persistence)
-            )[0]
+            right_res = topology_stand_count(side_map["right"], min_persistence=min_persistence)
+            right_per_m, right_pts = _extract_count_and_points(right_res)
+            right_raw = float(right_res.get("count_raw", float("nan"))) if isinstance(right_res, dict) else float("nan")
+            traits["topo_count_right"] = right_per_m
+            traits["topo_right_per_m"] = right_per_m
+            traits["topo_right_count"] = right_raw
+            object_points_xyz.extend([(float(x), 0.0, float(z)) for (x, z) in right_pts])
 
     side_vals = np.array([traits["topo_count_left"], traits["topo_count_right"]], dtype=float)
     if np.isfinite(side_vals).any():
         traits["topo_count"] = float(np.nanmean(side_vals))
+        traits["topo_avg_per_m"] = traits["topo_count"]
     else:
         traits["topo_count"] = float("nan")
+        traits["topo_avg_per_m"] = float("nan")
 
     return {
         "traits": traits,
@@ -219,6 +236,10 @@ def _topology_trait(df: pd.DataFrame, op_cfg: dict[str, Any], target_obj) -> dic
             "topology_negative_side_label": neg_label,
             "topology_left_count_per_m": traits["topo_count_left"],
             "topology_right_count_per_m": traits["topo_count_right"],
+            "topology_left_count": traits["topo_left_count"],
+            "topology_right_count": traits["topo_right_count"],
+            "topology_left_per_m": traits["topo_left_per_m"],
+            "topology_right_per_m": traits["topo_right_per_m"],
             "topology_count_mean_per_m": traits["topo_count"],
             "z_bin_m": z_bin_m,
             "unique_z_before": unique_z_before,
@@ -227,6 +248,9 @@ def _topology_trait(df: pd.DataFrame, op_cfg: dict[str, Any], target_obj) -> dic
             "result": traits,
             "warning": warning,
             "persistence_points_whole": pers_whole,
+            "topology_raw_count_whole": topo_raw_whole,
+            "topology_object_points_xyz": object_points_xyz,
+            "write_topology_objects": bool(op_cfg.get("write_topology_objects", False)),
         },
     }
 

@@ -194,3 +194,22 @@ def test_topology_trait_side_mean_and_ignore_from_scan_id():
     assert np.isfinite(float(out_ignore_right.traits["topo_count_left"]))
     assert np.isnan(float(out_ignore_right.traits["topo_count_right"]))
     assert out_ignore_right.traits["topo_count"] == pytest.approx(float(out_ignore_right.traits["topo_count_left"]))
+    assert np.isfinite(float(out_ignore_right.traits["topo_left_count"]))
+    assert np.isfinite(float(out_ignore_right.traits["topo_left_per_m"]))
+
+
+def test_topology_trait_write_objects_diag_shape():
+    df = pd.DataFrame({"X":[-20.0,-10.0,10.0,20.0],"Y":[100.0]*4,"Z":[0.0,100.0,0.0,100.0],"RSSI":[1.0,2.0,3.0,4.0]})
+    t = AnalysisTarget.from_points(target_id='to', target_type='plot', scan_id='2&1_1_20', points_df=df, source_indices=np.array([0,1,2,3]), row=None)
+    out = apply_pointcloud_ops(
+        t,
+        [{"op":"topology_trait","split_sides_for_single_plot":True, "write_topology_objects":True}],
+        context={"additional_scan_positive_side_label":"right", "additional_scan_negative_side_label":"left"},
+    )
+    d = out.diagnostics["pointcloud_ops"]["topology_trait"][0]
+    assert d["write_topology_objects"] is True
+    pts = d["topology_object_points_xyz"]
+    assert isinstance(pts, list)
+    if pts:
+        assert len(pts[0]) == 3
+        assert pts[0][1] == 0.0
