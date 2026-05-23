@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
+from .topology.stand_count import topology_stand_count
 
 
 @dataclass
@@ -30,6 +31,7 @@ _SUPPORTED_OPS = {
     "voxel_count",
     "bilateral_scalar_filter",
     "height_range_filter",
+    "topology_trait",
 }
 
 
@@ -109,6 +111,58 @@ def _height_range_filter(df: pd.DataFrame, op_cfg: dict[str, Any]) -> tuple[pd.D
         "points_after": int(len(out)),
     }
     return out, diag
+
+
+def _topology_trait(df: pd.DataFrame, op_cfg: dict[str, Any], target_obj) -> dict[str, Any]:
+    min_persistence = float(op_cfg.get("min_persistence", 0.35))
+    split_sides = bool(op_cfg.get("split_sides_for_single_plot", False))
+
+    z_source = None
+    warning = None
+    for col in ("travel_z_m", "scan_position_m", "encoder_z_m"):
+        if col in df.columns:
+            z_source = col
+            z_vals_m = df[col].to_numpy(dtype=float, copy=False)
+            break
+    if z_source is None:
+        z_source = "Z_mm_fallback"
+        z_vals_m = df["Z"].to_numpy(dtype=float, copy=False) / 1000.0
+        warning = "topology_trait used reconstructed Z fallback (Z/1000.0) because no travel/scan-position column was present"
+
+    topo_df = pd.DataFrame({
+        "x": df["X"].to_numpy(dtype=float, copy=False) / 1000.0,
+        "y": df["Y"].to_numpy(dtype=float, copy=False) / 1000.0,
+        "z": z_vals_m,
+    })
+
+    topo_count_whole, pers_whole = topology_stand_count(topo_df, min_persistence=min_persistence)
+    traits = {
+        "topo_count": topo_count_whole,
+        "topo_count_whole": topo_count_whole,
+        "topo_count_left": float("nan"),
+        "topo_count_right": float("nan"),
+    }
+
+    side_split_applied = False
+    if split_sides and getattr(target_obj, "row", None) is None:
+        side_split_applied = True
+        left_df = topo_df.loc[topo_df["x"] >= 0.0]
+        right_df = topo_df.loc[topo_df["x"] < 0.0]
+        traits["topo_count_left"] = topology_stand_count(left_df, min_persistence=min_persistence)[0]
+        traits["topo_count_right"] = topology_stand_count(right_df, min_persistence=min_persistence)[0]
+
+    return {
+        "traits": traits,
+        "diagnostic": {
+            "input_points": int(len(df)),
+            "z_source": z_source,
+            "side_split_applied": side_split_applied,
+            "min_persistence": min_persistence,
+            "result": traits,
+            "warning": warning,
+            "persistence_points_whole": pers_whole,
+        },
+    }
 
 
 def _voxel_count(df: pd.DataFrame, op_cfg: dict[str, Any]) -> int:
@@ -270,6 +324,12 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
         elif op == "height_range_filter":
             df, hr_diag = _height_range_filter(df, op_cfg)
             diagnostics.setdefault("height_range_filters", []).append(hr_diag)
+        elif op == "topology_trait":
+            if target_obj is None:
+                raise ValueError("topology_trait requires an AnalysisTarget")
+            topo_out = _topology_trait(df, op_cfg, target_obj)
+            traits.update(topo_out["traits"])
+            diagnostics.setdefault("topology_trait", []).append(topo_out["diagnostic"])
 
         diagnostics["points_after_each_op"].append({"op": op, "points": int(len(df))})
 
