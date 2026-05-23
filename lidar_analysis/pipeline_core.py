@@ -1029,6 +1029,21 @@ def analyze_plot(
     stand_topo_per_m = float("nan")
     stand_topo_left_count = float("nan")
     stand_topo_right_count = float("nan")
+
+    if isinstance(op_traits, dict):
+        topo_whole = op_traits.get("topo_count_whole", float("nan"))
+        topo_main = op_traits.get("topo_count", float("nan"))
+        if np.isfinite(topo_whole):
+            stand_topo_per_m = topo_whole
+        elif np.isfinite(topo_main):
+            stand_topo_per_m = topo_main
+
+        topo_left = op_traits.get("topo_count_left", float("nan"))
+        topo_right = op_traits.get("topo_count_right", float("nan"))
+        if np.isfinite(topo_left):
+            stand_topo_left_count = topo_left
+        if np.isfinite(topo_right):
+            stand_topo_right_count = topo_right
     n_points_o3d = 0
     voxel_count_o3d = float("nan")
     plot_idx = np.empty((0,), dtype=np.int32)
