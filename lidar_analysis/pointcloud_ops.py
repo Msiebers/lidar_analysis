@@ -7,6 +7,8 @@ import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
 
+from .topology import topology_stand_count
+
 
 @dataclass
 class _BackendResolver:
@@ -160,34 +162,48 @@ def _height_range_filter(df: pd.DataFrame, op_cfg: dict[str, Any], context: dict
     diag = {"axis": axis, "min_m": min_m, "max_m": max_m, "points_before": int(len(df)), "points_after": int(len(out))}
     return out, diag
 
-def _topology_count_from_df(df: pd.DataFrame, x_bin_mm: float, z_bin_mm: float) -> float:
-    if len(df) == 0:
-        return float("nan")
-    x = np.floor(df["X"].to_numpy(dtype=float) / x_bin_mm).astype(np.int64)
-    z = np.floor(df["Z"].to_numpy(dtype=float) / z_bin_mm).astype(np.int64)
-    cells = set(zip(x.tolist(), z.tolist()))
-    return float(len(cells))
+def _topology_input_xyz_m(df: pd.DataFrame) -> tuple[np.ndarray, str, str | None]:
+    x_m = df["X"].to_numpy(dtype=float, copy=False) / 1000.0
+    y_m = df["Y"].to_numpy(dtype=float, copy=False) / 1000.0
+    for zcol in ("travel_z_m", "scan_position_m", "encoder_z_m"):
+        if zcol in df.columns:
+            z_m = df[zcol].to_numpy(dtype=float, copy=False)
+            return np.column_stack([x_m, y_m, z_m]), zcol, None
+    z_m = df["Z"].to_numpy(dtype=float, copy=False) / 1000.0
+    return np.column_stack([x_m, y_m, z_m]), "reconstructed_Z", "topology_trait used reconstructed Z fallback (no travel_z_m/scan_position_m/encoder_z_m column found)"
 
-def _topology_trait(df: pd.DataFrame, op_cfg: dict[str, Any], target_obj) -> dict[str, Any]:
-    x_bin_mm = float(op_cfg.get("x_bin_m", 0.01)) * 1000.0
-    z_bin_mm = float(op_cfg.get("z_bin_m", 0.01)) * 1000.0
+
+def _topology_trait(df: pd.DataFrame, op_cfg: dict[str, Any], target_obj) -> tuple[dict[str, Any], dict[str, Any]]:
     split = bool(op_cfg.get("split_sides_for_single_plot", False))
-    two_row_mode = str(op_cfg.get("two_row_mode", "target_only")).lower()
-    topo_whole = _topology_count_from_df(df, x_bin_mm, z_bin_mm)
-    out = {"topo_count": topo_whole, "topo_count_whole": topo_whole, "topo_count_left": float("nan"), "topo_count_right": float("nan")}
+    min_persistence = float(op_cfg.get("min_persistence", 0.35))
+    xyz_m, z_source, warn = _topology_input_xyz_m(df)
+
+    topo_whole = topology_stand_count(xyz_m, min_persistence=min_persistence)["count"] if len(df) else 0.0
+    out = {"topo_count": float(topo_whole), "topo_count_whole": float(topo_whole), "topo_count_left": float("nan"), "topo_count_right": float("nan")}
 
     is_whole_plot = str(getattr(target_obj, "target_type", "")).lower() == "plot" and getattr(target_obj, "row", None) is None
-    if split and is_whole_plot and two_row_mode != "target_only":
+    side_split_applied = bool(split and is_whole_plot)
+    if side_split_applied:
         left = df[df["X"] >= 0]
         right = df[df["X"] < 0]
-        out["topo_count_left"] = _topology_count_from_df(left, x_bin_mm, z_bin_mm)
-        out["topo_count_right"] = _topology_count_from_df(right, x_bin_mm, z_bin_mm)
-    elif split and is_whole_plot:
-        left = df[df["X"] >= 0]
-        right = df[df["X"] < 0]
-        out["topo_count_left"] = _topology_count_from_df(left, x_bin_mm, z_bin_mm)
-        out["topo_count_right"] = _topology_count_from_df(right, x_bin_mm, z_bin_mm)
-    return out
+        if len(left):
+            out["topo_count_left"] = float(topology_stand_count(_topology_input_xyz_m(left)[0], min_persistence=min_persistence)["count"])
+        else:
+            out["topo_count_left"] = 0.0
+        if len(right):
+            out["topo_count_right"] = float(topology_stand_count(_topology_input_xyz_m(right)[0], min_persistence=min_persistence)["count"])
+        else:
+            out["topo_count_right"] = 0.0
+
+    diag = {
+        "topology_input_points": int(len(df)),
+        "topology_z_source": z_source,
+        "topology_side_split_applied": side_split_applied,
+        "topology_results": dict(out),
+    }
+    if warn:
+        diag["warning"] = warn
+    return out, diag
 def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=None):
     from .analysis_target import AnalysisTarget
 
@@ -238,9 +254,9 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
         elif op == "topology_trait":
             if target_obj is None:
                 raise ValueError("topology_trait requires AnalysisTarget input")
-            topo = _topology_trait(df, op_cfg, target_obj)
+            topo, tdiag = _topology_trait(df, op_cfg, target_obj)
             traits.update(topo)
-            diagnostics.setdefault("op_diagnostics", []).append({"op": op, "topology": topo, "points_read": int(len(df))})
+            diagnostics.setdefault("op_diagnostics", []).append({"op": op, **tdiag})
         elif op in {"voxel_volume", "voxel_grid", "voxel_count"}:
             voxel_count = _voxel_count(df, op_cfg)
             traits["voxel_count"] = voxel_count
