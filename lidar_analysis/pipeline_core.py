@@ -1059,7 +1059,11 @@ def analyze_plot(
                 target,
                 ops_cfg,
                 default_backend="scipy",
-                context={"pcl_backend_name": ((getattr(cfg, "pcl_backend", {}) or {}).get("name"))},
+                context={
+                    "pcl_backend_name": ((getattr(cfg, "pcl_backend", {}) or {}).get("name")),
+                    "additional_scan_positive_side_label": str(getattr(cfg, "additional_scan_positive_side_label", "right")),
+                    "additional_scan_negative_side_label": str(getattr(cfg, "additional_scan_negative_side_label", "left")),
+                },
             )
             op_traits = dict(target.traits)
             p.analysis_target = target
@@ -1123,15 +1127,9 @@ def analyze_plot(
     stand_topo_left_count = float("nan")
     stand_topo_right_count = float("nan")
     if op_traits:
-        target_type = str(getattr(p, "target_type", "plot"))
-        if target_type == "row":
-            stand_topo_per_m = float(op_traits.get("topo_count", float("nan")))
-        else:
-            stand_topo_per_m = float(
-                op_traits.get("topo_count_whole", op_traits.get("topo_count", float("nan")))
-            )
-            stand_topo_left_count = float(op_traits.get("topo_count_left", float("nan")))
-            stand_topo_right_count = float(op_traits.get("topo_count_right", float("nan")))
+        stand_topo_per_m = float(op_traits.get("topo_count", float("nan")))
+        stand_topo_left_count = float(op_traits.get("topo_count_left", float("nan")))
+        stand_topo_right_count = float(op_traits.get("topo_count_right", float("nan")))
 
     result = {
         "scan": scan_base if not getattr(p, "side_label", None) else f"{scan_base}_{p.side_label}",
