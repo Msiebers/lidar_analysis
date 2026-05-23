@@ -1,59 +1,66 @@
-import numpy as np
+#!/usr/bin/python3
+
+"""A simple implementation of persistent homology on 2D images."""
 
 from .union_find import UnionFind
 
 
-_NEIGHBORS_8 = [(-1, -1), (-1, 0), (-1, 1), (0, -1)]
+def get(im, p):
+    return im[p[0]][p[1]]
 
 
-def persistence(im: np.ndarray):
-    im = np.asarray(im, dtype=float)
-    if im.ndim != 2:
-        raise ValueError("persistence expects a 2D image")
+def iter_neighbors(p, w, h):
+    y, x = p
+
+    # 8-neighborhood
+    neigh = [(y + j, x + i) for i in [-1, 0, 1] for j in [-1, 0, 1]]
+
+    for j, i in neigh:
+        if j < 0 or j >= h:
+            continue
+        if i < 0 or i >= w:
+            continue
+        if j == y and i == x:
+            continue
+        yield j, i
+
+
+def persistence(im):
     h, w = im.shape
-    if h == 0 or w == 0:
-        return []
 
-    coords = [(r, c) for r in range(h) for c in range(w)]
-    coords.sort(key=lambda rc: im[rc[0], rc[1]], reverse=True)
+    # Get indices ordered by value from high to low
+    indices = [(i, j) for i in range(h) for j in range(w)]
+    indices.sort(key=lambda p: get(im, p), reverse=True)
 
     uf = UnionFind()
-    active = np.zeros((h, w), dtype=bool)
-    birth = {}
-    pers = []
+    groups0 = {}
 
-    for r, c in coords:
-        v = float(im[r, c])
-        idx = (r, c)
-        uf.make_set(idx)
-        active[r, c] = True
-        root = idx
-        birth[root] = v
+    def get_comp_birth(p):
+        return get(im, uf[p])
 
-        neighbor_roots = set()
-        for dr, dc in _NEIGHBORS_8:
-            rr, cc = r + dr, c + dc
-            if 0 <= rr < h and 0 <= cc < w and active[rr, cc]:
-                neighbor_roots.add(uf.find((rr, cc)))
-        if not neighbor_roots:
-            continue
+    # Process pixels from high to low
+    for i, p in enumerate(indices):
+        v = get(im, p)
 
-        roots = list(neighbor_roots)
-        keep = max(roots, key=lambda rt: birth[rt])
-        for rt in roots:
-            if rt == keep:
-                continue
-            b = birth[rt]
-            pers.append((b, v, b - v))
-            keep = uf.union(keep, rt)
-            birth[keep] = max(birth.get(keep, v), birth[rt])
+        ni = [uf[q] for q in iter_neighbors(p, w, h) if q in uf]
+        nc = sorted([(get_comp_birth(q), q) for q in set(ni)], reverse=True)
 
-        keep = uf.union(keep, idx)
-        birth[keep] = max(birth.get(keep, v), v)
+        if i == 0:
+            groups0[p] = (v, v, None)
 
-    for rt in list({uf.find(k) for k in uf.parent.keys()}):
-        b = birth.get(rt, 0.0)
-        pers.append((b, 0.0, b))
+        uf.add(p, -i)
 
-    pers.sort(key=lambda t: t[2], reverse=True)
-    return pers
+        if len(nc) > 0:
+            oldp = nc[0][1]
+            uf.union(oldp, p)
+
+            # Merge all others with oldp
+            for bl, q in nc[1:]:
+                if uf[q] not in groups0:
+                    groups0[uf[q]] = (bl, bl - v, p)
+                uf.union(oldp, q)
+
+    groups0 = [(k, groups0[k][0], groups0[k][1], groups0[k][2]) for k in groups0]
+    groups0.sort(key=lambda g: g[2], reverse=True)
+
+    return groups0

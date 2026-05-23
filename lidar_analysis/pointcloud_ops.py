@@ -138,7 +138,23 @@ def _topology_trait(df: pd.DataFrame, op_cfg: dict[str, Any], target_obj) -> dic
         "z": z_vals_m,
     })
 
-    topo_count_whole, pers_whole = topology_stand_count(topo_df, min_persistence=min_persistence)
+    z_bin_m = float(op_cfg.get("z_bin_m", 0.05))
+
+    if z_bin_m > 0 and "z" in topo_df.columns:
+        unique_z_before = int(topo_df["z"].nunique())
+        topo_df = topo_df.copy()
+        topo_df["z"] = np.floor(topo_df["z"] / z_bin_m) * z_bin_m
+        unique_z_after = int(topo_df["z"].nunique())
+
+        print(
+            f"[TOPO_DEBUG] target={getattr(target_obj, 'target_id', '<unknown>')} "
+            f"z_bin_m={z_bin_m} unique_z_before={unique_z_before} "
+            f"unique_z_after={unique_z_after}"
+        )
+
+    topo_res_whole = topology_stand_count(topo_df, min_persistence=min_persistence)
+    topo_count_whole = float(topo_res_whole.get("count", float("nan")))
+    pers_whole = topo_res_whole.get("points", [])
     traits = {
         "topo_count": topo_count_whole,
         "topo_count_whole": topo_count_whole,
