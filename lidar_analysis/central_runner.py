@@ -10,11 +10,11 @@ from typing import Iterable
 import yaml
 
 try:
-    from .config import AnalysisConfig
+    from .config import AnalysisConfig, normalize_rssi_mode, map_deprecated_analysis_keys
     from .pipeline_stages import DEFAULT_STAGES, StageContext
     from . import pipeline_core
 except Exception:
-    from config import AnalysisConfig
+    from config import AnalysisConfig, normalize_rssi_mode, map_deprecated_analysis_keys
     from pipeline_stages import DEFAULT_STAGES, StageContext
     import pipeline_core
 
@@ -320,6 +320,8 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         value = experiment_config.get(yaml_key, _DEFAULTS[field])
         return cast(value) if cast is not None else value
 
+    experiment_config = map_deprecated_analysis_keys(experiment_config)
+
     return AnalysisConfig(
         data_dirs=[data_dir],
         calibration_dir=data_dir,
@@ -346,12 +348,11 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         heading_sign=pick("heading_sign", "heading_sign", float),
 
         normalize_rssi=pick("normalize_rssi", "normalize_rssi", bool),
-        rssi_norm_mode=pick("rssi_norm_mode", "rssi_norm_mode", str),
+        rssi_norm_mode=normalize_rssi_mode(pick("rssi_norm_mode", "rssi_norm_mode", str)),
         use_rssi_filter=pick("use_rssi_filter", "use_rssi_filter", bool),
         rssi_min=pick("rssi_min", "rssi_min"),
         rssi_max=pick("rssi_max", "rssi_max"),
 
-        write_o3d_ply=pick("write_o3d_ply", "write_o3d_ply", bool),
         fusion_method=pick("fusion_method", "fusion_method", str),
         dim_units=pick("dim_units", "dim_units", str),
         row_width_u=pick("row_width_u", "row_width_u", float),
@@ -361,22 +362,13 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         max_y_u=pick("max_y_u", "max_y_u"),
         x_min_u=pick("x_min_u", "x_min_u"),
         min_radius_u=pick("min_radius_u", "min_radius_u"),
-        use_o3d_sor=pick("use_o3d_sor", "use_o3d_sor", bool),
-        o3d_sor_nb_neighbors=pick("o3d_sor_nb_neighbors", "o3d_sor_nb_neighbors", int),
-        o3d_sor_std_ratio=pick("o3d_sor_std_ratio", "o3d_sor_std_ratio", float),
-        use_o3d_voxel=pick("use_o3d_voxel", "use_o3d_voxel", bool),
-        o3d_voxel_size_mm=pick("o3d_voxel_size_mm", "o3d_voxel_size_mm", float),
-        topo_min_persistence=pick("topo_min_persistence", "topo_min_persistence", float),
-        topo_background_cut=pick("topo_background_cut", "topo_background_cut", float),
-        topo_x_bin_m=pick("topo_x_bin_m", "topo_x_bin_m", float),
-        topo_z_bin_m=pick("topo_z_bin_m", "topo_z_bin_m", float),
         roll_sign=pick("roll_sign", "roll_sign", float),
         pitch_sign=pick("pitch_sign", "pitch_sign", float),
         run_lai=pick("run_lai", "run_lai", bool),
         run_height=pick("run_height", "run_height", bool),
-        run_topology=pick("run_topology", "run_topology", bool),
-        run_o3d_metrics=pick("run_o3d_metrics", "run_o3d_metrics", bool),
         write_lidar_per_plot=pick("write_lidar_per_plot", "write_lidar_per_plot", bool),
+        pointcloud_ops=experiment_config.get("pointcloud_ops", []),
+        pcl_backend=experiment_config.get("pcl_backend"),
         additional_scan_side_split=pick("additional_scan_side_split", "additional_scan_side_split", bool),
         additional_scan_side_axis=pick("additional_scan_side_axis", "additional_scan_side_axis", str),
         additional_scan_positive_side_label=pick("additional_scan_positive_side_label", "additional_scan_positive_side_label", str),
@@ -402,6 +394,7 @@ def phenotype_columns() -> list[str]:
         "stand_topo_right_count",
         "o3d_points",
         "o3d_voxels",
+        "voxel_count",
         "points",
         "lidar_scans",
         "lidar_angles",
@@ -439,6 +432,7 @@ def append_trait_rows(results_csv: Path, experiment: str, date_str: str, scan_id
                 "stand_topo_right_count": rec.get("stand_topo_right_count"),
                 "o3d_points": rec.get("o3d_points"),
                 "o3d_voxels": rec.get("o3d_voxels"),
+                "voxel_count": rec.get("voxel_count"),
                 "points": rec.get("points"),
                 "lidar_scans": rec.get("lidar_scans"),
                 "lidar_angles": rec.get("lidar_angles"),

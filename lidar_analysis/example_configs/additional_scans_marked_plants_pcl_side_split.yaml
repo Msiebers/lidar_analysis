@@ -26,26 +26,30 @@ analysis:
   additional_scan_negative_side_label: left
 
   pointcloud_ops:
-    - op: bilateral_scalar_filter
-      field: z
-      sigma_s: 2.0
-      sigma_r: 0.05
-      radius: 0.10
-    - op: scalar_range_filter
-      field: y
-      min: -5.0
-      max: 5.0
-    - op: sor_filter
-      mean_k: 12
-      stddev_mul: 1.0
-    - op: voxel_grid
-      leaf_x: 0.005
-      leaf_y: 0.005
-      leaf_z: 0.005
+    - name: bilateral_scalar_filter
+      scalar: rssi_norm
+      output_scalar: rssi_norm_bilateral
+      replace_scalar: false
+      spatial_sigma_m: 0.02
+      scalar_sigma: 4.0
+
+    - name: scalar_range_filter
+      scalar: rssi_norm_bilateral
+      min: 1.0
+      max: null
+
+    - name: topology_trait
+      enabled: true
+      split_sides_for_single_plot: true
+      two_row_mode: target_only
+
+    - name: height_range_filter
+      axis: Y
+      min_m: 0.03
+      max_m: null
+
+    - name: voxel_count
+      voxel_size_m: 0.05
 
   pcl_backend:
-    enabled: true
-    executable: /home/central/Documents/lidar_analysis/cpp_ops/build/pcl_pointcloud_ops_batch
-    work_dir: null
-    keep_intermediate: true
-    fail_if_missing: false
+    enabled: false
