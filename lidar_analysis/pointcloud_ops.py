@@ -6,7 +6,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
-from .topology.stand_count import topology_stand_count
+try:
+    from .topology.stand_count import topology_stand_count
+except ImportError:
+    from topology.stand_count import topology_stand_count
 
 
 @dataclass
