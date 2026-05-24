@@ -1044,16 +1044,29 @@ def analyze_plot(
         goto_open3d = True
         p.cloud = data[mask]
 
+        plot_idx = keep_idx[mask]
+        fused_plot = fused_np[plot_idx]
+        points_df = pd.DataFrame(p.cloud[:, :4], columns=["X", "Y", "Z", "RSSI"])
+        if p.cloud.shape[1] > 4:
+            points_df["rssi_norm"] = p.cloud[:, 4]
+        points_df["source_index"] = plot_idx
+        points_df["time_s"] = fused_plot[:, 0]
+        points_df["phi"] = fused_plot[:, 1]
+        points_df["theta"] = fused_plot[:, 2]
+        points_df["dist_mm"] = fused_plot[:, 3]
+        points_df["range_m"] = fused_plot[:, 3] / 1000.0
+        points_df["encoder"] = fused_plot[:, 5]
+        points_df["roll_deg"] = fused_plot[:, 6]
+        points_df["pitch_deg"] = fused_plot[:, 7]
+        points_df["yaw_deg"] = fused_plot[:, 8]
+
         ops_cfg = getattr(cfg, "pointcloud_ops", None) or []
         if ops_cfg:
-            cloud_df = pd.DataFrame(p.cloud[:, :4], columns=["X", "Y", "Z", "RSSI"])
-            if p.cloud.shape[1] > 4:
-                cloud_df["rssi_norm"] = p.cloud[:, 4]
             target = AnalysisTarget.from_points(
                 target_id=p.name,
                 target_type=str(getattr(p, "target_type", "plot")),
                 scan_id=scan_base,
-                points_df=cloud_df,
+                points_df=points_df,
                 source_indices=keep_idx[mask],
                 row=p.row,
                 plot=p.letter,
@@ -1105,7 +1118,7 @@ def analyze_plot(
                 target_id=p.name,
                 target_type=str(getattr(p, "target_type", "plot")),
                 scan_id=scan_base,
-                points_df=pd.DataFrame(p.cloud[:, :4], columns=["X", "Y", "Z", "RSSI"]),
+                points_df=points_df,
                 source_indices=keep_idx[mask],
                 row=p.row,
                 plot=p.letter,
@@ -1116,7 +1129,6 @@ def analyze_plot(
         if cfg.run_height:
             h_arr = p.analysis_target.current_points[["X", "Y", "Z", "RSSI"]].to_numpy(dtype=np.float32, copy=False)
             height_m = height_from_world_y(h_arr, alpha=0.01)
-        plot_idx = keep_idx[mask]
         lidar_dict = _lidar_dict_from_plot_indices(fused_np, plot_idx, lidar_height_mm)
         if cfg.run_lai and lidar_dict is not None:
             distances = lidar_dict["distances"]
