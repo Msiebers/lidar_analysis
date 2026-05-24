@@ -117,8 +117,19 @@ def _height_range_filter(df: pd.DataFrame, op_cfg: dict[str, Any]) -> tuple[pd.D
 
 
 def _topology_trait(df: pd.DataFrame, op_cfg: dict[str, Any], target_obj) -> dict[str, Any]:
+    def _extract_count_and_points(res: Any) -> tuple[float, list[Any]]:
+        if isinstance(res, dict):
+            return float(res.get("count", float("nan"))), list(res.get("points", []) or [])
+        if isinstance(res, tuple):
+            count = float(res[0]) if len(res) > 0 else float("nan")
+            pts = list(res[1]) if len(res) > 1 and res[1] is not None else []
+            return count, pts
+        return float("nan"), []
+
     min_persistence = float(op_cfg.get("min_persistence", 0.35))
     split_sides = bool(op_cfg.get("split_sides_for_single_plot", False))
+    pos_label = str(op_cfg.get("additional_scan_positive_side_label", "right")).strip().lower() or "right"
+    neg_label = str(op_cfg.get("additional_scan_negative_side_label", "left")).strip().lower() or "left"
 
     z_source = None
     warning = None
@@ -140,6 +151,8 @@ def _topology_trait(df: pd.DataFrame, op_cfg: dict[str, Any], target_obj) -> dic
 
     z_bin_m = float(op_cfg.get("z_bin_m", 0.05))
 
+    unique_z_before = int(topo_df["z"].nunique()) if "z" in topo_df.columns else int(0)
+    unique_z_after = unique_z_before
     if z_bin_m > 0 and "z" in topo_df.columns:
         unique_z_before = int(topo_df["z"].nunique())
         topo_df = topo_df.copy()
@@ -153,22 +166,64 @@ def _topology_trait(df: pd.DataFrame, op_cfg: dict[str, Any], target_obj) -> dic
         )
 
     topo_res_whole = topology_stand_count(topo_df, min_persistence=min_persistence)
-    topo_count_whole = float(topo_res_whole.get("count", float("nan")))
-    pers_whole = topo_res_whole.get("points", [])
+    topo_count_whole, pers_whole = _extract_count_and_points(topo_res_whole)
+    topo_raw_whole = float(topo_res_whole.get("count_raw", float("nan"))) if isinstance(topo_res_whole, dict) else float("nan")
     traits = {
-        "topo_count": topo_count_whole,
+        "topo_count": float("nan"),
         "topo_count_whole": topo_count_whole,
         "topo_count_left": float("nan"),
         "topo_count_right": float("nan"),
+        "topo_left_count": float("nan"),
+        "topo_right_count": float("nan"),
+        "topo_left_per_m": float("nan"),
+        "topo_right_per_m": float("nan"),
+        "topo_avg_per_m": float("nan"),
     }
+    object_points_xyz: list[tuple[float, float, float]] = []
 
     side_split_applied = False
-    if split_sides and getattr(target_obj, "row", None) is None:
+    ignore_left = False
+    ignore_right = False
+    scan_id = str(getattr(target_obj, "scan_id", "") or "")
+    row_spec = scan_id.split("_", 1)[0]
+    if "&" in row_spec:
+        left_row, right_row = [s.strip() for s in row_spec.split("&", 1)]
+        ignore_left = left_row == "0"
+        ignore_right = right_row == "0"
+
+    if split_sides:
         side_split_applied = True
-        left_df = topo_df.loc[topo_df["x"] >= 0.0]
-        right_df = topo_df.loc[topo_df["x"] < 0.0]
-        traits["topo_count_left"] = topology_stand_count(left_df, min_persistence=min_persistence)[0]
-        traits["topo_count_right"] = topology_stand_count(right_df, min_persistence=min_persistence)[0]
+        pos_df = topo_df.loc[topo_df["x"] >= 0.0]
+        neg_df = topo_df.loc[topo_df["x"] < 0.0]
+
+        side_map = {
+            pos_label: pos_df,
+            neg_label: neg_df,
+        }
+        if not ignore_left and "left" in side_map:
+            left_res = topology_stand_count(side_map["left"], min_persistence=min_persistence)
+            left_per_m, left_pts = _extract_count_and_points(left_res)
+            left_raw = float(left_res.get("count_raw", float("nan"))) if isinstance(left_res, dict) else float("nan")
+            traits["topo_count_left"] = left_per_m
+            traits["topo_left_per_m"] = left_per_m
+            traits["topo_left_count"] = left_raw
+            object_points_xyz.extend([(float(x), 0.0, float(z)) for (x, z) in left_pts])
+        if not ignore_right and "right" in side_map:
+            right_res = topology_stand_count(side_map["right"], min_persistence=min_persistence)
+            right_per_m, right_pts = _extract_count_and_points(right_res)
+            right_raw = float(right_res.get("count_raw", float("nan"))) if isinstance(right_res, dict) else float("nan")
+            traits["topo_count_right"] = right_per_m
+            traits["topo_right_per_m"] = right_per_m
+            traits["topo_right_count"] = right_raw
+            object_points_xyz.extend([(float(x), 0.0, float(z)) for (x, z) in right_pts])
+
+    side_vals = np.array([traits["topo_count_left"], traits["topo_count_right"]], dtype=float)
+    if np.isfinite(side_vals).any():
+        traits["topo_count"] = float(np.nanmean(side_vals))
+        traits["topo_avg_per_m"] = traits["topo_count"]
+    else:
+        traits["topo_count"] = float("nan")
+        traits["topo_avg_per_m"] = float("nan")
 
     return {
         "traits": traits,
@@ -176,10 +231,26 @@ def _topology_trait(df: pd.DataFrame, op_cfg: dict[str, Any], target_obj) -> dic
             "input_points": int(len(df)),
             "z_source": z_source,
             "side_split_applied": side_split_applied,
+            "topology_side_split_applied": side_split_applied,
+            "topology_positive_side_label": pos_label,
+            "topology_negative_side_label": neg_label,
+            "topology_left_count_per_m": traits["topo_count_left"],
+            "topology_right_count_per_m": traits["topo_count_right"],
+            "topology_left_count": traits["topo_left_count"],
+            "topology_right_count": traits["topo_right_count"],
+            "topology_left_per_m": traits["topo_left_per_m"],
+            "topology_right_per_m": traits["topo_right_per_m"],
+            "topology_count_mean_per_m": traits["topo_count"],
+            "z_bin_m": z_bin_m,
+            "unique_z_before": unique_z_before,
+            "unique_z_after": unique_z_after,
             "min_persistence": min_persistence,
             "result": traits,
             "warning": warning,
             "persistence_points_whole": pers_whole,
+            "topology_raw_count_whole": topo_raw_whole,
+            "topology_object_points_xyz": object_points_xyz,
+            "write_topology_objects": bool(op_cfg.get("write_topology_objects", False)),
         },
     }
 
@@ -346,7 +417,13 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
         elif op == "topology_trait":
             if target_obj is None:
                 raise ValueError("topology_trait requires an AnalysisTarget")
-            topo_out = _topology_trait(df, op_cfg, target_obj)
+            topo_cfg = dict(op_cfg)
+            if isinstance(context, dict):
+                if "additional_scan_positive_side_label" in context and "additional_scan_positive_side_label" not in topo_cfg:
+                    topo_cfg["additional_scan_positive_side_label"] = context["additional_scan_positive_side_label"]
+                if "additional_scan_negative_side_label" in context and "additional_scan_negative_side_label" not in topo_cfg:
+                    topo_cfg["additional_scan_negative_side_label"] = context["additional_scan_negative_side_label"]
+            topo_out = _topology_trait(df, topo_cfg, target_obj)
             traits.update(topo_out["traits"])
             diagnostics.setdefault("topology_trait", []).append(topo_out["diagnostic"])
 

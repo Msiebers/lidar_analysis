@@ -1029,9 +1029,14 @@ def analyze_plot(
     stand_topo_per_m = float("nan")
     stand_topo_left_count = float("nan")
     stand_topo_right_count = float("nan")
+    stand_topo_left_per_m = float("nan")
+    stand_topo_right_per_m = float("nan")
     n_points_o3d = 0
     voxel_count_o3d = float("nan")
     plot_idx = np.empty((0,), dtype=np.int32)
+    op_traits = {}
+    topo_object_points = []
+    write_topology_objects = False
 
     if not np.any(mask):
         goto_open3d = False
@@ -1044,6 +1049,17 @@ def analyze_plot(
             cloud_df = pd.DataFrame(p.cloud[:, :4], columns=["X", "Y", "Z", "RSSI"])
             if p.cloud.shape[1] > 4:
                 cloud_df["rssi_norm"] = p.cloud[:, 4]
+            source_rows = fused_np[keep_idx[mask]]
+            cloud_df["source_index"] = keep_idx[mask]
+            cloud_df["time_s"] = source_rows[:, 0]
+            cloud_df["phi"] = source_rows[:, 1]
+            cloud_df["theta"] = source_rows[:, 2]
+            cloud_df["dist_mm"] = source_rows[:, 3]
+            cloud_df["range_m"] = source_rows[:, 3] / 1000.0
+            cloud_df["encoder"] = source_rows[:, 5]
+            cloud_df["roll_deg"] = source_rows[:, 6]
+            cloud_df["pitch_deg"] = source_rows[:, 7]
+            cloud_df["yaw_deg"] = source_rows[:, 8]
             target = AnalysisTarget.from_points(
                 target_id=p.name,
                 target_type=str(getattr(p, "target_type", "plot")),
@@ -1058,20 +1074,63 @@ def analyze_plot(
                 target,
                 ops_cfg,
                 default_backend="scipy",
-                context={"pcl_backend_name": ((getattr(cfg, "pcl_backend", {}) or {}).get("name"))},
+                context={
+                    "pcl_backend_name": ((getattr(cfg, "pcl_backend", {}) or {}).get("name")),
+                    "additional_scan_positive_side_label": str(getattr(cfg, "additional_scan_positive_side_label", "right")),
+                    "additional_scan_negative_side_label": str(getattr(cfg, "additional_scan_negative_side_label", "left")),
+                },
             )
             op_traits = dict(target.traits)
             p.analysis_target = target
             p.cloud = target.current_points[["X", "Y", "Z", "RSSI"]].to_numpy(dtype=np.float32, copy=False)
             op_diag = dict(target.diagnostics.get("pointcloud_ops", {}))
+            topo_diags = op_diag.get("topology_trait") or []
+            if topo_diags:
+                topo_d0 = topo_diags[0]
+                topo_object_points = list(topo_d0.get("topology_object_points_xyz", []) or [])
+                write_topology_objects = bool(topo_d0.get("write_topology_objects", False))
+                if write_topology_objects:
+                    obj_rows = []
+                    for pt in topo_object_points:
+                        if isinstance(pt, (list, tuple)) and len(pt) >= 3:
+                            obj_rows.append((float(pt[0]), float(pt[1]), float(pt[2])))
+                    obj_count = len(obj_rows)
+                    if obj_count > 0:
+                        base = str(scan_base)
+                        parts = base.split("_")
+                        if len(parts) >= 4:
+                            date_part = "_".join(parts[:3])
+                            exp_part = "_".join(parts[3:])
+                        else:
+                            date_part = base
+                            exp_part = "experiment"
+                        plot_id = str(p.name)
+                        topo_name = f"topology_count_{plot_id}_{obj_count}_{date_part}_{exp_part}.csv"
+                        topo_path = os.path.join(p.out_dir, topo_name)
+                        pd.DataFrame(obj_rows, columns=["X", "Y", "Z"]).to_csv(topo_path, index=False)
+                        print(f"[Topology] wrote counted objects: {topo_path}")
             print(f"[PC_OPS] target={target.target_id} before={op_diag.get('points_before_ops')} after={op_diag.get('points_after_ops')} order={op_diag.get('operation_order')} scalars_before={op_diag.get('available_scalar_columns_before')} scalars_after={op_diag.get('available_scalar_columns_after')}")
         else:
             op_traits = {}
+            cloud_df = pd.DataFrame(p.cloud[:, :4], columns=["X", "Y", "Z", "RSSI"])
+            if p.cloud.shape[1] > 4:
+                cloud_df["rssi_norm"] = p.cloud[:, 4]
+            source_rows = fused_np[keep_idx[mask]]
+            cloud_df["source_index"] = keep_idx[mask]
+            cloud_df["time_s"] = source_rows[:, 0]
+            cloud_df["phi"] = source_rows[:, 1]
+            cloud_df["theta"] = source_rows[:, 2]
+            cloud_df["dist_mm"] = source_rows[:, 3]
+            cloud_df["range_m"] = source_rows[:, 3] / 1000.0
+            cloud_df["encoder"] = source_rows[:, 5]
+            cloud_df["roll_deg"] = source_rows[:, 6]
+            cloud_df["pitch_deg"] = source_rows[:, 7]
+            cloud_df["yaw_deg"] = source_rows[:, 8]
             p.analysis_target = AnalysisTarget.from_points(
                 target_id=p.name,
                 target_type=str(getattr(p, "target_type", "plot")),
                 scan_id=scan_base,
-                points_df=pd.DataFrame(p.cloud[:, :4], columns=["X", "Y", "Z", "RSSI"]),
+                points_df=cloud_df,
                 source_indices=keep_idx[mask],
                 row=p.row,
                 plot=p.letter,
@@ -1121,6 +1180,12 @@ def analyze_plot(
     stand_topo_per_m = float("nan")
     stand_topo_left_count = float("nan")
     stand_topo_right_count = float("nan")
+    if op_traits:
+        stand_topo_per_m = float(op_traits.get("topo_avg_per_m", op_traits.get("topo_count", float("nan"))))
+        stand_topo_left_count = float(op_traits.get("topo_left_count", float("nan")))
+        stand_topo_right_count = float(op_traits.get("topo_right_count", float("nan")))
+        stand_topo_left_per_m = float(op_traits.get("topo_left_per_m", op_traits.get("topo_count_left", float("nan"))))
+        stand_topo_right_per_m = float(op_traits.get("topo_right_per_m", op_traits.get("topo_count_right", float("nan"))))
 
     result = {
         "scan": scan_base if not getattr(p, "side_label", None) else f"{scan_base}_{p.side_label}",
@@ -1143,6 +1208,8 @@ def analyze_plot(
         "stand_topo_per_m": stand_topo_per_m,
         "stand_topo_left_count": stand_topo_left_count,
         "stand_topo_right_count": stand_topo_right_count,
+        "stand_topo_left_per_m": stand_topo_left_per_m,
+        "stand_topo_right_per_m": stand_topo_right_per_m,
         "o3d_points": n_points_o3d,
         "o3d_voxels": voxel_count_o3d,
         "voxel_count": op_traits.get("voxel_count", float("nan")),

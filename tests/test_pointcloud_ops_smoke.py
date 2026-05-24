@@ -59,6 +59,46 @@ def test_analysis_target_raw_unchanged_current_mutated_by_ops():
     pd.testing.assert_frame_equal(out.raw_points.reset_index(drop=True), raw_before.reset_index(drop=True))
 
 
+def test_analysis_target_points_can_carry_source_ray_metadata_columns():
+    df = pd.DataFrame({
+        "X":[0.0,100.0],
+        "Y":[0.0,0.0],
+        "Z":[0.0,0.0],
+        "RSSI":[1.0,9.0],
+        "source_index":[10,11],
+        "time_s":[1.0,2.0],
+        "phi":[0.1,0.2],
+        "theta":[0.3,0.4],
+        "dist_mm":[1000.0,1200.0],
+        "range_m":[1.0,1.2],
+        "encoder":[100.0,101.0],
+        "roll_deg":[0.0,0.1],
+        "pitch_deg":[0.2,0.3],
+        "yaw_deg":[0.4,0.5],
+        "rssi_norm":[0.0,2.0],
+    })
+    t = AnalysisTarget.from_points(target_id='tm', target_type='plot', scan_id='s1', points_df=df, source_indices=np.array([10,11]))
+    required = {"source_index","time_s","phi","theta","dist_mm","range_m","encoder","roll_deg","pitch_deg","yaw_deg"}
+    assert required.issubset(set(t.raw_points.columns))
+    assert required.issubset(set(t.current_points.columns))
+    assert len(t.current_points["source_index"]) == len(t.current_points)
+
+
+def test_source_index_remains_row_aligned_after_mutating_filter():
+    df = pd.DataFrame({
+        "X":[0.0,100.0,200.0],
+        "Y":[0.0,0.0,0.0],
+        "Z":[0.0,0.0,0.0],
+        "RSSI":[1.0,9.0,3.0],
+        "source_index":[10,11,12],
+        "rssi_norm":[0.0,2.0,3.0],
+    })
+    t = AnalysisTarget.from_points(target_id='tm2', target_type='plot', scan_id='s1', points_df=df, source_indices=np.array([10,11,12]))
+    out = apply_pointcloud_ops(t, [{"op":"scalar_range_filter","input_scalar":"rssi_norm","min":1.0}])
+    assert list(out.current_points["source_index"].to_numpy()) == [11, 12]
+    assert len(out.current_points["source_index"]) == len(out.current_points)
+
+
 def test_voxel_count_uses_post_filter_current_points():
     df = pd.DataFrame({
         "X":[0.0,10.0,20.0],
@@ -170,3 +210,46 @@ def test_topology_trait_whole_plot_side_split_traits():
     assert "topo_count_left" in out.traits
     assert "topo_count_right" in out.traits
     assert out.diagnostics["pointcloud_ops"]["topology_trait"][0]["side_split_applied"] is True
+
+
+def test_topology_trait_side_mean_and_ignore_from_scan_id():
+    df = pd.DataFrame({"X":[-20.0,-10.0,10.0,20.0],"Y":[100.0]*4,"Z":[0.0,100.0,0.0,100.0],"RSSI":[1.0,2.0,3.0,4.0]})
+    t_both = AnalysisTarget.from_points(target_id='tb', target_type='plot', scan_id='2&1_1_20', points_df=df, source_indices=np.array([0,1,2,3]), row=None)
+    out_both = apply_pointcloud_ops(
+        t_both,
+        [{"op":"topology_trait","split_sides_for_single_plot":True}],
+        context={"additional_scan_positive_side_label":"right", "additional_scan_negative_side_label":"left"},
+    )
+    left = float(out_both.traits["topo_count_left"])
+    right = float(out_both.traits["topo_count_right"])
+    assert np.isfinite(left) and np.isfinite(right)
+    assert out_both.traits["topo_count"] == pytest.approx((left + right) / 2.0)
+
+    t_ignore_right = AnalysisTarget.from_points(target_id='tir', target_type='plot', scan_id='2&0_1_20', points_df=df, source_indices=np.array([0,1,2,3]), row=None)
+    out_ignore_right = apply_pointcloud_ops(
+        t_ignore_right,
+        [{"op":"topology_trait","split_sides_for_single_plot":True}],
+        context={"additional_scan_positive_side_label":"right", "additional_scan_negative_side_label":"left"},
+    )
+    assert np.isfinite(float(out_ignore_right.traits["topo_count_left"]))
+    assert np.isnan(float(out_ignore_right.traits["topo_count_right"]))
+    assert out_ignore_right.traits["topo_count"] == pytest.approx(float(out_ignore_right.traits["topo_count_left"]))
+    assert np.isfinite(float(out_ignore_right.traits["topo_left_count"]))
+    assert np.isfinite(float(out_ignore_right.traits["topo_left_per_m"]))
+
+
+def test_topology_trait_write_objects_diag_shape():
+    df = pd.DataFrame({"X":[-20.0,-10.0,10.0,20.0],"Y":[100.0]*4,"Z":[0.0,100.0,0.0,100.0],"RSSI":[1.0,2.0,3.0,4.0]})
+    t = AnalysisTarget.from_points(target_id='to', target_type='plot', scan_id='2&1_1_20', points_df=df, source_indices=np.array([0,1,2,3]), row=None)
+    out = apply_pointcloud_ops(
+        t,
+        [{"op":"topology_trait","split_sides_for_single_plot":True, "write_topology_objects":True}],
+        context={"additional_scan_positive_side_label":"right", "additional_scan_negative_side_label":"left"},
+    )
+    d = out.diagnostics["pointcloud_ops"]["topology_trait"][0]
+    assert d["write_topology_objects"] is True
+    pts = d["topology_object_points_xyz"]
+    assert isinstance(pts, list)
+    if pts:
+        assert len(pts[0]) == 3
+        assert pts[0][1] == 0.0
