@@ -4,6 +4,7 @@ import math
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from .fad import (
     EVEN_ZENITH_BREAKS_RAD,
@@ -79,20 +80,74 @@ def compute_lai_trait_from_lidar_data(
 
 
 def compute_lai_trait_from_target(*args, **kwargs) -> dict[str, Any]:
+    raise NotImplementedError("Use compute_lai_trait_from_points_df for pointcloud_ops integration.")
+
+
+def compute_lai_trait_from_points_df(
+    points_df: pd.DataFrame,
+    *,
+    gap_distance_m: float = 30.0,
+) -> dict[str, Any]:
     """
-    Placeholder for the new AnalysisTarget wrapper.
+    Legacy LAI trait computed directly from AnalysisTarget.current_points.
 
-    Do not guess this yet.
-
-    LAI needs ray-level matrix data:
-      distances_m: n_scans x n_angles
-      zeniths_rad: n_angles
-
-    AnalysisTarget.current_points alone probably is not enough, because it is a filtered
-    point cloud, not the original ray matrix with gap/no-return information.
-
-    The next step is to decide how the current pipeline should supply those inputs.
+    This intentionally preserves the old working behavior:
+      - Uses phi as the zenith-like angle source (legacy path converted from phi).
+      - Treats the full target table at this op stage as a single scan (1 x N rays).
+      - Uses fixed zenith breaks: [0, 15, 30, 45, 60, 75] degrees.
+      - Uses fixed gap distance: 30.0 m.
+      - Preserves zero-gap correction behavior.
     """
-    raise NotImplementedError(
-        "LAI needs distances_m and zeniths_rad. Preserve or pass ray-level lidar data before wiring lai_trait."
+    if points_df is None or len(points_df) == 0:
+        return {
+            "lai": float("nan"),
+            "lai_gap_fraction_ring_1": float("nan"),
+            "lai_gap_fraction_ring_2": float("nan"),
+            "lai_gap_fraction_ring_3": float("nan"),
+            "lai_gap_fraction_ring_4": float("nan"),
+            "lai_gap_fraction_ring_5": float("nan"),
+            "lai_n_scans": 0,
+            "lai_n_rays": 0,
+            "lai_n_valid_rings": 0,
+            "lai_corrected_zero_gaps": False,
+        }
+
+    if "phi" not in points_df.columns:
+        raise ValueError("lai_trait requires 'phi' metadata column in current_points")
+
+    if "range_m" in points_df.columns:
+        dist_m = points_df["range_m"].to_numpy(dtype=float, copy=False)
+    elif "dist_mm" in points_df.columns:
+        dist_m = points_df["dist_mm"].to_numpy(dtype=float, copy=False) / 1000.0
+    else:
+        raise ValueError("lai_trait requires either 'range_m' or 'dist_mm' metadata column")
+
+    phi = points_df["phi"].to_numpy(dtype=float, copy=False)
+    # Legacy convention note:
+    # historical LAI path derives zenith from phi via (pi/2 - phi), then abs().
+    zeniths_rad = np.abs((0.5 * math.pi) - phi)
+    distances_m = np.asarray(dist_m, dtype=float)[None, :]
+
+    zenith_breaks_rad = np.array((0, 15, 30, 45, 60, 75), dtype=float) / 180.0 * math.pi
+    result = legacy_lai(
+        distances_m=distances_m,
+        zeniths_rad=zeniths_rad,
+        zenith_breaks_rad=zenith_breaks_rad,
+        gap_distance_m=gap_distance_m,
+        correct_zero_gap_bins=True,
     )
+
+    gap = np.asarray(result.gap_fraction, dtype=float)
+    n_valid_rings = int(np.sum(np.isfinite(gap)))
+    return {
+        "lai": float(result.lai),
+        "lai_gap_fraction_ring_1": float(gap[0]) if gap.size > 0 else float("nan"),
+        "lai_gap_fraction_ring_2": float(gap[1]) if gap.size > 1 else float("nan"),
+        "lai_gap_fraction_ring_3": float(gap[2]) if gap.size > 2 else float("nan"),
+        "lai_gap_fraction_ring_4": float(gap[3]) if gap.size > 3 else float("nan"),
+        "lai_gap_fraction_ring_5": float(gap[4]) if gap.size > 4 else float("nan"),
+        "lai_n_scans": int(result.n_scans),
+        "lai_n_rays": int(result.n_angles),
+        "lai_n_valid_rings": n_valid_rings,
+        "lai_corrected_zero_gaps": bool(result.corrected_zero_gap_bins),
+    }

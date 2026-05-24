@@ -10,6 +10,10 @@ try:
     from .topology.stand_count import topology_stand_count
 except ImportError:
     from topology.stand_count import topology_stand_count
+try:
+    from .lai.lai import compute_lai_trait_from_points_df
+except ImportError:
+    from lai.lai import compute_lai_trait_from_points_df
 
 
 @dataclass
@@ -35,6 +39,7 @@ _SUPPORTED_OPS = {
     "bilateral_scalar_filter",
     "height_range_filter",
     "topology_trait",
+    "lai_trait",
 }
 
 
@@ -426,6 +431,15 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
             topo_out = _topology_trait(df, topo_cfg, target_obj)
             traits.update(topo_out["traits"])
             diagnostics.setdefault("topology_trait", []).append(topo_out["diagnostic"])
+        elif op == "lai_trait":
+            lai_traits = compute_lai_trait_from_points_df(df)
+            traits.update(lai_traits)
+            diagnostics.setdefault("lai_trait", []).append(
+                {
+                    "input_points": int(len(df)),
+                    "traits_written": sorted(list(lai_traits.keys())),
+                }
+            )
 
         diagnostics["points_after_each_op"].append({"op": op, "points": int(len(df))})
 
