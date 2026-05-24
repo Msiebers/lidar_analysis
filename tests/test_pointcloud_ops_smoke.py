@@ -99,6 +99,35 @@ def test_source_index_remains_row_aligned_after_mutating_filter():
     assert len(out.current_points["source_index"]) == len(out.current_points)
 
 
+def test_lai_trait_non_mutating_and_writes_expected_keys():
+    df = pd.DataFrame({
+        "X":[0.0,1.0,2.0],
+        "Y":[0.0,0.0,0.0],
+        "Z":[0.0,0.0,0.0],
+        "RSSI":[1.0,2.0,3.0],
+        "range_m":[1.0,2.0,35.0],
+        "phi":[0.1,0.2,0.3],
+        "source_index":[0,1,2],
+    })
+    t = AnalysisTarget.from_points(target_id='tlai', target_type='plot', scan_id='s1', points_df=df, source_indices=np.array([0,1,2]))
+    cur_before = t.current_points.copy(deep=True)
+    out = apply_pointcloud_ops(t, [{"op":"lai_trait"}])
+    pd.testing.assert_frame_equal(out.current_points.reset_index(drop=True), cur_before.reset_index(drop=True))
+    for k in [
+        "lai",
+        "lai_gap_fraction_ring_1",
+        "lai_gap_fraction_ring_2",
+        "lai_gap_fraction_ring_3",
+        "lai_gap_fraction_ring_4",
+        "lai_gap_fraction_ring_5",
+        "lai_n_scans",
+        "lai_n_rays",
+        "lai_n_valid_rings",
+        "lai_corrected_zero_gaps",
+    ]:
+        assert k in out.traits
+
+
 def test_voxel_count_uses_post_filter_current_points():
     df = pd.DataFrame({
         "X":[0.0,10.0,20.0],
