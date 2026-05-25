@@ -439,12 +439,16 @@ class Plot:
             return
 
         if self.analysis_target is not None:
-            df = self.analysis_target.current_points.copy()
-            if df.empty:
+            src_df = self.analysis_target.current_points
+            if src_df.empty:
                 return
-            for c in ["X", "Y", "Z", "RSSI"]:
-                if c not in df.columns:
+            required_cols = ["X", "Y", "Z", "RSSI"]
+            for c in required_cols:
+                if c not in src_df.columns:
                     raise ValueError(f"analysis_target.current_points missing required column {c!r}")
+            optional_cols = [c for c in ["rssi_norm", "rssi_norm_bilateral"] if c in src_df.columns]
+            write_cols = required_cols + optional_cols
+            df = src_df.loc[:, write_cols].copy()
             df.loc[:, ["X", "Y", "Z"]] = df[["X", "Y", "Z"]] / 1000.0
             self._write_csv(df)
             return
