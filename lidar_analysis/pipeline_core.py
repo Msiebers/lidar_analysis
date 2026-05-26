@@ -21,6 +21,7 @@ try:
     )
     from .pointcloud_ops import apply_pointcloud_ops
     from .analysis_target import AnalysisTarget
+    from .beam_diagnostics import compute_beam_diagnostics, write_beam_diagnostics_csv
 except Exception:
     from config import AnalysisConfig
     from fusion import fuse_by_time
@@ -33,6 +34,7 @@ except Exception:
     )
     from pointcloud_ops import apply_pointcloud_ops
     from analysis_target import AnalysisTarget
+    from beam_diagnostics import compute_beam_diagnostics, write_beam_diagnostics_csv
 
 # ----------------------
 # Load calibration file (STRICT)
@@ -1001,6 +1003,7 @@ def analyze_plot(
     row_options: list[str],
     lidar_height_mm: float,
     step_mm: float,
+    beam_diag,
 ) -> dict:
     z_mask = p.range_match(data[:, 2])
 
@@ -1059,6 +1062,8 @@ def analyze_plot(
         points_df["roll_deg"] = fused_plot[:, 6]
         points_df["pitch_deg"] = fused_plot[:, 7]
         points_df["yaw_deg"] = fused_plot[:, 8]
+        beam_id_plot = beam_diag.beam_id_by_row[plot_idx]
+        points_df["beam_id"] = beam_id_plot.astype(np.int32, copy=False)
 
         ops_cfg = getattr(cfg, "pointcloud_ops", None) or []
         if ops_cfg:
@@ -1333,6 +1338,24 @@ def process_scan(
         print(f"[Warning] No matched lidar-pico rows for {scan_base}")
         return []
 
+    beam_diag = compute_beam_diagnostics(fused_np, rounding_decimals=6)
+    beam_diag_csv = write_beam_diagnostics_csv(out_dir, scan_base, beam_diag)
+    print(f"[BeamDiag] wrote {beam_diag_csv}")
+    print(
+        "[BeamDiag] "
+        f"rows={beam_diag.summary.get('n_fused_rows')} "
+        f"unique_beams={beam_diag.summary.get('n_unique_beams')} "
+        f"unique_phi={beam_diag.summary.get('n_unique_phi')} "
+        f"unique_theta={beam_diag.summary.get('n_unique_theta')} "
+        f"rows_per_beam(min/median/max/mean)="
+        f"{beam_diag.summary.get('rows_per_beam_min')}/"
+        f"{beam_diag.summary.get('rows_per_beam_median')}/"
+        f"{beam_diag.summary.get('rows_per_beam_max')}/"
+        f"{beam_diag.summary.get('rows_per_beam_mean'):.2f} "
+        f"stable={beam_diag.summary.get('beam_count_stable')} "
+        f"rotation={beam_diag.summary.get('rotation_inference')}: {beam_diag.summary.get('rotation_note')}"
+    )
+
     data, keep_idx = reconstruct_world_points(
         fused_np,
         cfg,
@@ -1546,6 +1569,7 @@ def process_scan(
             row_options,
             lidar_height_mm,
             step_mm,
+            beam_diag,
         )
         trait_records.append(rec)
         write_scan_outputs(scan_base, cfg, p)
