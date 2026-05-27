@@ -5,7 +5,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from scipy.spatial import cKDTree
+from scipy.spatial import ConvexHull, cKDTree
 try:
     from .topology.stand_count import topology_stand_count
 except ImportError:
@@ -35,6 +35,7 @@ _SUPPORTED_OPS = {
     "bilateral_scalar_filter",
     "height_range_filter",
     "topology_trait",
+    "slice_structure_trait",
 }
 
 
@@ -255,6 +256,87 @@ def _topology_trait(df: pd.DataFrame, op_cfg: dict[str, Any], target_obj) -> dic
     }
 
 
+
+def _slice_structure_trait(df: pd.DataFrame, op_cfg: dict[str, Any]) -> dict[str, float]:
+    if len(df) == 0:
+        return {
+            "stacked_hull_volume_m3": float("nan"),
+            "max_spread_m": float("nan"),
+            "spread_at_50_m": float("nan"),
+        }
+
+    slice_height_m = float(op_cfg.get("slice_height_m", op_cfg.get("dz_m", 0.05)))
+    min_points_per_slice = int(op_cfg.get("min_points_per_slice", 3))
+    if slice_height_m <= 0:
+        raise ValueError(f"slice_structure_trait slice_height_m must be > 0; got {slice_height_m}")
+
+    xyz_m = df[["X", "Y", "Z"]].to_numpy(dtype=float, copy=False) / 1000.0
+    x_m = xyz_m[:, 0]
+    y_m = xyz_m[:, 1]
+    z_m = xyz_m[:, 2]
+
+    y0 = float(np.min(y_m))
+    y1 = float(np.max(y_m))
+    if not np.isfinite(y0) or not np.isfinite(y1):
+        return {
+            "stacked_hull_volume_m3": float("nan"),
+            "max_spread_m": float("nan"),
+            "spread_at_50_m": float("nan"),
+        }
+
+    n_slices = max(1, int(np.ceil((y1 - y0) / slice_height_m)))
+    edges = y0 + np.arange(n_slices + 1, dtype=float) * slice_height_m
+    if edges[-1] < y1:
+        edges = np.append(edges, y1)
+
+    stacked_hull_volume_m3 = 0.0
+    max_spread_m = float("nan")
+    spread_at_50_m = float("nan")
+    target_y = y0 + 0.5 * (y1 - y0)
+    target_dist = float("inf")
+
+    for i in range(len(edges) - 1):
+        lo, hi = float(edges[i]), float(edges[i + 1])
+        if i == len(edges) - 2:
+            m = (y_m >= lo) & (y_m <= hi)
+        else:
+            m = (y_m >= lo) & (y_m < hi)
+        if int(np.count_nonzero(m)) < min_points_per_slice:
+            continue
+
+        footprint = np.column_stack((x_m[m], z_m[m]))
+        if footprint.shape[0] < 3:
+            continue
+
+        try:
+            hull = ConvexHull(footprint)
+        except Exception:
+            continue
+
+        area_m2 = float(hull.volume)
+        thickness_m = hi - lo
+        if thickness_m > 0:
+            stacked_hull_volume_m3 += area_m2 * thickness_m
+
+        hull_pts = footprint[hull.vertices]
+        d = hull_pts[:, None, :] - hull_pts[None, :, :]
+        diam = float(np.sqrt(np.sum(d * d, axis=2)).max()) if hull_pts.shape[0] > 1 else 0.0
+
+        if not np.isfinite(max_spread_m) or diam > max_spread_m:
+            max_spread_m = diam
+
+        yc = 0.5 * (lo + hi)
+        dist = abs(yc - target_y)
+        if dist < target_dist:
+            target_dist = dist
+            spread_at_50_m = diam
+
+    return {
+        "stacked_hull_volume_m3": float(stacked_hull_volume_m3),
+        "max_spread_m": float(max_spread_m),
+        "spread_at_50_m": float(spread_at_50_m),
+    }
+
 def _voxel_count(df: pd.DataFrame, op_cfg: dict[str, Any]) -> int:
     size_m = float(
         op_cfg.get(
@@ -414,6 +496,8 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
         elif op == "height_range_filter":
             df, hr_diag = _height_range_filter(df, op_cfg)
             diagnostics.setdefault("height_range_filters", []).append(hr_diag)
+        elif op == "slice_structure_trait":
+            traits.update(_slice_structure_trait(df, op_cfg))
         elif op == "topology_trait":
             if target_obj is None:
                 raise ValueError("topology_trait requires an AnalysisTarget")

@@ -1205,6 +1205,9 @@ def analyze_plot(
         "o3d_points": n_points_o3d,
         "o3d_voxels": voxel_count_o3d,
         "voxel_count": op_traits.get("voxel_count", float("nan")),
+        "stacked_hull_volume_m3": op_traits.get("stacked_hull_volume_m3", float("nan")),
+        "max_spread_m": op_traits.get("max_spread_m", float("nan")),
+        "spread_at_50_m": op_traits.get("spread_at_50_m", float("nan")),
     }
 
     print(
