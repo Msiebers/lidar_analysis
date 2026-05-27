@@ -341,7 +341,7 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         overwrite_outputs=pick("overwrite_pointclouds", "overwrite_outputs", bool),
         reprocess_scans=force,
 
-        use_imu=pick("apply_imu", "use_imu", bool),
+        use_imu=bool(experiment_config.get("use_imu", experiment_config.get("apply_imu", _DEFAULTS["use_imu"]))),
         imu_zero_mode=pick("imu_zero_mode", "imu_zero_mode", str),
         imu_zero_fraction=pick("imu_zero_fraction", "imu_zero_fraction", float),
         use_heading=pick("use_heading", "use_heading", bool),
