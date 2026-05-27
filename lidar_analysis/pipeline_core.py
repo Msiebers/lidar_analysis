@@ -1202,8 +1202,6 @@ def analyze_plot(
         "stand_topo_right_count": stand_topo_right_count,
         "stand_topo_left_per_m": stand_topo_left_per_m,
         "stand_topo_right_per_m": stand_topo_right_per_m,
-        "o3d_points": n_points_o3d,
-        "o3d_voxels": voxel_count_o3d,
         "voxel_count": op_traits.get("voxel_count", float("nan")),
         "stacked_hull_volume_m3": op_traits.get("stacked_hull_volume_m3", float("nan")),
         "max_spread_m": op_traits.get("max_spread_m", float("nan")),
@@ -1215,7 +1213,6 @@ def analyze_plot(
         f"height={height_m:.3f} m, LAI_even={lai_even:.3f}, LAI_uneven={lai_uneven:.3f}, "
         f"stand_topo_per_m={stand_topo_per_m:.3f}, "
         f"count_left={stand_topo_left_count:.2f}, count_right={stand_topo_right_count:.2f}, "
-        f"o3d_points={n_points_o3d}, o3d_voxels={voxel_count_o3d}, "
         f"points={n_points}, scans={n_scans}, angles={n_angles}"
     )
     return result
@@ -1673,7 +1670,37 @@ def run_for_directory(
 
     # ---- AFTER the loop: one summary for the whole directory ----
     if all_trait_records:
-        traits_df = pd.DataFrame.from_records(all_trait_records)
+        traits_rows = []
+        for rec in all_trait_records:
+            traits_rows.append({
+                "scan": rec.get("scan"),
+                "row": rec.get("row"),
+                "plot": rec.get("plot"),
+                "split_source": rec.get("split_source"),
+                "target_type": rec.get("target_type"),
+                "target_number": rec.get("target_number"),
+                "z_min_m": rec.get("z_min_m", float("nan")),
+                "z_max_m": rec.get("z_max_m", float("nan")),
+                "points": rec.get("points", float("nan")),
+                "height_m": rec.get("height_m", float("nan")),
+                "lai_even": rec.get("lai_even", float("nan")),
+                "lai_uneven": rec.get("lai_uneven", float("nan")),
+                "lidar_scans": rec.get("lidar_scans", float("nan")),
+                "lidar_angles": rec.get("lidar_angles", float("nan")),
+                "point_density_m2": rec.get("point_density_m2", float("nan")),
+                "plot_length_m": rec.get("plot_length_m", float("nan")),
+                "plot_width_m": rec.get("plot_width_m", float("nan")),
+                "stand_topo_per_m": rec.get("stand_topo_per_m", float("nan")),
+                "stand_topo_left_count": rec.get("stand_topo_left_count", float("nan")),
+                "stand_topo_right_count": rec.get("stand_topo_right_count", float("nan")),
+                "stand_topo_left_per_m": rec.get("stand_topo_left_per_m", float("nan")),
+                "stand_topo_right_per_m": rec.get("stand_topo_right_per_m", float("nan")),
+                "voxel_count": rec.get("voxel_count", float("nan")),
+                "stacked_hull_volume_m3": rec.get("stacked_hull_volume_m3", float("nan")),
+                "max_spread_m": rec.get("max_spread_m", float("nan")),
+                "spread_at_50_m": rec.get("spread_at_50_m", float("nan")),
+            })
+        traits_df = pd.DataFrame.from_records(traits_rows)
         traits_df = traits_df.round(2)
         traits_path = os.path.join(dir_path, "lidar_traits_summary.csv")
         traits_df.to_csv(traits_path, index=False, na_rep="NA")
