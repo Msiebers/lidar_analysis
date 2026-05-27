@@ -5,11 +5,16 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from scipy.spatial import ConvexHull, cKDTree
+from scipy.spatial import cKDTree
 try:
     from .topology.stand_count import topology_stand_count
 except ImportError:
     from topology.stand_count import topology_stand_count
+try:
+    from scipy.spatial import ConvexHull, QhullError
+except Exception:
+    ConvexHull = None
+    QhullError = Exception
 
 
 @dataclass
@@ -38,6 +43,12 @@ _SUPPORTED_OPS = {
     "slice_structure_trait",
 }
 
+def op_enabled(cfg, name: str) -> bool:
+    for op in getattr(cfg, "pointcloud_ops", []) or []:
+        op_name = str(op.get("name", op.get("op", ""))).strip().lower()
+        if op_name == name and op.get("enabled", True) is not False:
+            return True
+    return False
 
 def _as_df(points_df: pd.DataFrame | np.ndarray) -> pd.DataFrame:
     if isinstance(points_df, pd.DataFrame):
@@ -256,87 +267,6 @@ def _topology_trait(df: pd.DataFrame, op_cfg: dict[str, Any], target_obj) -> dic
     }
 
 
-
-def _slice_structure_trait(df: pd.DataFrame, op_cfg: dict[str, Any]) -> dict[str, float]:
-    if len(df) == 0:
-        return {
-            "stacked_hull_volume_m3": float("nan"),
-            "max_spread_m": float("nan"),
-            "spread_at_50_m": float("nan"),
-        }
-
-    slice_height_m = float(op_cfg.get("slice_height_m", op_cfg.get("dz_m", 0.05)))
-    min_points_per_slice = int(op_cfg.get("min_points_per_slice", 3))
-    if slice_height_m <= 0:
-        raise ValueError(f"slice_structure_trait slice_height_m must be > 0; got {slice_height_m}")
-
-    xyz_m = df[["X", "Y", "Z"]].to_numpy(dtype=float, copy=False) / 1000.0
-    x_m = xyz_m[:, 0]
-    y_m = xyz_m[:, 1]
-    z_m = xyz_m[:, 2]
-
-    y0 = float(np.min(y_m))
-    y1 = float(np.max(y_m))
-    if not np.isfinite(y0) or not np.isfinite(y1):
-        return {
-            "stacked_hull_volume_m3": float("nan"),
-            "max_spread_m": float("nan"),
-            "spread_at_50_m": float("nan"),
-        }
-
-    n_slices = max(1, int(np.ceil((y1 - y0) / slice_height_m)))
-    edges = y0 + np.arange(n_slices + 1, dtype=float) * slice_height_m
-    if edges[-1] < y1:
-        edges = np.append(edges, y1)
-
-    stacked_hull_volume_m3 = 0.0
-    max_spread_m = float("nan")
-    spread_at_50_m = float("nan")
-    target_y = y0 + 0.5 * (y1 - y0)
-    target_dist = float("inf")
-
-    for i in range(len(edges) - 1):
-        lo, hi = float(edges[i]), float(edges[i + 1])
-        if i == len(edges) - 2:
-            m = (y_m >= lo) & (y_m <= hi)
-        else:
-            m = (y_m >= lo) & (y_m < hi)
-        if int(np.count_nonzero(m)) < min_points_per_slice:
-            continue
-
-        footprint = np.column_stack((x_m[m], z_m[m]))
-        if footprint.shape[0] < 3:
-            continue
-
-        try:
-            hull = ConvexHull(footprint)
-        except Exception:
-            continue
-
-        area_m2 = float(hull.volume)
-        thickness_m = hi - lo
-        if thickness_m > 0:
-            stacked_hull_volume_m3 += area_m2 * thickness_m
-
-        hull_pts = footprint[hull.vertices]
-        d = hull_pts[:, None, :] - hull_pts[None, :, :]
-        diam = float(np.sqrt(np.sum(d * d, axis=2)).max()) if hull_pts.shape[0] > 1 else 0.0
-
-        if not np.isfinite(max_spread_m) or diam > max_spread_m:
-            max_spread_m = diam
-
-        yc = 0.5 * (lo + hi)
-        dist = abs(yc - target_y)
-        if dist < target_dist:
-            target_dist = dist
-            spread_at_50_m = diam
-
-    return {
-        "stacked_hull_volume_m3": float(stacked_hull_volume_m3),
-        "max_spread_m": float(max_spread_m),
-        "spread_at_50_m": float(spread_at_50_m),
-    }
-
 def _voxel_count(df: pd.DataFrame, op_cfg: dict[str, Any]) -> int:
     size_m = float(
         op_cfg.get(
@@ -496,8 +426,20 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
         elif op == "height_range_filter":
             df, hr_diag = _height_range_filter(df, op_cfg)
             diagnostics.setdefault("height_range_filters", []).append(hr_diag)
+
         elif op == "slice_structure_trait":
-            traits.update(_slice_structure_trait(df, op_cfg))
+            slice_traits, slice_diag = _compute_slice_structure_traits(
+                df,
+                slice_height_m=float(op_cfg.get("slice_height_m", 0.05)),
+                height_axis=str(op_cfg.get("height_axis", "Y")),
+                spread_axis=str(op_cfg.get("spread_axis", "X")),
+                length_axis=str(op_cfg.get("length_axis", "Z")),
+                percentile_height=float(op_cfg.get("percentile_height", 50.0)),
+                min_points_per_slice=int(op_cfg.get("min_points_per_slice", 5)),
+            )
+            traits.update(slice_traits)
+            diagnostics.setdefault("slice_structure_trait", []).append(slice_diag)
+
         elif op == "topology_trait":
             if target_obj is None:
                 raise ValueError("topology_trait requires an AnalysisTarget")
@@ -522,3 +464,251 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
     target_obj.diagnostics["pointcloud_ops"] = diagnostics
     target_obj.op_history.extend(diagnostics["backend_used"])
     return target_obj
+
+def _axis_name_to_col(axis: str) -> str:
+    axis = str(axis).strip().upper()
+    if axis not in ("X", "Y", "Z"):
+        raise ValueError(f"axis must be one of X, Y, Z; got {axis!r}")
+    return axis
+
+
+def _convex_hull_area_2d(points_2d: np.ndarray) -> float:
+    """
+    Return 2D convex hull area.
+
+    In scipy ConvexHull, `.volume` is area for 2D hulls.
+    Input points are expected to be in metres, so output is square metres.
+    """
+    if points_2d.shape[0] < 3:
+        return 0.0
+
+    if ConvexHull is None:
+        return float("nan")
+
+    pts = np.unique(points_2d.astype(float), axis=0)
+    if pts.shape[0] < 3:
+        return 0.0
+
+    try:
+        hull = ConvexHull(pts)
+        return float(hull.volume)
+    except QhullError:
+        return 0.0
+    except Exception:
+        return float("nan")
+
+
+def _footprint_diameter_2d(points_2d: np.ndarray) -> float:
+    """
+    Return the maximum 2D distance between points in a height slice.
+
+    This is the X/Z footprint diameter when spread_axis=X and length_axis=Z.
+    It uses hull vertices when possible because the maximum distance must
+    occur on the convex hull.
+
+    Input points are expected to be in metres, so output is metres.
+    """
+    if points_2d.shape[0] < 2:
+        return float("nan")
+
+    pts = np.unique(points_2d.astype(float), axis=0)
+    if pts.shape[0] < 2:
+        return float("nan")
+
+    if ConvexHull is not None and pts.shape[0] >= 3:
+        try:
+            hull = ConvexHull(pts)
+            pts = pts[hull.vertices]
+        except Exception:
+            # Collinear/degenerate points can still have a useful diameter.
+            pass
+
+    diff = pts[:, None, :] - pts[None, :, :]
+    d2 = np.sum(diff * diff, axis=2)
+    max_d2 = float(np.nanmax(d2))
+
+    if not np.isfinite(max_d2):
+        return float("nan")
+
+    return float(np.sqrt(max_d2))
+
+
+def _compute_slice_structure_traits(
+    points_df,
+    *,
+    slice_height_m: float = 0.05,
+    height_axis: str = "Y",
+    spread_axis: str = "X",
+    length_axis: str = "Z",
+    percentile_height: float = 50.0,
+    min_points_per_slice: int = 5,
+) -> tuple[dict, dict]:
+    """
+    Compute target-level slice structure traits from the current point cloud.
+
+    Assumes AnalysisTarget.current_points / df stores X/Y/Z in millimetres.
+
+    Traits:
+      - stacked_hull_volume_m3:
+          Slice by height, compute 2D convex hull area in spread/length plane,
+          multiply by slice thickness, and sum across slices.
+
+      - max_spread_m:
+          Largest 2D footprint diameter in the spread/length plane across
+          all height slices.
+
+      - spread_at_50_m:
+          2D footprint diameter in the spread/length plane for the slice
+          centered at percentile_height percent of this target's own height
+          range. The name stays spread_at_50_m because the normal/default use
+          is percentile_height=50.
+    """
+    h_col = _axis_name_to_col(height_axis)
+    s_col = _axis_name_to_col(spread_axis)
+    l_col = _axis_name_to_col(length_axis)
+
+    for col in (h_col, s_col, l_col):
+        if col not in points_df.columns:
+            raise ValueError(f"slice_structure_trait requires column {col!r}")
+
+    slice_height_m = float(slice_height_m)
+    if slice_height_m <= 0:
+        raise ValueError(f"slice_height_m must be > 0, got {slice_height_m}")
+
+    percentile_height = float(percentile_height)
+    if not (0.0 <= percentile_height <= 100.0):
+        raise ValueError(
+            f"percentile_height must be between 0 and 100, got {percentile_height}"
+        )
+
+    min_points_per_slice = int(min_points_per_slice)
+    if min_points_per_slice < 1:
+        min_points_per_slice = 1
+
+    # Convert once: pipeline stores coordinates in mm; this op works in metres.
+    xyz_m = points_df[[s_col, h_col, l_col]].to_numpy(dtype=float, copy=True) / 1000.0
+
+    spread = xyz_m[:, 0]
+    height = xyz_m[:, 1]
+    length = xyz_m[:, 2]
+
+    valid = np.isfinite(spread) & np.isfinite(height) & np.isfinite(length)
+    spread = spread[valid]
+    height = height[valid]
+    length = length[valid]
+
+    traits = {
+        "stacked_hull_volume_m3": float("nan"),
+        "max_spread_m": float("nan"),
+        "spread_at_50_m": float("nan"),
+    }
+
+    diagnostics = {
+        "n_points_input": int(points_df.shape[0]),
+        "n_points_valid": int(height.size),
+        "slice_height_m": float(slice_height_m),
+        "height_axis": h_col,
+        "spread_axis": s_col,
+        "length_axis": l_col,
+        "spread_metric": "2d_footprint_diameter",
+        "percentile_height": float(percentile_height),
+        "min_points_per_slice": int(min_points_per_slice),
+        "n_slices": 0,
+        "n_slices_used_for_volume": 0,
+        "n_slices_used_for_spread": 0,
+        "n_slices_skipped_min_points": 0,
+        "target_height_min_m": float("nan"),
+        "target_height_max_m": float("nan"),
+        "target_height_range_m": float("nan"),
+        "percentile_height_center_m": float("nan"),
+        "spread_at_percentile_n_points": 0,
+    }
+
+    if height.size == 0:
+        return traits, diagnostics
+
+    h_min = float(np.nanmin(height))
+    h_max = float(np.nanmax(height))
+    h_range = h_max - h_min
+
+    diagnostics["target_height_min_m"] = h_min
+    diagnostics["target_height_max_m"] = h_max
+    diagnostics["target_height_range_m"] = h_range
+
+    if not np.isfinite(h_range) or h_range <= 0:
+        return traits, diagnostics
+
+    n_slices = int(np.ceil(h_range / slice_height_m))
+    diagnostics["n_slices"] = n_slices
+
+    total_volume = 0.0
+    max_spread = float("nan")
+    n_volume_slices = 0
+    n_spread_slices = 0
+    n_slices_skipped_min_points = 0
+
+    for i in range(n_slices):
+        lo = h_min + i * slice_height_m
+        hi = min(lo + slice_height_m, h_max)
+
+        if i == n_slices - 1:
+            m = (height >= lo) & (height <= hi)
+        else:
+            m = (height >= lo) & (height < hi)
+
+        n = int(np.sum(m))
+        if n == 0:
+            continue
+
+        slice_spread = spread[m]
+        slice_length = length[m]
+        pts_2d = np.column_stack([slice_spread, slice_length])
+
+        # "Spread" now means 2D X/Z footprint diameter, not X-only width.
+        if n >= 2:
+            diameter_m = _footprint_diameter_2d(pts_2d)
+            if np.isfinite(diameter_m):
+                max_spread = (
+                    diameter_m
+                    if not np.isfinite(max_spread)
+                    else max(max_spread, diameter_m)
+                )
+                n_spread_slices += 1
+
+        # Volume uses convex hull area in X/Z times height-slice thickness.
+        if n >= min_points_per_slice:
+            hull_area_m2 = _convex_hull_area_2d(pts_2d)
+            if np.isfinite(hull_area_m2) and hull_area_m2 > 0:
+                thickness_m = max(float(hi - lo), 0.0)
+                total_volume += hull_area_m2 * thickness_m
+                n_volume_slices += 1
+        else:
+            n_slices_skipped_min_points += 1
+
+    # Target-relative percentile height.
+    # For 50, this is halfway between this target's min and max height.
+    frac = percentile_height / 100.0
+    h_center = h_min + frac * h_range
+    diagnostics["percentile_height_center_m"] = float(h_center)
+
+    half_slice = slice_height_m / 2.0
+    p_mask = (height >= h_center - half_slice) & (height <= h_center + half_slice)
+    n_p = int(np.sum(p_mask))
+    diagnostics["spread_at_percentile_n_points"] = n_p
+
+    if n_p >= 2:
+        p_pts_2d = np.column_stack([spread[p_mask], length[p_mask]])
+        spread_at_p = _footprint_diameter_2d(p_pts_2d)
+    else:
+        spread_at_p = float("nan")
+
+    traits["stacked_hull_volume_m3"] = float(total_volume) if n_volume_slices > 0 else float("nan")
+    traits["max_spread_m"] = float(max_spread)
+    traits["spread_at_50_m"] = float(spread_at_p)
+
+    diagnostics["n_slices_used_for_volume"] = int(n_volume_slices)
+    diagnostics["n_slices_used_for_spread"] = int(n_spread_slices)
+    diagnostics["n_slices_skipped_min_points"] = int(n_slices_skipped_min_points)
+
+    return traits, diagnostics
+
