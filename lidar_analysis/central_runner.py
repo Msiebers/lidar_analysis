@@ -376,47 +376,92 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
     )
 
 
-def phenotype_columns() -> list[str]:
-    return [
+def _pointcloud_op_enabled(cfg: AnalysisConfig, *names: str) -> bool:
+    wanted = {str(n).strip().lower() for n in names}
+
+    for op_cfg in getattr(cfg, "pointcloud_ops", []) or []:
+        if not isinstance(op_cfg, dict):
+            continue
+
+        op_name = str(op_cfg.get("name", op_cfg.get("op", ""))).strip().lower()
+        if op_name in wanted and op_cfg.get("enabled", True) is not False:
+            return True
+
+    return False
+
+
+def phenotype_columns(cfg: AnalysisConfig) -> list[str]:
+    cols = [
         "experiment",
         "date",
         "scan_id",
         "row",
         "plot",
-        "height_m",
-        "lai_even",
-        "lai_uneven",
+    ]
+
+    if bool(getattr(cfg, "run_height", False)):
+        cols.append("height_m")
+
+    if bool(getattr(cfg, "run_lai", False)):
+        cols.extend([
+            "lai_even",
+            "lai_uneven",
+        ])
+
+    cols.extend([
         "point_density_m2",
         "plot_length_m",
         "plot_width_m",
-        "stand_topo_per_m",
-        "stand_topo_left_count",
-        "stand_topo_right_count",
-        "stand_topo_left_per_m",
-        "stand_topo_right_per_m",
-        "stacked_hull_volume_m3",
-        "max_spread_m",
-        "spread_at_50_m",
-        "voxel_count",
+    ])
+
+    if _pointcloud_op_enabled(cfg, "topology_trait"):
+        cols.extend([
+            "stand_topo_per_m",
+            "stand_topo_left_count",
+            "stand_topo_right_count",
+            "stand_topo_left_per_m",
+            "stand_topo_right_per_m",
+        ])
+
+    if _pointcloud_op_enabled(cfg, "slice_structure_trait"):
+        cols.extend([
+            "stacked_hull_volume_m3",
+            "max_spread_m",
+            "spread_at_50_m",
+        ])
+
+    if _pointcloud_op_enabled(cfg, "voxel_count", "voxel_grid", "voxel_volume"):
+        cols.append("voxel_count")
+
+    cols.extend([
         "points",
         "lidar_scans",
         "lidar_angles",
-    ]
+    ])
+
+    return cols
 
 
-def ensure_results_csv(path: Path) -> None:
-    if path.exists():
-        return
+def ensure_results_csv(path: Path, cfg: AnalysisConfig) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=phenotype_columns())
+        writer = csv.DictWriter(f, fieldnames=phenotype_columns(cfg))
         writer.writeheader()
 
 
-def append_trait_rows(results_csv: Path, experiment: str, date_str: str, scan_id: str, recs: Iterable[dict]) -> None:
-    ensure_results_csv(results_csv)
+def append_trait_rows(
+    results_csv: Path,
+    experiment: str,
+    date_str: str,
+    scan_id: str,
+    recs: Iterable[dict],
+    cfg: AnalysisConfig,
+) -> None:
+    fieldnames = phenotype_columns(cfg)
+
     with open(results_csv, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=phenotype_columns())
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+
         for rec in recs:
             row = {
                 "experiment": experiment,
@@ -435,15 +480,16 @@ def append_trait_rows(results_csv: Path, experiment: str, date_str: str, scan_id
                 "stand_topo_right_count": rec.get("stand_topo_right_count"),
                 "stand_topo_left_per_m": rec.get("stand_topo_left_per_m"),
                 "stand_topo_right_per_m": rec.get("stand_topo_right_per_m"),
-                "voxel_count": rec.get("voxel_count"),
                 "stacked_hull_volume_m3": rec.get("stacked_hull_volume_m3"),
                 "max_spread_m": rec.get("max_spread_m"),
                 "spread_at_50_m": rec.get("spread_at_50_m"),
+                "voxel_count": rec.get("voxel_count"),
                 "points": rec.get("points"),
                 "lidar_scans": rec.get("lidar_scans"),
                 "lidar_angles": rec.get("lidar_angles"),
             }
-            writer.writerow(row)
+
+            writer.writerow({k: row.get(k) for k in fieldnames})
 
 
 def extract_analysis_cfg(experiment_config: dict) -> dict:
@@ -509,7 +555,7 @@ def run_experiment_date(
     pointcloud_out = output_dir / "pointclouds"
     pointcloud_out.mkdir(parents=True, exist_ok=True)
     results_csv = output_dir / "results.csv"
-    ensure_results_csv(results_csv)
+    ensure_results_csv(results_csv, cfg)
 
     for scan_id, lidar_fp, pico_fp in pairs:
         print(f"[Run] Processing scan {scan_id}")
@@ -517,7 +563,7 @@ def run_experiment_date(
         for stage in DEFAULT_STAGES:
             result = stage.run(context, scan_id, lidar_fp, pico_fp)
             trait_rows.extend(result.trait_rows)
-        append_trait_rows(results_csv, experiment, date_name, scan_id, trait_rows)
+        append_trait_rows(results_csv, experiment, date_name, scan_id, trait_rows, cfg)
         print(f"[Success] {scan_id}: wrote {len(trait_rows)} phenotype row(s)")
 
     return results_csv
