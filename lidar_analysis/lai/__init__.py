@@ -6,6 +6,7 @@ from .fad import (
 )
 from .lai import (
     compute_legacy_lai_pair,
+    compute_lai_trait_from_beam_rows,
     compute_lai_trait_from_lidar_data,
     compute_lai_trait_from_target,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "LaiResult",
     "legacy_lai",
     "compute_legacy_lai_pair",
+    "compute_lai_trait_from_beam_rows",
     "compute_lai_trait_from_lidar_data",
     "compute_lai_trait_from_target",
 ]

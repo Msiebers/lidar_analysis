@@ -10,9 +10,9 @@ from scipy import stats
 from scipy.spatial.transform import Rotation as R
 
 if __package__:
-    from .lai import compute_lai_trait_from_target
+    from .lai import compute_lai_trait_from_beam_rows, compute_lai_trait_from_target
 else:
-    from lai import compute_lai_trait_from_target
+    from lai import compute_lai_trait_from_beam_rows, compute_lai_trait_from_target
 
 try:
     from .config import AnalysisConfig
@@ -236,10 +236,11 @@ def _lidar_dict_from_plot_indices(
     lidar_height_mm: float,
 ) -> dict | None:
     """
-    Build lidar_data dict for LAI from a set of fused rows belonging to one plot.
-    Treat the entire plot as a single 'scan' (1 x N distances).
+    Build lidar_data dict for legacy LAI from emitted fused rows in one plot.
 
     NOTE: fused_np[:, 3] is distance in millimeters; we convert to meters here.
+    SICK distance zero is a no-return beam, so convert it to the legacy gap
+    sentinel before passing the dict to old-style LAI callers.
     """
     if plot_idx.size == 0:
         return None
@@ -247,22 +248,44 @@ def _lidar_dict_from_plot_indices(
     rows = fused_np[plot_idx]
     # Columns in fused_np: [0]=shared_time, [1]=phi (rad), [2]=theta (rad),
     #                      [3]=dist_mm, [4]=rssi
-    phi = rows[:, 1].astype(np.float64, copy=False)
+    theta = rows[:, 2].astype(np.float64, copy=False)
     dist_mm = rows[:, 3].astype(np.float64, copy=False)
     dist_m = dist_mm / 1000.0
 
-    # Convert azimuth-like phi to zenith (0 = up), ensure non-negative
-    zeniths = (0.5 * math.pi) - phi
-    zeniths = np.where(zeniths < 0, -zeniths, zeniths)
+    # Physical cap orientation: theta=0 is down, +/-pi is sky.  Keep the
+    # sky-facing half and express it as legacy zenith (0=sky, pi/2=horizon).
+    theta = ((theta + math.pi) % (2.0 * math.pi)) - math.pi
+    zeniths = math.pi - np.abs(theta)
+    valid = np.isfinite(dist_m) & np.isfinite(zeniths) & (zeniths >= 0.0) & (zeniths <= 0.5 * math.pi)
+    if not np.any(valid):
+        return None
+
+    dist_m = dist_m[valid].copy()
+    gap_distance_m = 30.0
+    dist_m[dist_m <= 0.0] = gap_distance_m + 1.0
 
     # Single "scan": shape (1, N_angles), in meters
     distances = dist_m[None, :]
 
     return {
-        "zeniths": zeniths,
+        "zeniths": zeniths[valid],
         "distances": distances,
         "height_above_ground": float(lidar_height_mm) / 1000.0,
     }
+
+
+def _plot_interval_indices_from_fused(
+    fused_np: np.ndarray,
+    plot: "Plot",
+    step_mm: float,
+) -> np.ndarray:
+    """Return emitted fused beam rows whose scanner travel lies in a plot interval."""
+    if fused_np.size == 0:
+        return np.empty((0,), dtype=np.int32)
+
+    travel_z_mm = fused_np[:, 5].astype(np.float64, copy=False) * float(step_mm)
+    mask = plot.range_match(travel_z_mm)
+    return np.flatnonzero(mask).astype(np.int32, copy=False)
 
 def _to_cartesian_mm(phi, theta, r_mm):
     x = r_mm * np.cos(phi) * np.sin(theta)
@@ -1079,6 +1102,7 @@ def analyze_plot(
     n_points_o3d = 0
     voxel_count_o3d = float("nan")
     plot_idx = np.empty((0,), dtype=np.int32)
+    lai_plot_idx = np.empty((0,), dtype=np.int32)
     op_traits = {}
     topo_object_points = []
     write_topology_objects = False
@@ -1176,13 +1200,33 @@ def analyze_plot(
         if cfg.run_height:
             h_arr = p.analysis_target.current_points[["X", "Y", "Z", "RSSI"]].to_numpy(dtype=np.float32, copy=False)
             height_m = height_from_world_y(h_arr, alpha=0.01)
-        if cfg.run_lai:
+
+    if cfg.run_lai:
+        lai_plot_idx = _plot_interval_indices_from_fused(fused_np, p, step_mm)
+        if lai_plot_idx.size > 0:
+            lai_rows = fused_np[lai_plot_idx]
+            lai_traits = compute_lai_trait_from_beam_rows(
+                distances_m=lai_rows[:, 3].astype(np.float64, copy=False) / 1000.0,
+                theta_rad=lai_rows[:, 2].astype(np.float64, copy=False),
+                gap_distance_m=30.0,
+                distance_column="dist_mm",
+            )
+        elif hasattr(p, "analysis_target"):
             lai_traits = compute_lai_trait_from_target(p.analysis_target, gap_distance_m=30.0)
+        else:
+            lai_traits = compute_lai_trait_from_beam_rows(
+                distances_m=np.empty((0,), dtype=np.float64),
+                theta_rad=np.empty((0,), dtype=np.float64),
+                gap_distance_m=30.0,
+                distance_column="dist_mm",
+            )
+
+        if hasattr(p, "analysis_target"):
             p.analysis_target.traits.update(lai_traits)
-            lai_even = float(lai_traits.get("lai_even", float("nan")))
-            lai_uneven = float(lai_traits.get("lai_uneven", float("nan")))
-            n_scans = int(lai_traits.get("lai_n_scans", 0) or 0)
-            n_angles = int(lai_traits.get("lai_n_angles", 0) or 0)
+        lai_even = float(lai_traits.get("lai_even", float("nan")))
+        lai_uneven = float(lai_traits.get("lai_uneven", float("nan")))
+        n_scans = int(lai_traits.get("lai_n_scans", 0) or 0)
+        n_angles = int(lai_traits.get("lai_n_angles", 0) or 0)
 
     topo_input = np.empty((0, 3), dtype=float)
     if goto_open3d:
