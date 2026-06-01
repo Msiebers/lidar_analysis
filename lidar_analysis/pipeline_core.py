@@ -9,6 +9,11 @@ import yaml
 from scipy import stats
 from scipy.spatial.transform import Rotation as R
 
+if __package__:
+    from .lai import compute_lai_trait_from_target
+else:
+    from lai import compute_lai_trait_from_target
+
 try:
     from .config import AnalysisConfig
     from .fusion import fuse_by_time
@@ -1060,6 +1065,7 @@ def analyze_plot(
     p.cloud = np.empty((0, 4), dtype=np.float32)
     n_points = 0
     height_m = float("nan")
+    lai_traits = {}
     lai_even = float("nan")
     lai_uneven = float("nan")
     n_scans = 0
@@ -1170,14 +1176,13 @@ def analyze_plot(
         if cfg.run_height:
             h_arr = p.analysis_target.current_points[["X", "Y", "Z", "RSSI"]].to_numpy(dtype=np.float32, copy=False)
             height_m = height_from_world_y(h_arr, alpha=0.01)
-        lidar_dict = _lidar_dict_from_plot_indices(fused_np, plot_idx, lidar_height_mm)
-        if cfg.run_lai and lidar_dict is not None:
-            distances = lidar_dict["distances"]
-            n_scans, n_angles = distances.shape
-            lai_even_val = lai(lidar_dict, EVEN_ZENITH_BREAKS)
-            lai_uneven_val = lai(lidar_dict, UNEVEN_ZENITH_BREAKS)
-            lai_even = float(lai_even_val) if lai_even_val is not None else float("nan")
-            lai_uneven = float(lai_uneven_val) if lai_uneven_val is not None else float("nan")
+        if cfg.run_lai:
+            lai_traits = compute_lai_trait_from_target(p.analysis_target, gap_distance_m=30.0)
+            p.analysis_target.traits.update(lai_traits)
+            lai_even = float(lai_traits.get("lai_even", float("nan")))
+            lai_uneven = float(lai_traits.get("lai_uneven", float("nan")))
+            n_scans = int(lai_traits.get("lai_n_scans", 0) or 0)
+            n_angles = int(lai_traits.get("lai_n_angles", 0) or 0)
 
     topo_input = np.empty((0, 3), dtype=float)
     if goto_open3d:
@@ -1246,6 +1251,7 @@ def analyze_plot(
         "max_spread_m": op_traits.get("max_spread_m", float("nan")),
         "spread_at_50_m": op_traits.get("spread_at_50_m", float("nan")),
     }
+    result.update(lai_traits)
 
     print(
         f"[Traits] scan={scan_base}, plot={p.name}, "
@@ -1728,6 +1734,26 @@ def run_for_directory(
                 "height_m": rec.get("height_m", float("nan")),
                 "lai_even": rec.get("lai_even", float("nan")),
                 "lai_uneven": rec.get("lai_uneven", float("nan")),
+                "lai_even_gap_fraction_ring_1": rec.get("lai_even_gap_fraction_ring_1", float("nan")),
+                "lai_even_gap_fraction_ring_2": rec.get("lai_even_gap_fraction_ring_2", float("nan")),
+                "lai_even_gap_fraction_ring_3": rec.get("lai_even_gap_fraction_ring_3", float("nan")),
+                "lai_even_gap_fraction_ring_4": rec.get("lai_even_gap_fraction_ring_4", float("nan")),
+                "lai_even_gap_fraction_ring_5": rec.get("lai_even_gap_fraction_ring_5", float("nan")),
+                "lai_uneven_gap_fraction_ring_1": rec.get("lai_uneven_gap_fraction_ring_1", float("nan")),
+                "lai_uneven_gap_fraction_ring_2": rec.get("lai_uneven_gap_fraction_ring_2", float("nan")),
+                "lai_uneven_gap_fraction_ring_3": rec.get("lai_uneven_gap_fraction_ring_3", float("nan")),
+                "lai_uneven_gap_fraction_ring_4": rec.get("lai_uneven_gap_fraction_ring_4", float("nan")),
+                "lai_uneven_gap_fraction_ring_5": rec.get("lai_uneven_gap_fraction_ring_5", float("nan")),
+                "lai_n_scans": rec.get("lai_n_scans", float("nan")),
+                "lai_n_angles": rec.get("lai_n_angles", float("nan")),
+                "lai_n_rays": rec.get("lai_n_rays", float("nan")),
+                "lai_gap_distance_m": rec.get("lai_gap_distance_m", float("nan")),
+                "lai_even_corrected_zero_gap_bins": rec.get("lai_even_corrected_zero_gap_bins", float("nan")),
+                "lai_uneven_corrected_zero_gap_bins": rec.get("lai_uneven_corrected_zero_gap_bins", float("nan")),
+                "lai_angle_column_used": rec.get("lai_angle_column_used"),
+                "lai_distance_column_used": rec.get("lai_distance_column_used"),
+                "lai_n_missing_range": rec.get("lai_n_missing_range", float("nan")),
+                "lai_n_missing_angle": rec.get("lai_n_missing_angle", float("nan")),
                 "lidar_scans": rec.get("lidar_scans", float("nan")),
                 "lidar_angles": rec.get("lidar_angles", float("nan")),
                 "point_density_m2": rec.get("point_density_m2", float("nan")),
