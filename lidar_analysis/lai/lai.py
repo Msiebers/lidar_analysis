@@ -174,27 +174,46 @@ def compute_lai_trait_from_target(target: Any, *, gap_distance_m: float = 30.0) 
     else:
         return _empty_lai_traits(gap_distance_m=gap_distance_m)
 
-    if "phi" not in points.columns:
+    if "theta" not in points.columns:
         return _empty_lai_traits(
             gap_distance_m=gap_distance_m,
             distance_column=distance_column,
             n_missing_angle=len(points),
         )
 
-    angle_column = "phi"
-    phi = points[angle_column].to_numpy(dtype=float, copy=False)
+    angle_column = "theta_sky_half"
+    theta = points["theta"].to_numpy(dtype=float, copy=False)
 
-    # Preserve the legacy pipeline_core._lidar_dict_from_plot_indices convention:
-    # fused/target phi is in radians and zenith is abs(pi/2 - phi). This is the
-    # comparison LAI beam-angle convention, not world-zenith corrected geometry.
-    finite_phi = phi[np.isfinite(phi)]
-    if finite_phi.size and np.nanmax(np.abs(finite_phi)) > (2.0 * math.pi + 1e-6):
-        phi = np.deg2rad(phi)
-    zeniths_rad = np.abs((0.5 * math.pi) - phi)
+    # Legacy comparison LAI sky-facing sector for the cart-mounted SICK.
+    #
+    # Physical cap orientation:
+    #   theta =   0 deg  -> down / ground
+    #   theta = +90 deg  -> side / horizon
+    #   theta = -90 deg  -> side / horizon
+    #   theta = +/-180   -> up / sky
+    #
+    # Therefore legacy zenith-from-sky is:
+    #   theta = +/-180 deg -> zenith = 0 deg
+    #   theta = +/-90 deg  -> zenith = 90 deg
+    #
+    # We exclude the downward half near theta = 0.
+    # This is still legacy comparison LAI, not world-zenith-corrected geometry.
+    finite_theta = theta[np.isfinite(theta)]
+    if finite_theta.size and np.nanmax(np.abs(finite_theta)) > (2.0 * math.pi + 1e-6):
+        theta = np.deg2rad(theta)
+
+    # Normalize theta to [-pi, pi].
+    theta = ((theta + math.pi) % (2.0 * math.pi)) - math.pi
+
+    # Distance from the sky/up direction at +/-pi.
+    zeniths_rad = math.pi - np.abs(theta)
+
+    # Keep only the sky-facing half: zenith 0..90 degrees.
+    theta_sector = (zeniths_rad >= 0.0) & (zeniths_rad <= 0.5 * math.pi)
 
     range_ok = np.isfinite(distances_m)
     angle_ok = np.isfinite(zeniths_rad)
-    valid = range_ok & angle_ok
+    valid = range_ok & angle_ok & theta_sector
     n_missing_range = int((~range_ok).sum())
     n_missing_angle = int((~angle_ok).sum())
 
@@ -207,7 +226,16 @@ def compute_lai_trait_from_target(target: Any, *, gap_distance_m: float = 30.0) 
             n_missing_angle=n_missing_angle,
         )
 
-    distances_scan = distances_m[valid][None, :]
+    distances_scan = distances_m[valid].copy()
+
+    # SICK raw CSVs appear to encode no-return / no-hit beams as distance 0.
+    # The legacy LAI algorithm expects gaps to be distances > gap_distance_m.
+    # Convert zero-distance sky-sector rays to a legacy gap sentinel so the
+    # old gap-fraction calculation can see them as canopy escapes.
+    zero_distance_as_gap = distances_scan <= 0.0
+    distances_scan[zero_distance_as_gap] = gap_distance_m + 1.0
+    distances_scan = distances_scan[None, :]
+
     zeniths_scan = zeniths_rad[valid]
     pair = compute_legacy_lai_pair(
         distances_m=distances_scan,
