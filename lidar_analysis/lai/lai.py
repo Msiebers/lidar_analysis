@@ -153,36 +153,36 @@ def compute_lai_trait_from_lidar_data(
     )
 
 
-def compute_lai_trait_from_target(target: Any, *, gap_distance_m: float = 30.0) -> dict[str, Any]:
+def compute_lai_trait_from_beam_rows(
+    *,
+    distances_m: np.ndarray,
+    theta_rad: np.ndarray,
+    gap_distance_m: float = 30.0,
+    distance_column: str | None = "dist_mm",
+) -> dict[str, Any]:
+    """Compute legacy LAI from emitted LiDAR beam rows.
+
+    LAI uses the SICK cap's sky-facing theta half, not endpoint-selected
+    reconstructed target points.  SICK distance zero is treated as a no-return
+    / gap beam by converting it to the legacy gap sentinel before calling the
+    old LAI math.
     """
-    Compute legacy LAI traits from the target's initially split ray rows.
+    distances_m = np.asarray(distances_m, dtype=float)
+    theta = np.asarray(theta_rad, dtype=float)
 
-    The current pipeline stores the split plot/plant rows in AnalysisTarget.raw_points
-    before pointcloud filters mutate current_points, so this wrapper uses raw_points
-    to keep LAI aligned to the target Z interval without losing rows to later filters.
-    """
-    points = getattr(target, "raw_points", None)
-    if points is None or len(points) == 0:
-        return _empty_lai_traits(gap_distance_m=gap_distance_m)
-
-    if "range_m" in points.columns:
-        distance_column = "range_m"
-        distances_m = points["range_m"].to_numpy(dtype=float, copy=False)
-    elif "dist_mm" in points.columns:
-        distance_column = "dist_mm"
-        distances_m = points["dist_mm"].to_numpy(dtype=float, copy=False) / 1000.0
-    else:
-        return _empty_lai_traits(gap_distance_m=gap_distance_m)
-
-    if "theta" not in points.columns:
+    if distances_m.size == 0:
         return _empty_lai_traits(
             gap_distance_m=gap_distance_m,
+            angle_column="theta_sky_half",
             distance_column=distance_column,
-            n_missing_angle=len(points),
+        )
+    if theta.size != distances_m.size:
+        raise ValueError(
+            "LAI distances_m and theta_rad must have the same number of rows "
+            f"({distances_m.size} != {theta.size})"
         )
 
     angle_column = "theta_sky_half"
-    theta = points["theta"].to_numpy(dtype=float, copy=False)
 
     # Legacy comparison LAI sky-facing sector for the cart-mounted SICK.
     #
@@ -250,4 +250,40 @@ def compute_lai_trait_from_target(target: Any, *, gap_distance_m: float = 30.0) 
         distance_column=distance_column,
         n_missing_range=n_missing_range,
         n_missing_angle=n_missing_angle,
+    )
+
+
+def compute_lai_trait_from_target(target: Any, *, gap_distance_m: float = 30.0) -> dict[str, Any]:
+    """
+    Compute legacy LAI traits from an AnalysisTarget's raw point rows.
+
+    Prefer compute_lai_trait_from_beam_rows for pipeline plot-level LAI, because
+    AnalysisTarget rows are endpoint-selected and can omit no-return beams.
+    """
+    points = getattr(target, "raw_points", None)
+    if points is None or len(points) == 0:
+        return _empty_lai_traits(gap_distance_m=gap_distance_m)
+
+    if "range_m" in points.columns:
+        distance_column = "range_m"
+        distances_m = points["range_m"].to_numpy(dtype=float, copy=False)
+    elif "dist_mm" in points.columns:
+        distance_column = "dist_mm"
+        distances_m = points["dist_mm"].to_numpy(dtype=float, copy=False) / 1000.0
+    else:
+        return _empty_lai_traits(gap_distance_m=gap_distance_m)
+
+    if "theta" not in points.columns:
+        return _empty_lai_traits(
+            gap_distance_m=gap_distance_m,
+            distance_column=distance_column,
+            n_missing_angle=len(points),
+        )
+
+    theta = points["theta"].to_numpy(dtype=float, copy=False)
+    return compute_lai_trait_from_beam_rows(
+        distances_m=distances_m,
+        theta_rad=theta,
+        gap_distance_m=gap_distance_m,
+        distance_column=distance_column,
     )
