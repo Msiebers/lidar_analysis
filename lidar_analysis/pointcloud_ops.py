@@ -436,6 +436,8 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
                 length_axis=str(op_cfg.get("length_axis", "Z")),
                 percentile_height=float(op_cfg.get("percentile_height", 50.0)),
                 min_points_per_slice=int(op_cfg.get("min_points_per_slice", 5)),
+                clump_grid_m=float(op_cfg.get("clump_grid_m", 0.05)),
+                clump_connectivity=int(op_cfg.get("clump_connectivity", 8)),
             )
             traits.update(slice_traits)
             diagnostics.setdefault("slice_structure_trait", []).append(slice_diag)
@@ -533,6 +535,234 @@ def _footprint_diameter_2d(points_2d: np.ndarray) -> float:
     return float(np.sqrt(max_d2))
 
 
+def _largest_grid_component_mask(
+    a: np.ndarray,
+    b: np.ndarray,
+    *,
+    grid_m: float,
+    connectivity: int = 8,
+) -> tuple[np.ndarray, int]:
+    """
+    Return point mask and occupied-cell count for the largest 2D grid clump.
+
+    a/b are footprint coordinates in metres, usually X/Z.
+    """
+    n = int(a.size)
+    if n == 0:
+        return np.zeros((0,), dtype=bool), 0
+
+    grid_m = float(grid_m)
+    if not np.isfinite(grid_m) or grid_m <= 0:
+        raise ValueError(f"clump_grid_m must be > 0, got {grid_m}")
+
+    ia = np.floor(a / grid_m).astype(np.int64)
+    ib = np.floor(b / grid_m).astype(np.int64)
+
+    cells = np.column_stack([ia, ib])
+    unique_cells, inverse = np.unique(cells, axis=0, return_inverse=True)
+
+    n_cells = int(unique_cells.shape[0])
+    if n_cells == 0:
+        return np.zeros((n,), dtype=bool), 0
+
+    cell_to_idx = {
+        (int(unique_cells[i, 0]), int(unique_cells[i, 1])): i
+        for i in range(n_cells)
+    }
+
+    point_counts = np.bincount(inverse, minlength=n_cells)
+
+    if int(connectivity) == 4:
+        offsets = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+    else:
+        offsets = [
+            (-1, -1), (-1, 0), (-1, 1),
+            (0, -1),           (0, 1),
+            (1, -1),  (1, 0),  (1, 1),
+        ]
+
+    visited = np.zeros(n_cells, dtype=bool)
+    best_component: list[int] = []
+    best_score = -1
+
+    for seed in range(n_cells):
+        if visited[seed]:
+            continue
+
+        stack = [seed]
+        visited[seed] = True
+        comp: list[int] = []
+
+        while stack:
+            ci = stack.pop()
+            comp.append(ci)
+
+            ca = int(unique_cells[ci, 0])
+            cb = int(unique_cells[ci, 1])
+
+            for da, db in offsets:
+                ni = cell_to_idx.get((ca + da, cb + db))
+                if ni is None or visited[ni]:
+                    continue
+                visited[ni] = True
+                stack.append(ni)
+
+        score = int(point_counts[comp].sum())
+        if score > best_score:
+            best_score = score
+            best_component = comp
+
+    if not best_component:
+        return np.zeros((n,), dtype=bool), 0
+
+    best_component_arr = np.asarray(best_component, dtype=np.int64)
+    point_mask = np.isin(inverse, best_component_arr)
+    return point_mask, int(best_component_arr.size)
+
+
+def _largest_closed_clump_cells_and_points(
+    a: np.ndarray,
+    b: np.ndarray,
+    *,
+    grid_m: float,
+    connectivity: int = 8,
+    close_cells: int = 1,
+    fill_holes: bool = True,
+) -> tuple[int, np.ndarray]:
+    """
+    Find largest connected occupied-cell clump in 2D, then close/fill that
+    clump and return:
+
+      closed_cell_count, point_mask_for_original_largest_clump
+
+    a/b are footprint coordinates in metres, usually X/Z.
+
+    Important:
+    - Connectivity is used to decide what cells belong to the same observed clump.
+    - Closing/filling is applied only after the largest clump is selected.
+    - This does not close the whole slice, so separate neighbor plants are less
+      likely to get bridged into the target.
+    """
+    n = int(a.size)
+    if n == 0:
+        return 0, np.zeros((0,), dtype=bool)
+
+    grid_m = float(grid_m)
+    if not np.isfinite(grid_m) or grid_m <= 0:
+        raise ValueError(f"clump_grid_m must be > 0, got {grid_m}")
+
+    ia = np.floor(a / grid_m).astype(np.int64)
+    ib = np.floor(b / grid_m).astype(np.int64)
+
+    cells = np.column_stack([ia, ib])
+    unique_cells, inverse = np.unique(cells, axis=0, return_inverse=True)
+
+    n_cells = int(unique_cells.shape[0])
+    if n_cells == 0:
+        return 0, np.zeros((n,), dtype=bool)
+
+    cell_to_idx = {
+        (int(unique_cells[i, 0]), int(unique_cells[i, 1])): i
+        for i in range(n_cells)
+    }
+
+    point_counts = np.bincount(inverse, minlength=n_cells)
+
+    if int(connectivity) == 4:
+        offsets = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+    else:
+        offsets = [
+            (-1, -1), (-1, 0), (-1, 1),
+            (0, -1),           (0, 1),
+            (1, -1),  (1, 0),  (1, 1),
+        ]
+
+    visited = np.zeros(n_cells, dtype=bool)
+    best_component: list[int] = []
+    best_score = -1
+
+    for seed in range(n_cells):
+        if visited[seed]:
+            continue
+
+        stack = [seed]
+        visited[seed] = True
+        comp: list[int] = []
+
+        while stack:
+            ci = stack.pop()
+            comp.append(ci)
+
+            ca = int(unique_cells[ci, 0])
+            cb = int(unique_cells[ci, 1])
+
+            for da, db in offsets:
+                ni = cell_to_idx.get((ca + da, cb + db))
+                if ni is None or visited[ni]:
+                    continue
+                visited[ni] = True
+                stack.append(ni)
+
+        # Largest clump means most original points, not widest footprint.
+        score = int(point_counts[comp].sum())
+        if score > best_score:
+            best_score = score
+            best_component = comp
+
+    if not best_component:
+        return 0, np.zeros((n,), dtype=bool)
+
+    best_component_arr = np.asarray(best_component, dtype=np.int64)
+    point_mask = np.isin(inverse, best_component_arr)
+
+    # Build a small binary image around only the largest clump.
+    best_cells = unique_cells[best_component_arr]
+    min_a = int(np.min(best_cells[:, 0]))
+    max_a = int(np.max(best_cells[:, 0]))
+    min_b = int(np.min(best_cells[:, 1]))
+    max_b = int(np.max(best_cells[:, 1]))
+
+    # Padding gives closing room to operate without clipping at the edge.
+    close_cells = max(int(close_cells), 0)
+    pad = max(close_cells + 2, 2)
+
+    shape_a = (max_a - min_a + 1) + 2 * pad
+    shape_b = (max_b - min_b + 1) + 2 * pad
+
+    img = np.zeros((shape_a, shape_b), dtype=bool)
+    aa = best_cells[:, 0] - min_a + pad
+    bb = best_cells[:, 1] - min_b + pad
+    img[aa, bb] = True
+
+    closed = img
+
+    if close_cells > 0:
+        try:
+            from scipy import ndimage
+
+            structure = np.ones(
+                (2 * close_cells + 1, 2 * close_cells + 1),
+                dtype=bool,
+            )
+            closed = ndimage.binary_closing(closed, structure=structure)
+
+            if fill_holes:
+                closed = ndimage.binary_fill_holes(closed)
+        except Exception:
+            # If scipy.ndimage is unavailable for some reason, fall back to
+            # occupied cells only rather than crashing the whole pipeline.
+            closed = img
+    elif fill_holes:
+        try:
+            from scipy import ndimage
+            closed = ndimage.binary_fill_holes(closed)
+        except Exception:
+            closed = img
+
+    closed_cell_count = int(np.count_nonzero(closed))
+    return closed_cell_count, point_mask
+
+
 def _compute_slice_structure_traits(
     points_df,
     *,
@@ -542,26 +772,32 @@ def _compute_slice_structure_traits(
     length_axis: str = "Z",
     percentile_height: float = 50.0,
     min_points_per_slice: int = 5,
+    clump_grid_m: float = 0.05,
+    clump_connectivity: int = 8,
+    clump_close_cells: int = 1,
+    clump_fill_holes: bool = True,
 ) -> tuple[dict, dict]:
     """
-    Compute target-level slice structure traits from the current point cloud.
+    Compute target-level closed-clump slice volume from the current point cloud.
 
     Assumes AnalysisTarget.current_points / df stores X/Y/Z in millimetres.
 
-    Traits:
+    Public output names are intentionally unchanged:
       - stacked_hull_volume_m3:
-          Slice by height, compute 2D convex hull area in spread/length plane,
-          multiply by slice thickness, and sum across slices.
-
+          now means closed largest-clump slice volume.
       - max_spread_m:
-          Largest 2D footprint diameter in the spread/length plane across
-          all height slices.
-
+          largest 2D footprint diameter of the observed largest clump in any slice.
       - spread_at_50_m:
-          2D footprint diameter in the spread/length plane for the slice
-          centered at percentile_height percent of this target's own height
-          range. The name stays spread_at_50_m because the normal/default use
-          is percentile_height=50.
+          2D footprint diameter of the observed largest clump near target-relative
+          percentile_height. Still experimental.
+
+    Algorithm:
+      For each height slice:
+        1. Grid X/Z footprint into clump_grid_m cells.
+        2. Find connected occupied-cell clumps.
+        3. Keep largest observed clump.
+        4. Apply binary closing/fill only to that clump.
+        5. Count closed cells and multiply by cell area and slice thickness.
     """
     h_col = _axis_name_to_col(height_axis)
     s_col = _axis_name_to_col(spread_axis)
@@ -575,6 +811,10 @@ def _compute_slice_structure_traits(
     if slice_height_m <= 0:
         raise ValueError(f"slice_height_m must be > 0, got {slice_height_m}")
 
+    clump_grid_m = float(clump_grid_m)
+    if clump_grid_m <= 0:
+        raise ValueError(f"clump_grid_m must be > 0, got {clump_grid_m}")
+
     percentile_height = float(percentile_height)
     if not (0.0 <= percentile_height <= 100.0):
         raise ValueError(
@@ -584,6 +824,10 @@ def _compute_slice_structure_traits(
     min_points_per_slice = int(min_points_per_slice)
     if min_points_per_slice < 1:
         min_points_per_slice = 1
+
+    clump_connectivity = 4 if int(clump_connectivity) == 4 else 8
+    clump_close_cells = max(int(clump_close_cells), 0)
+    clump_fill_holes = bool(clump_fill_holes)
 
     # Convert once: pipeline stores coordinates in mm; this op works in metres.
     xyz_m = points_df[[s_col, h_col, l_col]].to_numpy(dtype=float, copy=True) / 1000.0
@@ -607,10 +851,15 @@ def _compute_slice_structure_traits(
         "n_points_input": int(points_df.shape[0]),
         "n_points_valid": int(height.size),
         "slice_height_m": float(slice_height_m),
+        "clump_grid_m": float(clump_grid_m),
+        "clump_connectivity": int(clump_connectivity),
+        "clump_close_cells": int(clump_close_cells),
+        "clump_fill_holes": bool(clump_fill_holes),
         "height_axis": h_col,
         "spread_axis": s_col,
         "length_axis": l_col,
-        "spread_metric": "2d_footprint_diameter",
+        "volume_metric": "closed_largest_connected_clump_grid_volume",
+        "spread_metric": "observed_largest_clump_2d_footprint_diameter",
         "percentile_height": float(percentile_height),
         "min_points_per_slice": int(min_points_per_slice),
         "n_slices": 0,
@@ -660,13 +909,33 @@ def _compute_slice_structure_traits(
         if n == 0:
             continue
 
+        if n < min_points_per_slice:
+            n_slices_skipped_min_points += 1
+            continue
+
         slice_spread = spread[m]
         slice_length = length[m]
-        pts_2d = np.column_stack([slice_spread, slice_length])
 
-        # "Spread" now means 2D X/Z footprint diameter, not X-only width.
-        if n >= 2:
-            diameter_m = _footprint_diameter_2d(pts_2d)
+        closed_cells, keep_mask = _largest_closed_clump_cells_and_points(
+            slice_spread,
+            slice_length,
+            grid_m=clump_grid_m,
+            connectivity=clump_connectivity,
+            close_cells=clump_close_cells,
+            fill_holes=clump_fill_holes,
+        )
+
+        if closed_cells <= 0 or not np.any(keep_mask):
+            continue
+
+        thickness_m = max(float(hi - lo), 0.0)
+        total_volume += float(closed_cells) * (clump_grid_m ** 2) * thickness_m
+        n_volume_slices += 1
+
+        # Spread uses observed largest clump points, not the closed/fill mask.
+        clump_pts_2d = np.column_stack([slice_spread[keep_mask], slice_length[keep_mask]])
+        if clump_pts_2d.shape[0] >= 2:
+            diameter_m = _footprint_diameter_2d(clump_pts_2d)
             if np.isfinite(diameter_m):
                 max_spread = (
                     diameter_m
@@ -675,18 +944,7 @@ def _compute_slice_structure_traits(
                 )
                 n_spread_slices += 1
 
-        # Volume uses convex hull area in X/Z times height-slice thickness.
-        if n >= min_points_per_slice:
-            hull_area_m2 = _convex_hull_area_2d(pts_2d)
-            if np.isfinite(hull_area_m2) and hull_area_m2 > 0:
-                thickness_m = max(float(hi - lo), 0.0)
-                total_volume += hull_area_m2 * thickness_m
-                n_volume_slices += 1
-        else:
-            n_slices_skipped_min_points += 1
-
     # Target-relative percentile height.
-    # For 50, this is halfway between this target's min and max height.
     frac = percentile_height / 100.0
     h_center = h_min + frac * h_range
     diagnostics["percentile_height_center_m"] = float(h_center)
@@ -696,9 +954,22 @@ def _compute_slice_structure_traits(
     n_p = int(np.sum(p_mask))
     diagnostics["spread_at_percentile_n_points"] = n_p
 
-    if n_p >= 2:
-        p_pts_2d = np.column_stack([spread[p_mask], length[p_mask]])
-        spread_at_p = _footprint_diameter_2d(p_pts_2d)
+    if n_p >= min_points_per_slice:
+        p_spread = spread[p_mask]
+        p_length = length[p_mask]
+        _, p_keep_mask = _largest_closed_clump_cells_and_points(
+            p_spread,
+            p_length,
+            grid_m=clump_grid_m,
+            connectivity=clump_connectivity,
+            close_cells=clump_close_cells,
+            fill_holes=clump_fill_holes,
+        )
+        if np.any(p_keep_mask):
+            p_pts_2d = np.column_stack([p_spread[p_keep_mask], p_length[p_keep_mask]])
+            spread_at_p = _footprint_diameter_2d(p_pts_2d)
+        else:
+            spread_at_p = float("nan")
     else:
         spread_at_p = float("nan")
 
@@ -711,4 +982,3 @@ def _compute_slice_structure_traits(
     diagnostics["n_slices_skipped_min_points"] = int(n_slices_skipped_min_points)
 
     return traits, diagnostics
-

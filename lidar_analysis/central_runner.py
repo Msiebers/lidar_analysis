@@ -466,7 +466,7 @@ def append_trait_rows(
             row = {
                 "experiment": experiment,
                 "date": date_str,
-                "scan_id": scan_id,
+                "scan_id": rec.get("scan", scan_id),
                 "row": rec.get("row"),
                 "plot": rec.get("plot"),
                 "height_m": rec.get("height_m"),

@@ -970,6 +970,37 @@ def is_additional_scan_name(scan_base: str) -> bool:
     return s.startswith("scan_")
 
 
+def _safe_filename_token(value) -> str:
+    token = str(value).strip()
+    token = token.replace(os.sep, "_")
+    if os.altsep:
+        token = token.replace(os.altsep, "_")
+    token = token.replace(" ", "_")
+    token = "".join(
+        ch if (ch.isalnum() or ch in {"_", "-", "&"}) else "_"
+        for ch in token
+    )
+    token = token.strip("_")
+    return token or "unknown"
+
+
+def _additional_scan_target_suffix(plot: Plot) -> str:
+    target_type = _safe_filename_token(getattr(plot, "target_type", "plot"))
+    target_number = _safe_filename_token(getattr(plot, "target_number", getattr(plot, "letter", "target")))
+    letter = _safe_filename_token(getattr(plot, "letter", target_number))
+
+    if target_type.lower() in {"none", "nan", "unknown", ""}:
+        return letter
+
+    if target_number.lower() in {"none", "nan", "unknown", ""}:
+        return f"{target_type}_{letter}"
+
+    if target_number.lower().startswith(target_type.lower() + "_"):
+        return target_number
+
+    return f"{target_type}_{target_number}"
+
+
 def with_side_suffix(plot: Plot, side_label: str, side_sign: str) -> Plot:
     p2 = Plot(
         row=plot.row,
@@ -984,10 +1015,15 @@ def with_side_suffix(plot: Plot, side_label: str, side_sign: str) -> Plot:
     p2.side_label = side_label
     p2.side_sign = side_sign
 
+    side_token = _safe_filename_token(side_label)
+
     if is_additional_scan_name(str(plot.scan_base)):
-        file_stem = f"{plot.scan_base}_{side_label}"
+        scan_token = _safe_filename_token(plot.scan_base)
+        target_suffix = _additional_scan_target_suffix(plot)
+        file_stem = f"{scan_token}_{side_token}_{target_suffix}"
     else:
-        file_stem = os.path.splitext(os.path.basename(p2.csv_out))[0] + f"_{side_label}"
+        file_stem = os.path.splitext(os.path.basename(p2.csv_out))[0] + f"_{side_token}"
+
     p2.csv_out = os.path.join(p2.out_dir, f"{file_stem}.csv")
     p2.ply_out = os.path.join(p2.out_dir, f"{file_stem}.ply")
     return p2
@@ -1179,9 +1215,12 @@ def analyze_plot(
         stand_topo_left_per_m = float(op_traits.get("topo_left_per_m", op_traits.get("topo_count_left", float("nan"))))
         stand_topo_right_per_m = float(op_traits.get("topo_right_per_m", op_traits.get("topo_count_right", float("nan"))))
 
+    side_label = getattr(p, "side_label", None)
+
     result = {
-        "scan": scan_base if not getattr(p, "side_label", None) else f"{scan_base}_{p.side_label}",
-        "row": p.row,
+        "scan": scan_base if not side_label else f"{scan_base}_{side_label}",
+        "row": side_label if side_label else p.row,
+        "side": side_label,
         "plot": p.letter,
         "split_source": getattr(p, "split_source", "distance"),
         "target_type": getattr(p, "target_type", "plot"),
@@ -1339,22 +1378,26 @@ def process_scan(
         return []
 
     beam_diag = compute_beam_diagnostics(fused_np, rounding_decimals=6)
-    beam_diag_csv = write_beam_diagnostics_csv(out_dir, scan_base, beam_diag)
-    print(f"[BeamDiag] wrote {beam_diag_csv}")
-    print(
-        "[BeamDiag] "
-        f"rows={beam_diag.summary.get('n_fused_rows')} "
-        f"unique_beams={beam_diag.summary.get('n_unique_beams')} "
-        f"unique_phi={beam_diag.summary.get('n_unique_phi')} "
-        f"unique_theta={beam_diag.summary.get('n_unique_theta')} "
-        f"rows_per_beam(min/median/max/mean)="
-        f"{beam_diag.summary.get('rows_per_beam_min')}/"
-        f"{beam_diag.summary.get('rows_per_beam_median')}/"
-        f"{beam_diag.summary.get('rows_per_beam_max')}/"
-        f"{beam_diag.summary.get('rows_per_beam_mean'):.2f} "
-        f"stable={beam_diag.summary.get('beam_count_stable')} "
-        f"rotation={beam_diag.summary.get('rotation_inference')}: {beam_diag.summary.get('rotation_note')}"
-    )
+
+    # Beam diagnostics are kept in memory because beam_id is used downstream in
+    # AnalysisTarget metadata. Do not write the diagnostics CSV during routine runs.
+    #
+    # beam_diag_csv = write_beam_diagnostics_csv(out_dir, scan_base, beam_diag)
+    # print(f"[BeamDiag] wrote {beam_diag_csv}")
+    # print(
+    #     "[BeamDiag] "
+    #     f"rows={beam_diag.summary.get('n_fused_rows')} "
+    #     f"unique_beams={beam_diag.summary.get('n_unique_beams')} "
+    #     f"unique_phi={beam_diag.summary.get('n_unique_phi')} "
+    #     f"unique_theta={beam_diag.summary.get('n_unique_theta')} "
+    #     f"rows_per_beam(min/median/max/mean)="
+    #     f"{beam_diag.summary.get('rows_per_beam_min')}/"
+    #     f"{beam_diag.summary.get('rows_per_beam_median')}/"
+    #     f"{beam_diag.summary.get('rows_per_beam_max')}/"
+    #     f"{beam_diag.summary.get('rows_per_beam_mean'):.2f} "
+    #     f"stable={beam_diag.summary.get('beam_count_stable')} "
+    #     f"rotation={beam_diag.summary.get('rotation_inference')}: {beam_diag.summary.get('rotation_note')}"
+    # )
 
     data, keep_idx = reconstruct_world_points(
         fused_np,
