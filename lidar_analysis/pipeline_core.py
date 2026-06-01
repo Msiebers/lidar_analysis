@@ -1386,24 +1386,28 @@ def process_scan(
     beam_diag = compute_beam_diagnostics(fused_np, rounding_decimals=6)
 
     # Beam diagnostics are kept in memory because beam_id is used downstream in
-    # AnalysisTarget metadata. Do not write the diagnostics CSV during routine runs.
-    #
-    # beam_diag_csv = write_beam_diagnostics_csv(out_dir, scan_base, beam_diag)
-    # print(f"[BeamDiag] wrote {beam_diag_csv}")
-    # print(
-    #     "[BeamDiag] "
-    #     f"rows={beam_diag.summary.get('n_fused_rows')} "
-    #     f"unique_beams={beam_diag.summary.get('n_unique_beams')} "
-    #     f"unique_phi={beam_diag.summary.get('n_unique_phi')} "
-    #     f"unique_theta={beam_diag.summary.get('n_unique_theta')} "
-    #     f"rows_per_beam(min/median/max/mean)="
-    #     f"{beam_diag.summary.get('rows_per_beam_min')}/"
-    #     f"{beam_diag.summary.get('rows_per_beam_median')}/"
-    #     f"{beam_diag.summary.get('rows_per_beam_max')}/"
-    #     f"{beam_diag.summary.get('rows_per_beam_mean'):.2f} "
-    #     f"stable={beam_diag.summary.get('beam_count_stable')} "
-    #     f"rotation={beam_diag.summary.get('rotation_inference')}: {beam_diag.summary.get('rotation_note')}"
-    # )
+    # AnalysisTarget metadata. Only write the diagnostics CSV when debugging.
+    write_beam_diag_csv = True
+
+    if write_beam_diag_csv:
+        beam_diag_csv = write_beam_diagnostics_csv(out_dir, scan_base, beam_diag)
+        print(f"[BeamDiag] wrote {beam_diag_csv}")
+
+    print(
+        "[BeamDiag] "
+        f"rows={beam_diag.summary.get('n_fused_rows')} "
+        f"unique_beams={beam_diag.summary.get('n_unique_beams')} "
+        f"unique_phi={beam_diag.summary.get('n_unique_phi')} "
+        f"unique_theta={beam_diag.summary.get('n_unique_theta')} "
+        f"rows_per_beam(min/median/max/mean)="
+        f"{beam_diag.summary.get('rows_per_beam_min')}/"
+        f"{beam_diag.summary.get('rows_per_beam_median')}/"
+        f"{beam_diag.summary.get('rows_per_beam_max')}/"
+        f"{beam_diag.summary.get('rows_per_beam_mean'):.2f} "
+        f"stable={beam_diag.summary.get('beam_count_stable')} "
+        f"rotation={beam_diag.summary.get('rotation_inference')}: "
+        f"{beam_diag.summary.get('rotation_note')}"
+    )
 
     data, keep_idx = reconstruct_world_points(
         fused_np,
