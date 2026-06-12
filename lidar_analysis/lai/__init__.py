@@ -5,6 +5,7 @@ from .fad import (
     legacy_lai,
 )
 from .lai import (
+    compute_lai_all_schemes,
     compute_legacy_lai_pair,
     compute_lai_trait_from_beam_rows,
     compute_lai_trait_from_lidar_data,
@@ -16,6 +17,7 @@ __all__ = [
     "UNEVEN_ZENITH_BREAKS_RAD",
     "LaiResult",
     "legacy_lai",
+    "compute_lai_all_schemes",
     "compute_legacy_lai_pair",
     "compute_lai_trait_from_beam_rows",
     "compute_lai_trait_from_lidar_data",

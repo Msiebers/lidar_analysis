@@ -1328,15 +1328,33 @@ def analyze_plot(
                 theta_rad=lai_rows[:, 2].astype(np.float64, copy=False),
                 gap_distance_m=30.0,
                 distance_column="dist_mm",
+                run_mta=bool(getattr(cfg, "run_mta", False)),
+                mta_lo_deg=float(getattr(cfg, "mta_lo_deg", 25.0)),
+                mta_hi_deg=float(getattr(cfg, "mta_hi_deg", 65.0)),
+                mta_n_bins=int(getattr(cfg, "mta_n_bins", 8)),
+                mta_min_rays_per_bin=int(getattr(cfg, "mta_min_rays_per_bin", 30)),
             )
         elif hasattr(p, "analysis_target"):
-            lai_traits = compute_lai_trait_from_target(p.analysis_target, gap_distance_m=30.0)
+            lai_traits = compute_lai_trait_from_target(
+                p.analysis_target,
+                gap_distance_m=30.0,
+                run_mta=bool(getattr(cfg, "run_mta", False)),
+                mta_lo_deg=float(getattr(cfg, "mta_lo_deg", 25.0)),
+                mta_hi_deg=float(getattr(cfg, "mta_hi_deg", 65.0)),
+                mta_n_bins=int(getattr(cfg, "mta_n_bins", 8)),
+                mta_min_rays_per_bin=int(getattr(cfg, "mta_min_rays_per_bin", 30)),
+            )
         else:
             lai_traits = compute_lai_trait_from_beam_rows(
                 distances_m=np.empty((0,), dtype=np.float64),
                 theta_rad=np.empty((0,), dtype=np.float64),
                 gap_distance_m=30.0,
                 distance_column="dist_mm",
+                run_mta=bool(getattr(cfg, "run_mta", False)),
+                mta_lo_deg=float(getattr(cfg, "mta_lo_deg", 25.0)),
+                mta_hi_deg=float(getattr(cfg, "mta_hi_deg", 65.0)),
+                mta_n_bins=int(getattr(cfg, "mta_n_bins", 8)),
+                mta_min_rays_per_bin=int(getattr(cfg, "mta_min_rays_per_bin", 30)),
             )
 
         if hasattr(p, "analysis_target"):
@@ -1486,16 +1504,64 @@ def analyze_plot(
         "spread_at_50_m": op_traits.get("spread_at_50_m", float("nan")),
     }
     result.update(lai_traits)
+    if not bool(getattr(cfg, "run_mta", False)):
+        for key in ("lai_mta_deg", "lai_mta_sem_deg", "lai_mta_slope", "lai_mta_n_bins"):
+            result.pop(key, None)
     result.update(fad_traits)
+
+    mta_msg = ""
+    if bool(getattr(cfg, "run_mta", False)):
+        mta_msg = (
+            f", MTA={float(lai_traits.get('lai_mta_deg', float('nan'))):.1f} deg "
+            f"({int(lai_traits.get('lai_mta_n_bins', 0) or 0)} bins)"
+        )
 
     print(
         f"[Traits] scan={scan_base}, plot={p.name}, "
-        f"height={height_m:.3f} m, LAI_even={lai_even:.3f}, LAI_uneven={lai_uneven:.3f}, "
+        f"height={height_m:.3f} m, LAI_even={lai_even:.3f}, LAI_uneven={lai_uneven:.3f}"
+        f"{mta_msg}, "
         f"stand_topo_per_m={stand_topo_per_m:.3f}, "
         f"count_left={stand_topo_left_count:.2f}, count_right={stand_topo_right_count:.2f}, "
         f"points={n_points}, scans={n_scans}, angles={n_angles}"
     )
     return result
+
+
+def trait_summary_row(rec: dict, cfg: AnalysisConfig) -> dict:
+    row = {
+        "scan": rec.get("scan"),
+        "row": rec.get("row"),
+        "plot": rec.get("plot"),
+        "split_source": rec.get("split_source"),
+        "target_type": rec.get("target_type"),
+        "target_number": rec.get("target_number"),
+        "z_min_m": rec.get("z_min_m", float("nan")),
+        "z_max_m": rec.get("z_max_m", float("nan")),
+        "points": rec.get("points", float("nan")),
+        "height_m": rec.get("height_m", float("nan")),
+        "lai_even": rec.get("lai_even", float("nan")),
+        "lai_uneven": rec.get("lai_uneven", float("nan")),
+        "point_density_m2": rec.get("point_density_m2", float("nan")),
+        "plot_length_m": rec.get("plot_length_m", float("nan")),
+        "plot_width_m": rec.get("plot_width_m", float("nan")),
+        "stand_topo_per_m": rec.get("stand_topo_per_m", float("nan")),
+        "stand_topo_left_count": rec.get("stand_topo_left_count", float("nan")),
+        "stand_topo_right_count": rec.get("stand_topo_right_count", float("nan")),
+        "stand_topo_left_per_m": rec.get("stand_topo_left_per_m", float("nan")),
+        "stand_topo_right_per_m": rec.get("stand_topo_right_per_m", float("nan")),
+        "voxel_count": rec.get("voxel_count", float("nan")),
+        "stacked_hull_volume_m3": rec.get("stacked_hull_volume_m3", float("nan")),
+        "max_spread_m": rec.get("max_spread_m", float("nan")),
+        "spread_at_50_m": rec.get("spread_at_50_m", float("nan")),
+    }
+    if bool(getattr(cfg, "run_mta", False)):
+        row.update({
+            "lai_mta_deg": rec.get("lai_mta_deg", float("nan")),
+            "lai_mta_sem_deg": rec.get("lai_mta_sem_deg", float("nan")),
+            "lai_mta_slope": rec.get("lai_mta_slope", float("nan")),
+            "lai_mta_n_bins": rec.get("lai_mta_n_bins", 0),
+        })
+    return row
 
 
 def apply_rssi_normalization_after_masks(
@@ -1958,54 +2024,7 @@ def run_for_directory(
     if all_trait_records:
         traits_rows = []
         for rec in all_trait_records:
-            traits_rows.append({
-                "scan": rec.get("scan"),
-                "row": rec.get("row"),
-                "plot": rec.get("plot"),
-                "split_source": rec.get("split_source"),
-                "target_type": rec.get("target_type"),
-                "target_number": rec.get("target_number"),
-                "z_min_m": rec.get("z_min_m", float("nan")),
-                "z_max_m": rec.get("z_max_m", float("nan")),
-                "points": rec.get("points", float("nan")),
-                "height_m": rec.get("height_m", float("nan")),
-                "lai_even": rec.get("lai_even", float("nan")),
-                "lai_uneven": rec.get("lai_uneven", float("nan")),
-                # "lai_even_gap_fraction_ring_1": rec.get("lai_even_gap_fraction_ring_1", float("nan")),
-                # "lai_even_gap_fraction_ring_2": rec.get("lai_even_gap_fraction_ring_2", float("nan")),
-                # "lai_even_gap_fraction_ring_3": rec.get("lai_even_gap_fraction_ring_3", float("nan")),
-                # "lai_even_gap_fraction_ring_4": rec.get("lai_even_gap_fraction_ring_4", float("nan")),
-                # "lai_even_gap_fraction_ring_5": rec.get("lai_even_gap_fraction_ring_5", float("nan")),
-                # "lai_uneven_gap_fraction_ring_1": rec.get("lai_uneven_gap_fraction_ring_1", float("nan")),
-                # "lai_uneven_gap_fraction_ring_2": rec.get("lai_uneven_gap_fraction_ring_2", float("nan")),
-                # "lai_uneven_gap_fraction_ring_3": rec.get("lai_uneven_gap_fraction_ring_3", float("nan")),
-                # "lai_uneven_gap_fraction_ring_4": rec.get("lai_uneven_gap_fraction_ring_4", float("nan")),
-                # "lai_uneven_gap_fraction_ring_5": rec.get("lai_uneven_gap_fraction_ring_5", float("nan")),
-                # "lai_n_scans": rec.get("lai_n_scans", float("nan")),
-                # "lai_n_angles": rec.get("lai_n_angles", float("nan")),
-                # "lai_n_rays": rec.get("lai_n_rays", float("nan")),
-                # "lai_gap_distance_m": rec.get("lai_gap_distance_m", float("nan")),
-                # "lai_even_corrected_zero_gap_bins": rec.get("lai_even_corrected_zero_gap_bins", float("nan")),
-                # "lai_uneven_corrected_zero_gap_bins": rec.get("lai_uneven_corrected_zero_gap_bins", float("nan")),
-                # "lai_angle_column_used": rec.get("lai_angle_column_used"),
-                # "lai_distance_column_used": rec.get("lai_distance_column_used"),
-                # "lai_n_missing_range": rec.get("lai_n_missing_range", float("nan")),
-                # "lai_n_missing_angle": rec.get("lai_n_missing_angle", float("nan")),
-                # "lidar_scans": rec.get("lidar_scans", float("nan")),
-                # "lidar_angles": rec.get("lidar_angles", float("nan")),
-                "point_density_m2": rec.get("point_density_m2", float("nan")),
-                "plot_length_m": rec.get("plot_length_m", float("nan")),
-                "plot_width_m": rec.get("plot_width_m", float("nan")),
-                "stand_topo_per_m": rec.get("stand_topo_per_m", float("nan")),
-                "stand_topo_left_count": rec.get("stand_topo_left_count", float("nan")),
-                "stand_topo_right_count": rec.get("stand_topo_right_count", float("nan")),
-                "stand_topo_left_per_m": rec.get("stand_topo_left_per_m", float("nan")),
-                "stand_topo_right_per_m": rec.get("stand_topo_right_per_m", float("nan")),
-                "voxel_count": rec.get("voxel_count", float("nan")),
-                "stacked_hull_volume_m3": rec.get("stacked_hull_volume_m3", float("nan")),
-                "max_spread_m": rec.get("max_spread_m", float("nan")),
-                "spread_at_50_m": rec.get("spread_at_50_m", float("nan")),
-            })
+            traits_rows.append(trait_summary_row(rec, cfg))
         traits_df = pd.DataFrame.from_records(traits_rows)
         traits_df = traits_df.round(2)
         traits_path = os.path.join(dir_path, "lidar_traits_summary.csv")

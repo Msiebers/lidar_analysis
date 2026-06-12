@@ -12,6 +12,16 @@ from .fad import (
 )
 
 _LAI_GAP_FRACTION_RINGS = 5
+_MTA_TRAIT_DEFAULTS: dict[str, Any] = {
+    "lai_mta_deg": float("nan"),
+    "lai_mta_sem_deg": float("nan"),
+    "lai_mta_slope": float("nan"),
+    "lai_mta_n_bins": 0,
+}
+
+
+def _mta_default_traits() -> dict[str, Any]:
+    return dict(_MTA_TRAIT_DEFAULTS)
 
 
 def _empty_lai_traits(
@@ -39,6 +49,7 @@ def _empty_lai_traits(
     for prefix in ("lai_even", "lai_uneven"):
         for ring_i in range(1, _LAI_GAP_FRACTION_RINGS + 1):
             traits[f"{prefix}_gap_fraction_ring_{ring_i}"] = float("nan")
+    traits.update(_mta_default_traits())
     return traits
 
 
@@ -77,6 +88,149 @@ def _flatten_lai_pair(
                 float(vals[ring_i - 1]) if ring_i <= vals.size else float("nan")
             )
 
+    for key, default in _MTA_TRAIT_DEFAULTS.items():
+        value = pair.get(key, default)
+        traits[key] = int(value) if key == "lai_mta_n_bins" else float(value)
+
+    return traits
+
+
+def _robust_mta(
+    *,
+    distances_m: np.ndarray,
+    zeniths_rad: np.ndarray,
+    gap_distance_m: float,
+    lo_deg: float,
+    hi_deg: float,
+    n_bins: int,
+    min_rays_per_bin: int,
+) -> dict[str, Any]:
+    """Estimate mean tilt angle from binned gap fractions.
+
+    This is intentionally narrow and only uses the same range/zenith arrays as
+    legacy LAI.  It does not alter the normal even/uneven LAI calculations.
+    """
+    distances_m = np.asarray(distances_m, dtype=float)
+    zeniths_rad = np.asarray(zeniths_rad, dtype=float)
+    n_bins = int(n_bins)
+    if distances_m.ndim != 2 or zeniths_rad.ndim != 1 or n_bins <= 0:
+        return _mta_default_traits()
+    if distances_m.shape[1] != zeniths_rad.size:
+        return _mta_default_traits()
+
+    lo = math.radians(float(lo_deg))
+    hi = math.radians(float(hi_deg))
+    if not (np.isfinite(lo) and np.isfinite(hi)) or hi <= lo:
+        return _mta_default_traits()
+
+    abs_zeniths = np.abs(zeniths_rad)
+    breaks = np.linspace(lo, hi, n_bins + 1)
+    centers: list[float] = []
+    contacts: list[float] = []
+    xs: list[float] = []
+    ys: list[float] = []
+
+    for bin_i in range(n_bins):
+        in_bin = (abs_zeniths >= breaks[bin_i]) & (abs_zeniths < breaks[bin_i + 1])
+        if not np.any(in_bin):
+            continue
+        rays = distances_m[:, in_bin].ravel()
+        rays = rays[np.isfinite(rays)]
+        if rays.size < int(min_rays_per_bin):
+            continue
+        gap_fraction = float(np.mean(rays > float(gap_distance_m)))
+        if not (0.0 < gap_fraction < 1.0):
+            continue
+
+        center = float((breaks[bin_i] + breaks[bin_i + 1]) / 2.0)
+        contact = float(-math.log(gap_fraction))
+        centers.append(math.degrees(center))
+        contacts.append(contact)
+        xs.append(float(1.0 / max(math.cos(center), 1e-12)))
+        ys.append(contact)
+
+    used_bins = len(centers)
+    if used_bins == 0:
+        return _mta_default_traits()
+
+    centers_arr = np.asarray(centers, dtype=float)
+    weights = np.asarray(contacts, dtype=float)
+    if np.sum(weights) <= 0.0:
+        mta_deg = float(np.mean(centers_arr))
+        sem_deg = float(np.std(centers_arr, ddof=1) / math.sqrt(used_bins)) if used_bins > 1 else float("nan")
+    else:
+        mta_deg = float(np.average(centers_arr, weights=weights))
+        variance = float(np.average((centers_arr - mta_deg) ** 2, weights=weights))
+        sem_deg = math.sqrt(variance / used_bins) if used_bins > 1 else float("nan")
+
+    slope = float("nan")
+    if used_bins >= 2:
+        slope = float(np.polyfit(np.asarray(xs, dtype=float), np.asarray(ys, dtype=float), 1)[0])
+
+    return {
+        "lai_mta_deg": mta_deg,
+        "lai_mta_sem_deg": sem_deg,
+        "lai_mta_slope": slope,
+        "lai_mta_n_bins": used_bins,
+    }
+
+
+def compute_lai_all_schemes(
+    *,
+    distances_m: np.ndarray,
+    zeniths_rad: np.ndarray,
+    gap_distance_m: float = 30.0,
+    run_mta: bool = False,
+    mta_lo_deg: float = 25.0,
+    mta_hi_deg: float = 65.0,
+    mta_n_bins: int = 8,
+    mta_min_rays_per_bin: int = 30,
+) -> dict[str, Any]:
+    """
+    Compute normal legacy LAI and optional MTA traits.
+
+    MTA is opt-in so the default LAI outputs remain the existing even/uneven
+    columns unless callers explicitly request the extra MTA fields.
+    """
+    even = legacy_lai(
+        distances_m=distances_m,
+        zeniths_rad=zeniths_rad,
+        zenith_breaks_rad=EVEN_ZENITH_BREAKS_RAD,
+        gap_distance_m=gap_distance_m,
+    )
+
+    uneven = legacy_lai(
+        distances_m=distances_m,
+        zeniths_rad=zeniths_rad,
+        zenith_breaks_rad=UNEVEN_ZENITH_BREAKS_RAD,
+        gap_distance_m=gap_distance_m,
+    )
+
+    traits: dict[str, Any] = {
+        "lai_even": even.lai,
+        "lai_uneven": uneven.lai,
+        "lai_even_gap_fraction": even.gap_fraction,
+        "lai_uneven_gap_fraction": uneven.gap_fraction,
+        "lai_n_scans": even.n_scans,
+        "lai_n_angles": even.n_angles,
+        "lai_gap_distance_m": gap_distance_m,
+        "lai_even_corrected_zero_gap_bins": even.corrected_zero_gap_bins,
+        "lai_uneven_corrected_zero_gap_bins": uneven.corrected_zero_gap_bins,
+    }
+    if run_mta:
+        traits.update(
+            _robust_mta(
+                distances_m=distances_m,
+                zeniths_rad=zeniths_rad,
+                gap_distance_m=gap_distance_m,
+                lo_deg=mta_lo_deg,
+                hi_deg=mta_hi_deg,
+                n_bins=mta_n_bins,
+                min_rays_per_bin=mta_min_rays_per_bin,
+            )
+        )
+    else:
+        traits.update(_mta_default_traits())
     return traits
 
 
@@ -93,37 +247,23 @@ def compute_legacy_lai_pair(
 
     This is the first-pass legacy behavior.
     """
-    even = legacy_lai(
+    return compute_lai_all_schemes(
         distances_m=distances_m,
         zeniths_rad=zeniths_rad,
-        zenith_breaks_rad=EVEN_ZENITH_BREAKS_RAD,
         gap_distance_m=gap_distance_m,
+        run_mta=False,
     )
-
-    uneven = legacy_lai(
-        distances_m=distances_m,
-        zeniths_rad=zeniths_rad,
-        zenith_breaks_rad=UNEVEN_ZENITH_BREAKS_RAD,
-        gap_distance_m=gap_distance_m,
-    )
-
-    return {
-        "lai_even": even.lai,
-        "lai_uneven": uneven.lai,
-        "lai_even_gap_fraction": even.gap_fraction,
-        "lai_uneven_gap_fraction": uneven.gap_fraction,
-        "lai_n_scans": even.n_scans,
-        "lai_n_angles": even.n_angles,
-        "lai_gap_distance_m": gap_distance_m,
-        "lai_even_corrected_zero_gap_bins": even.corrected_zero_gap_bins,
-        "lai_uneven_corrected_zero_gap_bins": uneven.corrected_zero_gap_bins,
-    }
 
 
 def compute_lai_trait_from_lidar_data(
     lidar_data: dict[str, Any],
     *,
     gap_distance_m: float = 30.0,
+    run_mta: bool = False,
+    mta_lo_deg: float = 25.0,
+    mta_hi_deg: float = 65.0,
+    mta_n_bins: int = 8,
+    mta_min_rays_per_bin: int = 30,
 ) -> dict[str, Any]:
     """
     Pipeline-friendly wrapper for old-style lidar_data dict.
@@ -141,10 +281,15 @@ def compute_lai_trait_from_lidar_data(
 
     distances = np.asarray(lidar_data["distances"], dtype=float)
     zeniths = np.asarray(lidar_data["zeniths"], dtype=float)
-    pair = compute_legacy_lai_pair(
+    pair = compute_lai_all_schemes(
         distances_m=distances,
         zeniths_rad=zeniths,
         gap_distance_m=gap_distance_m,
+        run_mta=run_mta,
+        mta_lo_deg=mta_lo_deg,
+        mta_hi_deg=mta_hi_deg,
+        mta_n_bins=mta_n_bins,
+        mta_min_rays_per_bin=mta_min_rays_per_bin,
     )
     return _flatten_lai_pair(
         pair,
@@ -159,6 +304,11 @@ def compute_lai_trait_from_beam_rows(
     theta_rad: np.ndarray,
     gap_distance_m: float = 30.0,
     distance_column: str | None = "dist_mm",
+    run_mta: bool = False,
+    mta_lo_deg: float = 25.0,
+    mta_hi_deg: float = 65.0,
+    mta_n_bins: int = 8,
+    mta_min_rays_per_bin: int = 30,
 ) -> dict[str, Any]:
     """Compute legacy LAI from emitted LiDAR beam rows.
 
@@ -237,10 +387,15 @@ def compute_lai_trait_from_beam_rows(
     distances_scan = distances_scan[None, :]
 
     zeniths_scan = zeniths_rad[valid]
-    pair = compute_legacy_lai_pair(
+    pair = compute_lai_all_schemes(
         distances_m=distances_scan,
         zeniths_rad=zeniths_scan,
         gap_distance_m=gap_distance_m,
+        run_mta=run_mta,
+        mta_lo_deg=mta_lo_deg,
+        mta_hi_deg=mta_hi_deg,
+        mta_n_bins=mta_n_bins,
+        mta_min_rays_per_bin=mta_min_rays_per_bin,
     )
     return _flatten_lai_pair(
         pair,
@@ -253,7 +408,16 @@ def compute_lai_trait_from_beam_rows(
     )
 
 
-def compute_lai_trait_from_target(target: Any, *, gap_distance_m: float = 30.0) -> dict[str, Any]:
+def compute_lai_trait_from_target(
+    target: Any,
+    *,
+    gap_distance_m: float = 30.0,
+    run_mta: bool = False,
+    mta_lo_deg: float = 25.0,
+    mta_hi_deg: float = 65.0,
+    mta_n_bins: int = 8,
+    mta_min_rays_per_bin: int = 30,
+) -> dict[str, Any]:
     """
     Compute legacy LAI traits from an AnalysisTarget's raw point rows.
 
@@ -286,4 +450,9 @@ def compute_lai_trait_from_target(target: Any, *, gap_distance_m: float = 30.0) 
         theta_rad=theta,
         gap_distance_m=gap_distance_m,
         distance_column=distance_column,
+        run_mta=run_mta,
+        mta_lo_deg=mta_lo_deg,
+        mta_hi_deg=mta_hi_deg,
+        mta_n_bins=mta_n_bins,
+        mta_min_rays_per_bin=mta_min_rays_per_bin,
     )
