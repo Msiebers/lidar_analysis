@@ -7,8 +7,8 @@ import warnings
 import numpy as np
 
 
-EVEN_ZENITH_BREAKS_RAD = np.array((0, 15, 30, 45, 60, 90), dtype=float) / 180.0 * math.pi
-UNEVEN_ZENITH_BREAKS_RAD = np.array((0, 13, 28, 43, 58, 90), dtype=float) / 180.0 * math.pi
+EVEN_ZENITH_BREAKS_RAD = np.array((0, 15, 30, 45, 60, 75), dtype=float) / 180.0 * math.pi
+UNEVEN_ZENITH_BREAKS_RAD = np.array((0, 13, 28, 43, 58, 75), dtype=float) / 180.0 * math.pi
 
 
 @dataclass(frozen=True)

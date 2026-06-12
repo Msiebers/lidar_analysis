@@ -209,7 +209,7 @@ def compute_lai_trait_from_beam_rows(
     zeniths_rad = math.pi - np.abs(theta)
 
     # Keep only the sky-facing half: zenith 0..90 degrees.
-    theta_sector = (zeniths_rad >= 0.0) & (zeniths_rad <= 0.5 * math.pi)
+    theta_sector = (zeniths_rad >= 0.0) & (zeniths_rad <= math.radians(75.0))
 
     range_ok = np.isfinite(distances_m)
     angle_ok = np.isfinite(zeniths_rad)

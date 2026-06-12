@@ -143,8 +143,8 @@ def load_calibration(cart_id: str, calib_dir: str) -> dict:
 # LiDAR-only trait helpers: LAI + height
 # ======================================================================
 
-EVEN_ZENITH_BREAKS = np.array((0, 15, 30, 45, 60, 90), dtype=float) / 180 * math.pi
-UNEVEN_ZENITH_BREAKS = np.array((0, 13, 28, 43, 58, 90), dtype=float) / 180 * math.pi
+EVEN_ZENITH_BREAKS = np.array((0, 15, 30, 45, 60, 75), dtype=float) / 180 * math.pi
+UNEVEN_ZENITH_BREAKS = np.array((0, 13, 28, 43, 58, 75), dtype=float) / 180 * math.pi
 
 def lai(lidar_data: dict, zenith_breaks: np.ndarray) -> float | None:
     """Compute LAI using the legacy gap-fraction routine."""
@@ -270,7 +270,7 @@ def _lidar_dict_from_plot_indices(
     # sky-facing half and express it as legacy zenith (0=sky, pi/2=horizon).
     theta = ((theta + math.pi) % (2.0 * math.pi)) - math.pi
     zeniths = math.pi - np.abs(theta)
-    valid = np.isfinite(dist_m) & np.isfinite(zeniths) & (zeniths >= 0.0) & (zeniths <= 0.5 * math.pi)
+    valid = np.isfinite(dist_m) & np.isfinite(zeniths) & (zeniths >= 0.0) & (zeniths <= math.radians(75.0))
     if not np.any(valid):
         return None
 
