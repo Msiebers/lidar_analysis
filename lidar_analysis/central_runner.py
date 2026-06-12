@@ -366,6 +366,15 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         pitch_sign=pick("pitch_sign", "pitch_sign", float),
         run_lai=pick("run_lai", "run_lai", bool),
         run_height=pick("run_height", "run_height", bool),
+        run_fad=pick("run_fad", "run_fad", bool),
+        fad_height_percentile=pick("fad_height_percentile", "fad_height_percentile", float),
+        fad_y_min_m=pick("fad_y_min_m", "fad_y_min_m", float),
+        fad_height_buffer_m=pick("fad_height_buffer_m", "fad_height_buffer_m", float),
+        fad_grubbs_alpha=pick("fad_grubbs_alpha", "fad_grubbs_alpha", float),
+        fad_g_function=pick("fad_g_function", "fad_g_function", str),
+        fad_run_layers=pick("fad_run_layers", "fad_run_layers", bool),
+        fad_layer_thickness_m=pick("fad_layer_thickness_m", "fad_layer_thickness_m"),
+        fad_include_layer_columns=pick("fad_include_layer_columns", "fad_include_layer_columns", bool),
         write_lidar_per_plot=pick("write_lidar_per_plot", "write_lidar_per_plot", bool),
         pointcloud_ops=experiment_config.get("pointcloud_ops", []),
         pcl_backend=experiment_config.get("pcl_backend"),
@@ -427,6 +436,11 @@ def phenotype_columns(cfg: AnalysisConfig) -> list[str]:
             # "lai_n_missing_range",
             # "lai_n_missing_angle",
         ])
+
+    if bool(getattr(cfg, "run_fad", False)):
+        cols.append("fad_app_m2_m3")
+        if bool(getattr(cfg, "fad_run_layers", False)):
+            cols.extend(["fad_lai_from_layers", "fad_n_layers"])
 
     cols.extend([
         "point_density_m2",
@@ -512,6 +526,9 @@ def append_trait_rows(
                 # "lai_distance_column_used": rec.get("lai_distance_column_used"),
                 # "lai_n_missing_range": rec.get("lai_n_missing_range"),
                 # "lai_n_missing_angle": rec.get("lai_n_missing_angle"),
+                "fad_app_m2_m3": rec.get("fad_app_m2_m3"),
+                "fad_lai_from_layers": rec.get("fad_lai_from_layers"),
+                "fad_n_layers": rec.get("fad_n_layers"),
                 "point_density_m2": rec.get("point_density_m2"),
                 "plot_length_m": rec.get("plot_length_m"),
                 "plot_width_m": rec.get("plot_width_m"),

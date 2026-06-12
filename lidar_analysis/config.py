@@ -49,6 +49,15 @@ class AnalysisConfig:
     min_radius_u: float | None = None
     run_lai: bool = False
     run_height: bool = False
+    run_fad: bool = False
+    fad_height_percentile: float = 99.0
+    fad_y_min_m: float = 0.03
+    fad_height_buffer_m: float = 0.0
+    fad_grubbs_alpha: float = 0.01
+    fad_g_function: str = "spherical"
+    fad_run_layers: bool = False
+    fad_layer_thickness_m: float | None = 0.10
+    fad_include_layer_columns: bool = True
     write_lidar_per_plot: bool = True
 
     # Deprecated compatibility shims.
