@@ -1403,8 +1403,8 @@ def analyze_plot(
                 raw_hit_mask=raw_hit_mask,
                 box=fad_box,
                 g_function=cfg.fad_g_function,
-                layer_thickness_m=cfg.fad_layer_thickness_m,
-                include_layer_columns=cfg.fad_include_layer_columns,
+                layer_thickness_m=cfg.fad_layer_thickness_m if cfg.fad_run_layers else None,
+                include_layer_columns=cfg.fad_include_layer_columns if cfg.fad_run_layers else False,
             )
         )
 
