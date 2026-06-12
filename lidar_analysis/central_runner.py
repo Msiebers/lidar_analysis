@@ -365,6 +365,11 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         roll_sign=pick("roll_sign", "roll_sign", float),
         pitch_sign=pick("pitch_sign", "pitch_sign", float),
         run_lai=pick("run_lai", "run_lai", bool),
+        run_mta=pick("run_mta", "run_mta", bool),
+        mta_lo_deg=pick("mta_lo_deg", "mta_lo_deg", float),
+        mta_hi_deg=pick("mta_hi_deg", "mta_hi_deg", float),
+        mta_n_bins=pick("mta_n_bins", "mta_n_bins", int),
+        mta_min_rays_per_bin=pick("mta_min_rays_per_bin", "mta_min_rays_per_bin", int),
         run_height=pick("run_height", "run_height", bool),
         run_fad=pick("run_fad", "run_fad", bool),
         fad_height_percentile=pick("fad_height_percentile", "fad_height_percentile", float),
@@ -436,6 +441,8 @@ def phenotype_columns(cfg: AnalysisConfig) -> list[str]:
             # "lai_n_missing_range",
             # "lai_n_missing_angle",
         ])
+        if bool(getattr(cfg, "run_mta", False)):
+            cols.extend(["lai_mta_deg", "lai_mta_sem_deg", "lai_mta_slope", "lai_mta_n_bins"])
 
     if bool(getattr(cfg, "run_fad", False)):
         cols.append("fad_app_m2_m3")
@@ -506,6 +513,10 @@ def append_trait_rows(
                 "height_m": rec.get("height_m"),
                 "lai_even": rec.get("lai_even"),
                 "lai_uneven": rec.get("lai_uneven"),
+                "lai_mta_deg": rec.get("lai_mta_deg"),
+                "lai_mta_sem_deg": rec.get("lai_mta_sem_deg"),
+                "lai_mta_slope": rec.get("lai_mta_slope"),
+                "lai_mta_n_bins": rec.get("lai_mta_n_bins"),
                 # "lai_even_gap_fraction_ring_1": rec.get("lai_even_gap_fraction_ring_1"),
                 # "lai_even_gap_fraction_ring_2": rec.get("lai_even_gap_fraction_ring_2"),
                 # "lai_even_gap_fraction_ring_3": rec.get("lai_even_gap_fraction_ring_3"),
