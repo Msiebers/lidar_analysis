@@ -27,6 +27,13 @@ try:
     from .pointcloud_ops import apply_pointcloud_ops
     from .analysis_target import AnalysisTarget
     from .beam_diagnostics import compute_beam_diagnostics, write_beam_diagnostics_csv
+    from .fad import (
+        Box3D,
+        compute_fad_traits,
+        estimate_fad_height_from_points,
+        height_result_to_traits,
+        make_fad_box_from_footprint_and_height,
+    )
 except Exception:
     from config import AnalysisConfig
     from fusion import fuse_by_time
@@ -40,6 +47,13 @@ except Exception:
     from pointcloud_ops import apply_pointcloud_ops
     from analysis_target import AnalysisTarget
     from beam_diagnostics import compute_beam_diagnostics, write_beam_diagnostics_csv
+    from fad import (
+        Box3D,
+        compute_fad_traits,
+        estimate_fad_height_from_points,
+        height_result_to_traits,
+        make_fad_box_from_footprint_and_height,
+    )
 
 # ----------------------
 # Load calibration file (STRICT)
@@ -718,6 +732,107 @@ def reconstruct_world_points(
     return data, keep_idx
 
 
+def reconstruct_world_rays(
+    fused_np: np.ndarray,
+    cfg: AnalysisConfig,
+    step_mm: float,
+    lidar_height_mm: float,
+    roll_offset: float,
+    pitch_offset: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return LiDAR beam origins and directions in reconstructed-cloud coordinates.
+
+    This mirrors ``reconstruct_world_points`` for FAD ray-path traits, but uses
+    a unit-length beam vector instead of the measured return distance so
+    no-return rows still contribute valid gap rays.
+    """
+    if fused_np.size == 0:
+        empty = np.empty((0, 3), dtype=np.float32)
+        return empty, empty
+
+    phi = fused_np[:, 1]
+    theta = fused_np[:, 2]
+    count = fused_np[:, 5]
+    roll_deg = fused_np[:, 6]
+    pitch_deg = fused_np[:, 7]
+    yaw_deg = fused_np[:, 8]
+
+    unit_r = np.ones(fused_np.shape[0], dtype=np.float32)
+    beam_dirs_lidar = _to_cartesian_mm(phi, theta, unit_r)
+
+    roll_apply = np.zeros_like(roll_deg, dtype=np.float32)
+    pitch_apply = np.zeros_like(pitch_deg, dtype=np.float32)
+    yaw_apply = np.zeros_like(yaw_deg, dtype=np.float32)
+
+    if cfg.use_imu:
+        imu_zero_mode = str(getattr(cfg, "imu_zero_mode", "dense_median")).strip().lower()
+        imu_zero_fraction = float(getattr(cfg, "imu_zero_fraction", 0.6))
+
+        if imu_zero_mode == "dense_median":
+            roll_zero = dense_median(roll_deg, imu_zero_fraction)
+            pitch_zero = dense_median(pitch_deg, imu_zero_fraction)
+        elif imu_zero_mode == "calibration":
+            roll_zero = float(roll_offset)
+            pitch_zero = float(pitch_offset)
+        else:
+            raise ValueError(f"Unknown imu_zero_mode: {imu_zero_mode}")
+
+        roll_apply = (roll_deg - roll_zero) * cfg.roll_sign
+        pitch_apply = (pitch_deg - pitch_zero) * cfg.pitch_sign
+
+    if cfg.use_heading:
+        yaw_unwrapped = np.rad2deg(np.unwrap(np.deg2rad(yaw_deg)))
+        yaw_zero = np.median(yaw_unwrapped[:50]) if yaw_unwrapped.size >= 50 else yaw_unwrapped[0]
+        yaw_apply = (yaw_unwrapped - yaw_zero) * cfg.heading_sign
+
+    angles = np.stack([roll_apply, pitch_apply, yaw_apply], axis=1)
+    rot = R.from_euler("ZXY", angles, degrees=True)
+
+    d_mm = count.astype(np.float32) * float(step_mm)
+    cart_translation = np.stack(
+        [
+            np.zeros_like(d_mm, dtype=np.float32),
+            np.zeros_like(d_mm, dtype=np.float32),
+            d_mm,
+        ],
+        axis=1,
+    )
+
+    lidar_offset_body = np.array(
+        [0.0, float(lidar_height_mm), 0.0],
+        dtype=np.float32,
+    )
+    lidar_offset_world = rot.apply(
+        np.repeat(lidar_offset_body[None, :], len(d_mm), axis=0)
+    ).astype(np.float32, copy=False)
+
+    origins_mm = cart_translation + lidar_offset_world
+    directions = rot.apply(beam_dirs_lidar).astype(np.float32, copy=False)
+
+    return origins_mm / 1000.0, directions
+
+
+def _fad_x_bounds_for_plot(
+    plot: "Plot",
+    row_options: list[str],
+    row_width_m: float,
+) -> tuple[float, float]:
+    side_sign = getattr(plot, "side_sign", None)
+
+    if side_sign == "positive":
+        return 0.0, float(row_width_m)
+    if side_sign == "negative":
+        return -float(row_width_m), 0.0
+
+    if row_options[0] != row_options[1]:
+        if plot.row == row_options[0]:
+            return 0.0, float(row_width_m)
+        if plot.row == row_options[1]:
+            return -float(row_width_m), 0.0
+
+    return -float(row_width_m), float(row_width_m)
+
+
 def apply_global_filters(
     scan_base: str,
     data: np.ndarray,
@@ -1068,6 +1183,8 @@ def analyze_plot(
     lidar_height_mm: float,
     step_mm: float,
     beam_diag,
+    roll_offset: float = 0.0,
+    pitch_offset: float = 0.0,
 ) -> dict:
     z_mask = p.range_match(data[:, 2])
 
@@ -1103,6 +1220,7 @@ def analyze_plot(
     voxel_count_o3d = float("nan")
     plot_idx = np.empty((0,), dtype=np.int32)
     lai_plot_idx = np.empty((0,), dtype=np.int32)
+    fad_traits = {}
     op_traits = {}
     topo_object_points = []
     write_topology_objects = False
@@ -1228,6 +1346,78 @@ def analyze_plot(
         n_scans = int(lai_traits.get("lai_n_scans", 0) or 0)
         n_angles = int(lai_traits.get("lai_n_angles", 0) or 0)
 
+    if cfg.run_fad:
+        row_width_m = _to_m_units(cfg.row_width_u, cfg.dim_units)
+        x_min_m, x_max_m = _fad_x_bounds_for_plot(p, row_options, row_width_m)
+        z_min_m = float(p.min_z) / 1000.0
+        z_max_m = float(p.max_z) / 1000.0
+
+        if p.analysis_target is not None:
+            fad_points_m = (
+                p.analysis_target.current_points[["X", "Y", "Z"]]
+                .to_numpy(dtype=np.float64, copy=False)
+                / 1000.0
+            )
+        else:
+            fad_points_m = np.empty((0, 3), dtype=np.float64)
+
+        height_result = estimate_fad_height_from_points(
+            fad_points_m,
+            percentile=cfg.fad_height_percentile,
+            y_min_m=cfg.fad_y_min_m,
+            buffer_m=cfg.fad_height_buffer_m,
+            grubbs_alpha=cfg.fad_grubbs_alpha,
+        )
+        fad_traits.update(height_result_to_traits(height_result))
+
+        fad_box: Box3D = make_fad_box_from_footprint_and_height(
+            x_min_m=x_min_m,
+            x_max_m=x_max_m,
+            z_min_m=z_min_m,
+            z_max_m=z_max_m,
+            height=height_result,
+            y_min_m=cfg.fad_y_min_m,
+        )
+
+        fad_plot_idx = _plot_interval_indices_from_fused(fused_np, p, step_mm)
+        fad_rows = fused_np[fad_plot_idx]
+        origins_m, directions_m = reconstruct_world_rays(
+            fad_rows,
+            cfg,
+            step_mm=step_mm,
+            lidar_height_mm=lidar_height_mm,
+            roll_offset=roll_offset,
+            pitch_offset=pitch_offset,
+        )
+        dist_mm = fad_rows[:, 3].astype(np.float64, copy=False) if fad_rows.size else np.empty((0,), dtype=np.float64)
+        raw_hit_mask = dist_mm > 0.0
+        ranges_m = dist_mm / 1000.0
+        ranges_m = ranges_m.astype(np.float64, copy=True)
+        ranges_m[~raw_hit_mask] = np.inf
+
+        fad_traits.update(
+            compute_fad_traits(
+                origins_m=origins_m,
+                directions_m=directions_m,
+                ranges_m=ranges_m,
+                raw_hit_mask=raw_hit_mask,
+                box=fad_box,
+                g_function=cfg.fad_g_function,
+                layer_thickness_m=cfg.fad_layer_thickness_m,
+                include_layer_columns=cfg.fad_include_layer_columns,
+            )
+        )
+
+        fad_value = float(fad_traits.get("fad_app_m2_m3", float("nan")))
+        returns = int(np.sum(raw_hit_mask))
+        no_returns = int(raw_hit_mask.size - returns)
+        target_id = p.analysis_target.target_id if p.analysis_target is not None else p.name
+        print(
+            f"[FAD] target={target_id} rays={int(fad_plot_idx.size)} "
+            f"returns={returns} no_returns={no_returns} "
+            f"height={height_result.height_m:.3f} fad={fad_value:.3f}"
+        )
+
     topo_input = np.empty((0, 3), dtype=float)
     if goto_open3d:
         if cfg.run_o3d_metrics:
@@ -1296,6 +1486,7 @@ def analyze_plot(
         "spread_at_50_m": op_traits.get("spread_at_50_m", float("nan")),
     }
     result.update(lai_traits)
+    result.update(fad_traits)
 
     print(
         f"[Traits] scan={scan_base}, plot={p.name}, "
@@ -1663,6 +1854,8 @@ def process_scan(
             lidar_height_mm,
             step_mm,
             beam_diag,
+            roll_offset=roll_offset,
+            pitch_offset=pitch_offset,
         )
         trait_records.append(rec)
         write_scan_outputs(scan_base, cfg, p)
