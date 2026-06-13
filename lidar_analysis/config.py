@@ -48,6 +48,11 @@ class AnalysisConfig:
     max_y_u: float | None = None
     min_radius_u: float | None = None
     run_lai: bool = False
+    run_mta: bool = False
+    mta_lo_deg: float = 25.0
+    mta_hi_deg: float = 65.0
+    mta_n_bins: int = 8
+    mta_min_rays_per_bin: int = 30
     run_height: bool = False
     run_fad: bool = False
     fad_height_percentile: float = 99.0
