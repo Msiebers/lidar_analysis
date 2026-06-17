@@ -1321,6 +1321,26 @@ def analyze_plot(
 
     if cfg.run_lai:
         lai_plot_idx = _plot_interval_indices_from_fused(fused_np, p, step_mm)
+                # Debug: prove whether LAI is using X-bounded point rows or raw fused rows.
+        if bool(getattr(cfg, "debug_lai_bounds", False)):
+            lai_idx_debug = np.asarray(lai_plot_idx, dtype=np.int64)
+            plot_idx_debug = np.asarray(plot_idx, dtype=np.int64)
+
+            if lai_idx_debug.size and plot_idx_debug.size:
+                overlap = np.intersect1d(lai_idx_debug, plot_idx_debug).size
+                overlap_pct = 100.0 * overlap / lai_idx_debug.size
+            else:
+                overlap = 0
+                overlap_pct = 0.0
+
+            print(
+                f"[LAI_DEBUG] target={p.name} "
+                f"lai_fused_rows={lai_idx_debug.size} "
+                f"x_filtered_plot_rows={plot_idx_debug.size} "
+                f"overlap={overlap} "
+                f"overlap_pct_of_lai={overlap_pct:.1f}% "
+                f"plot_z=({p.min_z:.1f},{p.max_z:.1f})"
+            )
         if lai_plot_idx.size > 0:
             lai_rows = fused_np[lai_plot_idx]
             lai_traits = compute_lai_trait_from_beam_rows(

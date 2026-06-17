@@ -80,22 +80,6 @@ def _scalar_range_filter(df: pd.DataFrame, op_cfg: dict[str, Any]) -> pd.DataFra
     return df.loc[m].copy()
 
 
-def _sor_filter(df: pd.DataFrame, op_cfg: dict[str, Any]) -> pd.DataFrame:
-    mean_k = int(op_cfg.get("mean_k", op_cfg.get("nb_neighbors", 5)))
-    std_mul = float(op_cfg.get("stddev_mul_thresh", op_cfg.get("std_ratio", 2.0)))
-    if len(df) <= 2 or mean_k < 1:
-        return df.copy()
-    xyz = df[["X", "Y", "Z"]].to_numpy(dtype=float, copy=False)
-    k = min(mean_k + 1, len(df))
-    dist, _ = cKDTree(xyz).query(xyz, k=k)
-    # exclude self at [:,0]
-    knn = dist[:, 1:] if dist.ndim > 1 else dist.reshape(-1, 1)
-    mean_dist = np.mean(knn, axis=1)
-    md_mean = float(np.mean(mean_dist))
-    md_std = float(np.std(mean_dist))
-    threshold = md_mean + std_mul * md_std
-    keep = mean_dist <= threshold
-    return df.loc[keep].copy()
 
 
 def _height_range_filter(df: pd.DataFrame, op_cfg: dict[str, Any]) -> tuple[pd.DataFrame, dict[str, Any]]:
@@ -177,9 +161,19 @@ def _topology_trait(df: pd.DataFrame, op_cfg: dict[str, Any], target_obj) -> dic
             f"unique_z_after={unique_z_after}"
         )
 
-    topo_res_whole = topology_stand_count(topo_df, min_persistence=min_persistence)
-    topo_count_whole, pers_whole = _extract_count_and_points(topo_res_whole)
-    topo_raw_whole = float(topo_res_whole.get("count_raw", float("nan"))) if isinstance(topo_res_whole, dict) else float("nan")
+# The whole-cloud persistence pass only feeds the *_whole diagnostics.
+    # When sides are split we get our actual counts from the per-side passes,
+    # so the whole pass is redundant work. Skip it only when explicitly told
+    # to, so default behavior (and the *_whole diagnostic keys) is unchanged.
+    skip_whole = split_sides and bool(op_cfg.get("skip_whole_when_split", False)) \
+        and not bool(op_cfg.get("write_topology_objects", False))
+
+    if skip_whole:
+        topo_count_whole, pers_whole, topo_raw_whole = float("nan"), [], float("nan")
+    else:
+        topo_res_whole = topology_stand_count(topo_df, min_persistence=min_persistence)
+        topo_count_whole, pers_whole = _extract_count_and_points(topo_res_whole)
+        topo_raw_whole = float(topo_res_whole.get("count_raw", float("nan"))) if isinstance(topo_res_whole, dict) else float("nan")
     traits = {
         "topo_count": float("nan"),
         "topo_count_whole": topo_count_whole,
@@ -288,79 +282,125 @@ def _voxel_count(df: pd.DataFrame, op_cfg: dict[str, Any]) -> int:
     idx = np.floor(xyz_m / size_m).astype(np.int64)
     return int(np.unique(idx, axis=0).shape[0])
 
+def _sor_filter(df: pd.DataFrame, op_cfg) -> pd.DataFrame:
+    mean_k = int(op_cfg.get("mean_k", op_cfg.get("nb_neighbors", 5)))
+    std_mul = float(op_cfg.get("stddev_mul_thresh", op_cfg.get("std_ratio", 2.0)))
 
-def _bilateral_scalar_filter(df: pd.DataFrame, op_cfg: dict[str, Any]) -> tuple[pd.DataFrame, str]:
-    field = _require_scalar(df, _resolve_scalar_name(op_cfg), "bilateral_scalar_filter")
+    if len(df) <= 2 or mean_k < 1:
+        return df.copy()
 
-    # Config values are in meters / scalar units.
+    xyz = df[["X", "Y", "Z"]].to_numpy(dtype=float, copy=False)
+
+    finite = np.isfinite(xyz).all(axis=1)
+    if not finite.all():
+        work = df.loc[finite].copy()
+        if len(work) <= 2:
+            return work
+        xyz = work[["X", "Y", "Z"]].to_numpy(dtype=float, copy=False)
+    else:
+        work = df
+
+    k = min(mean_k + 1, len(work))
+
+    tree = cKDTree(xyz, balanced_tree=False, compact_nodes=False)
+    dist, _ = tree.query(xyz, k=k, workers=-1)
+
+    knn = dist[:, 1:] if dist.ndim > 1 else dist.reshape(-1, 1)
+    mean_dist = np.mean(knn, axis=1)
+
+    threshold = float(np.mean(mean_dist)) + std_mul * float(np.std(mean_dist))
+    keep = mean_dist <= threshold
+
+    return work.loc[keep].copy()
+
+
+def _bilateral_scalar_filter(df: pd.DataFrame, op_cfg):
+    field = _require_scalar(
+        df,
+        _resolve_scalar_name(op_cfg),
+        "bilateral_scalar_filter",
+    )
+
     sigma_s = float(op_cfg.get("sigma_spatial", op_cfg.get("spatial_sigma_m", 0.03)))
     sigma_r = float(op_cfg.get("sigma_range", op_cfg.get("scalar_sigma", 2.5)))
-
-    # PCL-style default: radius search at 2 * spatial sigma.
     radius = float(op_cfg.get("radius", op_cfg.get("radius_m", sigma_s * 2.0)))
-
-    # PCL bilateral itself does not expose min/max neighbors, so default to no cap.
     min_neighbors = int(op_cfg.get("min_neighbors", 1))
-    max_neighbors = int(op_cfg.get("max_neighbors", 0))  # 0 = no cap
+    max_neighbors = int(op_cfg.get("max_neighbors", 0))
 
-    if sigma_s <= 0:
-        raise ValueError(f"spatial sigma must be > 0; got {sigma_s}")
-    if sigma_r <= 0:
-        raise ValueError(f"scalar sigma must be > 0; got {sigma_r}")
-    if radius <= 0:
-        raise ValueError(f"radius must be > 0; got {radius}")
+    if sigma_s <= 0 or sigma_r <= 0 or radius <= 0:
+        raise ValueError("bilateral_scalar_filter sigmas and radius must be > 0")
 
     if len(df) == 0:
         return df.copy(), field
 
-    # pipeline_core stores X/Y/Z in millimeters.
-    # Bilateral config uses meters, so convert coordinates to meters here.
     xyz_m = df[["X", "Y", "Z"]].to_numpy(dtype=float, copy=False) / 1000.0
     vals = df[field].to_numpy(dtype=float, copy=False)
 
-    tree = cKDTree(xyz_m)
-    out_vals = vals.copy()
+    finite = np.isfinite(xyz_m).all(axis=1) & np.isfinite(vals)
+    if not finite.all():
+        out = df.copy()
+        used = str(op_cfg.get("output_scalar") or field)
+
+        if bool(op_cfg.get("replace_scalar", True)):
+            used = field
+            out[field] = vals
+        else:
+            out[used] = vals
+
+        work_idx = np.where(finite)[0]
+        if work_idx.size == 0:
+            return out, used
+
+        xyz_work = xyz_m[work_idx]
+        vals_work = vals[work_idx]
+    else:
+        out = df.copy()
+        work_idx = np.arange(len(df))
+        xyz_work = xyz_m
+        vals_work = vals
+
+    tree = cKDTree(xyz_work, balanced_tree=False, compact_nodes=False)
+    all_nbrs = tree.query_ball_point(xyz_work, r=radius, workers=-1)
+
+    out_vals_work = vals_work.copy()
 
     spatial_denom = max(2.0 * sigma_s * sigma_s, 1e-12)
     scalar_denom = max(2.0 * sigma_r * sigma_r, 1e-12)
 
-    for i, p in enumerate(xyz_m):
-        nbr_idx = tree.query_ball_point(p, r=radius)
-
+    for i, nbr_idx in enumerate(all_nbrs):
         if len(nbr_idx) < min_neighbors:
             continue
 
         nbr_idx = np.asarray(nbr_idx, dtype=int)
 
-        # Optional cap, only if explicitly requested.
         if max_neighbors > 0 and nbr_idx.size > max_neighbors:
-            d2_all = np.sum((xyz_m[nbr_idx] - p) ** 2, axis=1)
+            d2_all = np.sum((xyz_work[nbr_idx] - xyz_work[i]) ** 2, axis=1)
             keep_order = np.argsort(d2_all, kind="mergesort")[:max_neighbors]
             nbr_idx = nbr_idx[keep_order]
 
-        d2 = np.sum((xyz_m[nbr_idx] - p) ** 2, axis=1)
-        spatial_w = np.exp(-d2 / spatial_denom)
+        d2 = np.sum((xyz_work[nbr_idx] - xyz_work[i]) ** 2, axis=1)
 
-        scalar_d2 = (vals[nbr_idx] - vals[i]) ** 2
-        scalar_w = np.exp(-scalar_d2 / scalar_denom)
+        spatial_w = np.exp(-d2 / spatial_denom)
+        scalar_w = np.exp(-((vals_work[nbr_idx] - vals_work[i]) ** 2) / scalar_denom)
 
         weights = spatial_w * scalar_w
-        weight_sum = float(np.sum(weights))
+        wsum = float(np.sum(weights))
 
-        if weight_sum > 0:
-            out_vals[i] = float(np.sum(weights * vals[nbr_idx]) / weight_sum)
+        if wsum > 0:
+            out_vals_work[i] = float(np.sum(weights * vals_work[nbr_idx]) / wsum)
 
     replace_scalar = bool(op_cfg.get("replace_scalar", True))
     output_scalar = op_cfg.get("output_scalar")
 
-    out = df.copy()
+    full_out_vals = vals.copy()
+    full_out_vals[work_idx] = out_vals_work
 
     if output_scalar and not replace_scalar:
         used = str(output_scalar)
-        out[used] = out_vals
+        out[used] = full_out_vals
     else:
         used = field
-        out[field] = out_vals
+        out[field] = full_out_vals
 
     return out, used
 

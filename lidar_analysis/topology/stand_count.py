@@ -8,20 +8,19 @@ def topology_stand_count(
     point_cloud,
     min_persistence: float = 0.35,
     max_grid_cells: int = 500_000,
-    debug: bool = False,
+    debug: bool = True,
 ):
     """
     Legacy topology stand count.
 
     Expects x, y, z in meters.
-    x = lateral position
-    y = height
-    z = travel/scan-position axis, preferably already discretized/binned
+      x = lateral position
+      y = height
+      z = travel/scan-position axis, preferably already discretized/binned
 
     Returns:
         {"count": count_per_meter, "points": birth_points, "count_raw": raw_count}
     """
-
     if point_cloud is None:
         return {"count": float("nan"), "points": [], "count_raw": float("nan")}
 
@@ -41,18 +40,14 @@ def topology_stand_count(
     if arr.shape[0] == 0:
         return {"count": float("nan"), "points": [], "count_raw": float("nan")}
 
-    x = arr[:, 0]
     z = arr[:, 2]
-
     distance = float(np.nanmax(z) - np.nanmin(z))
     if not np.isfinite(distance) or distance <= 0:
         return {"count": float("nan"), "points": [], "count_raw": float("nan")}
 
     df = pd.DataFrame(arr, columns=("x", "y", "z"))
-
     # Legacy behavior: 0.02 m x bins.
     df["round_x"] = np.floor(df["x"] * 50.0) / 50.0
-
     pc = df.groupby(["round_x", "z"], as_index=False).size()
 
     xs = pd.DataFrame(sorted(set(pc["round_x"]), reverse=True), columns=("round_x",))
@@ -84,7 +79,6 @@ def topology_stand_count(
         right_on=("round_x", "z"),
         how="outer",
     )
-
     grid_as_table = grid_as_table.sort_values(
         by=["round_x", "z"],
         ascending=(False, True),
@@ -92,13 +86,11 @@ def topology_stand_count(
 
     im = np.array(grid_as_table["size"])
     im.shape = (len(xs), len(zs))
-
     im[np.isnan(im)] = 0
 
     max_im = float(np.max(im))
     if max_im <= 0:
         return {"count": float("nan"), "points": [], "count_raw": float("nan")}
-
     im = im / max_im
 
     g0 = persistence(im)
@@ -106,18 +98,20 @@ def topology_stand_count(
     xs = xs.sort_values(by="round_x", ascending=False).reset_index(drop=True)
     zs = zs.sort_values(by="z").reset_index(drop=True)
 
+    # Index plain numpy arrays instead of pandas .iloc per component.
+    xs_arr = xs["round_x"].to_numpy()
+    zs_arr = zs["z"].to_numpy()
+
     def ind_to_coord(p):
-        return (xs["round_x"].iloc[p[0]], zs["z"].iloc[p[1]])
+        return (xs_arr[p[0]], zs_arr[p[1]])
 
     birth_points = []
     raw_count = 0
-
     for i, item in enumerate(g0):
         # Legacy imagepers returns:
         #   (birth_pixel, birth_level, persistence, death_pixel)
         q, birth_level, pers, death_pixel = item
         birth_points.append(ind_to_coord(q))
-
         if pers < float(min_persistence):
             raw_count = i
             break

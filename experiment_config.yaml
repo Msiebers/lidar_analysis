@@ -1,0 +1,126 @@
+experiment_name: test
+processing_mode: local
+config_reviewed: true
+config_note: "LAI and MTA test using capped LiDAR LAI."
+
+analysis:
+  # Splitting
+  split_source: distance
+  mark_target_type: plant
+  mark_z_buffer_u: 2.0
+  missing_mark_file: error
+  empty_mark_file: skip
+  free_marks_as: none
+  markers_dirname: markers
+  
+  # Dimensions / global masks
+  dim_units: ft
+  row_width_u: 2
+  start_u: 5.0
+  split_u: 8.0
+  end_buffer_u: 0 
+  n_plots: null
+  x_min_u: 0.6
+  max_y_u: null
+  min_radius_u: 0.1
+
+  # Marker/debug outputs
+  write_reference_points: false
+  write_window_pointcloud: false
+  write_marker_pointcloud: false
+
+  # Outputs
+  generate_pointclouds: true
+  overwrite_pointclouds: true
+  write_lidar_per_plot: false
+
+  # Fusion / IMU
+  fusion_method: pps
+  apply_imu: true
+  imu_zero_mode: dense_median
+  imu_zero_fraction: 0.2
+  use_heading: false
+  heading_sign: 1.0
+  roll_sign: 1.0
+  pitch_sign: -1.0
+
+  # RSSI normalization
+  normalize_rssi: true
+  rssi_norm_mode: zscore
+  use_rssi_filter: false
+  rssi_min: null
+  rssi_max: null
+
+  # Traits
+  run_height: false
+  run_lai: false
+  debug_lai_bounds: false
+  run_mta: false
+  run_fad: false
+
+  # MTA settings
+  mta_lo_deg: 25.0
+  mta_hi_deg: 65.0
+  mta_n_bins: 8
+  mta_min_rays_per_bin: 30
+
+  # FAD settings are present but inactive because run_fad is false
+  fad_height_percentile: 99.0
+  fad_y_min_m: 0.1
+  fad_height_buffer_m: 0.0
+  fad_grubbs_alpha: 0.01
+  fad_g_function: spherical
+  fad_run_layers: false
+  fad_layer_thickness_m: 0.10
+  fad_include_layer_columns: false
+  
+  # Additional scans / side split
+  additional_scan_side_split: false
+  additional_scan_side_axis: x
+  additional_scan_positive_side_label: right
+  additional_scan_negative_side_label: left
+
+  # YAML-ordered target-level ops
+  
+  pointcloud_ops:
+    
+    - name: height_range_filter
+      enabled: true
+      axis: Y
+      min_m: 0.1
+      max_m: 0.8
+      
+    - name: bilateral_scalar_filter
+      enabled: true
+      backend: scipy
+      scalar: rssi_norm
+      output_scalar: rssi_norm_bilateral
+      replace_scalar: true
+      spatial_sigma_m: 0.02
+      scalar_sigma: 4.0
+      
+    - name: scalar_range_filter
+      enabled: true
+      scalar: rssi_norm
+      min: 1.2
+      max: 4.0
+      
+    - name: sor_filter
+      enabled: true
+      mean_k: 6
+      stddev_mul_thresh: 1.0
+
+    - name: topology_trait
+      enabled: true
+      min_persistence: 0.4
+      z_bin_m: 0.01
+      split_sides_for_single_plot: true
+      two_row_mode: target_only
+      write_topology_objects: true
+
+    - name: voxel_count
+      enabled: false
+      voxel_size_m: 0.05
+
+  pcl_backend:
+    enabled: false

@@ -1,185 +1,589 @@
+"""
+Plot-scale LAI traits from spinning multi-beam LiDAR, as an analogue of the
+LI-COR LAI-2200C inversion (Section 10 of the manual).
+
+Primary entry point: compute_lai_trait_from_beam_rows(beam_rows, ...), which the
+pipeline calls from analyze_plot(). compute_lai_trait_from_target() and
+compute_lai_trait_from_lidar_data() are thin compatibility wrappers.
+
+Schemes (all relevant for a ground cart, which must NOT use 75-90 deg rays):
+  lai_even   : capped 0-74.5 deg, Miller sin-theta weights (spherical-tuned).
+  lai_uneven : capped 0-74.5 deg, LAI-2200 PUBLISHED weights -- the LI-COR
+               apples-to-apples comparison value.
+  lai_full   : full 0-90 deg, Miller weights. Diagnostic only: more nearly
+               leaf-angle-independent, but uses the contaminated near-horizon
+               beams, so not the reported cart trait.
+
+Equation references are to the transcribed Section 10 (10-1 ... 10-30).
+Core relations, all confirmed against that transcription:
+  K_i  = -ln(GAPS_i) * cos(theta_i)              (10-15)
+  L    = 2 * sum_i W_i K_i,  sum W_i = 1          (10-13, 10-29)
+  Le   uses arithmetic-mean gap (AVGTRANS)        (10-6, 10-11)
+  L    uses log-mean gap (GAPS) -> reported       (10-7, 10-12)
+  Omega_app = Le / L                              (10-8, 10-16, 10-17)
+  G(theta) = -ln P * cos(theta) / L               (10-10)  [MTA uses this slope]
+  DIFN = 2 * sum_i W'_i GAPS_i, sum W'_i = 1/2     (10-25, 10-26, 10-30)
+  MTA  = poly(slope of G vs theta)                (10-22, 10-23)
+"""
+
 from __future__ import annotations
 
 import math
+import warnings
 from typing import Any
 
 import numpy as np
 
-from .fad import (
-    EVEN_ZENITH_BREAKS_RAD,
-    UNEVEN_ZENITH_BREAKS_RAD,
-    legacy_lai,
-)
+# --- Ring schemes -----------------------------------------------------------
 
-_LAI_GAP_FRACTION_RINGS = 5
-_MTA_TRAIT_DEFAULTS: dict[str, Any] = {
-    "lai_mta_deg": float("nan"),
-    "lai_mta_sem_deg": float("nan"),
-    "lai_mta_slope": float("nan"),
-    "lai_mta_n_bins": 0,
+# Capped at ~74.5 deg (outer edge of the LAI-2200 68 deg ring). Excludes the
+# 74.5-90 deg wedge, which for a ground cart is the most contaminated.
+CAPPED_ZENITH_BREAKS_RAD = np.deg2rad([0.0, 15.0, 30.0, 45.0, 60.0, 74.5])
+# Full hemisphere, diagnostic only.
+FULL_ZENITH_BREAKS_RAD = np.deg2rad([0.0, 15.0, 30.0, 45.0, 60.0, 90.0])
+
+# Published LAI-2200C weights (Section 10 "Weighting Factors").
+LAI2200_PUBLISHED_WEIGHTS = np.array([0.041, 0.131, 0.201, 0.290, 0.337])       # sum 1   (10-14)
+LAI2200_PUBLISHED_DIFN_WEIGHTS = np.array([0.033, 0.097, 0.127, 0.141, 0.102])  # sum 1/2 (10-26)
+
+# scheme name -> (zenith_breaks, lai_weight_override, difn_weight_override)
+SCHEMES: dict[str, tuple[np.ndarray, np.ndarray | None, np.ndarray | None]] = {
+    "lai_even": (CAPPED_ZENITH_BREAKS_RAD, None, None),
+    "lai_uneven": (CAPPED_ZENITH_BREAKS_RAD, LAI2200_PUBLISHED_WEIGHTS, LAI2200_PUBLISHED_DIFN_WEIGHTS),
+    "lai_full": (FULL_ZENITH_BREAKS_RAD, None, None),
 }
 
+_LAI_GAP_FRACTION_RINGS = 5
 
-def _mta_default_traits() -> dict[str, Any]:
-    return dict(_MTA_TRAIT_DEFAULTS)
-
-
-def _empty_lai_traits(
-    *,
-    gap_distance_m: float,
-    angle_column: str | None = None,
-    distance_column: str | None = None,
-    n_missing_range: int = 0,
-    n_missing_angle: int = 0,
-) -> dict[str, Any]:
-    traits: dict[str, Any] = {
-        "lai_even": float("nan"),
-        "lai_uneven": float("nan"),
-        "lai_n_scans": 0,
-        "lai_n_angles": 0,
-        "lai_n_rays": 0,
-        "lai_gap_distance_m": float(gap_distance_m),
-        "lai_even_corrected_zero_gap_bins": False,
-        "lai_uneven_corrected_zero_gap_bins": False,
-        "lai_angle_column_used": angle_column,
-        "lai_distance_column_used": distance_column,
-        "lai_n_missing_range": int(n_missing_range),
-        "lai_n_missing_angle": int(n_missing_angle),
-    }
-    for prefix in ("lai_even", "lai_uneven"):
-        for ring_i in range(1, _LAI_GAP_FRACTION_RINGS + 1):
-            traits[f"{prefix}_gap_fraction_ring_{ring_i}"] = float("nan")
-    traits.update(_mta_default_traits())
-    return traits
+# Mean-tilt-angle polynomial alpha(m), Eq. 10-22 (after Lang 1986).
+_MTA_POLY_COEFFS = (56.81964, 46.84833, -64.62133, -158.69141, 522.06260, 1008.14931)
 
 
-def _flatten_lai_pair(
-    pair: dict[str, Any],
-    *,
-    gap_distance_m: float,
-    n_rays: int,
-    angle_column: str | None = None,
-    distance_column: str | None = None,
-    n_missing_range: int = 0,
-    n_missing_angle: int = 0,
-) -> dict[str, Any]:
-    traits = _empty_lai_traits(
-        gap_distance_m=gap_distance_m,
-        angle_column=angle_column,
-        distance_column=distance_column,
-        n_missing_range=n_missing_range,
-        n_missing_angle=n_missing_angle,
-    )
-    traits.update({
-        "lai_even": float(pair.get("lai_even", float("nan"))),
-        "lai_uneven": float(pair.get("lai_uneven", float("nan"))),
-        "lai_n_scans": int(pair.get("lai_n_scans", 0) or 0),
-        "lai_n_angles": int(pair.get("lai_n_angles", 0) or 0),
-        "lai_n_rays": int(n_rays),
-        "lai_gap_distance_m": float(pair.get("lai_gap_distance_m", gap_distance_m)),
-        "lai_even_corrected_zero_gap_bins": bool(pair.get("lai_even_corrected_zero_gap_bins", False)),
-        "lai_uneven_corrected_zero_gap_bins": bool(pair.get("lai_uneven_corrected_zero_gap_bins", False)),
-    })
+# --- Weights ----------------------------------------------------------------
 
-    for prefix in ("lai_even", "lai_uneven"):
-        vals = np.asarray(pair.get(f"{prefix}_gap_fraction", []), dtype=float).ravel()
-        for ring_i in range(1, _LAI_GAP_FRACTION_RINGS + 1):
-            traits[f"{prefix}_gap_fraction_ring_{ring_i}"] = (
-                float(vals[ring_i - 1]) if ring_i <= vals.size else float("nan")
-            )
+def _weights(breaks_rad: np.ndarray, override: np.ndarray | None, active: np.ndarray | None = None) -> np.ndarray:
+    """LAI weights, normalized so active rings sum to 1 (10-29)."""
+    if override is not None:
+        base = np.asarray(override, dtype=float)
+    else:
+        base = np.cos(breaks_rad[:-1]) - np.cos(breaks_rad[1:])  # integral sin dtheta
+    if active is not None:
+        base = np.where(active, base, 0.0)
+    s = base.sum()
+    return base / s if s > 0 else base
 
-    for key, default in _MTA_TRAIT_DEFAULTS.items():
-        value = pair.get(key, default)
-        traits[key] = int(value) if key == "lai_mta_n_bins" else float(value)
 
-    return traits
+def _difn_weights(breaks_rad: np.ndarray, override: np.ndarray | None, active: np.ndarray | None = None) -> np.ndarray:
+    """DIFN weights, normalized so active rings sum to 1/2 (10-30)."""
+    if override is not None:
+        base = np.asarray(override, dtype=float)
+    else:
+        base = 0.5 * (np.sin(breaks_rad[1:]) ** 2 - np.sin(breaks_rad[:-1]) ** 2)  # integral sin*cos dtheta
+    if active is not None:
+        base = np.where(active, base, 0.0)
+    s = base.sum()
+    return base * (0.5 / s) if s > 0 else base
+
+
+# --- Mean tilt angle --------------------------------------------------------
+
+def _mta_poly(m: float) -> float:
+    val = 0.0
+    for k, a in enumerate(_MTA_POLY_COEFFS):
+        val += a * (m ** k)
+    return float(np.clip(val, 0.0, 90.0))
+
+
+def _ols_slope(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:
+    """Least-squares slope and its standard error."""
+    n = x.size
+    xb = x.mean()
+    Sxx = float(((x - xb) ** 2).sum())
+    if Sxx <= 0.0:
+        return float("nan"), float("nan")
+    yb = y.mean()
+    m = float(((x - xb) * (y - yb)).sum() / Sxx)
+    if n > 2:
+        resid = y - (m * x + (yb - m * xb))
+        sse = float((resid ** 2).sum())
+        mse = math.sqrt(sse / ((n - 2) * Sxx)) if sse > 0 else 0.0
+    else:
+        mse = float("nan")
+    return m, mse
 
 
 def _robust_mta(
-    *,
     distances_m: np.ndarray,
     zeniths_rad: np.ndarray,
     gap_distance_m: float,
-    lo_deg: float,
-    hi_deg: float,
-    n_bins: int,
-    min_rays_per_bin: int,
+    treat_no_return_as_gap: bool,
+    lai_ref: float,
+    *,
+    lo_deg: float = 25.0,   # accepted for signature compatibility; unused
+    hi_deg: float = 65.0,   # accepted for signature compatibility; unused
+    n_bins: int = 8,        # accepted for signature compatibility; unused
+    min_rays_per_bin: int = 30,
 ) -> dict[str, Any]:
-    """Estimate mean tilt angle from binned gap fractions.
-
-    This is intentionally narrow and only uses the same range/zenith arrays as
-    legacy LAI.  It does not alter the normal even/uneven LAI calculations.
     """
-    distances_m = np.asarray(distances_m, dtype=float)
-    zeniths_rad = np.asarray(zeniths_rad, dtype=float)
-    n_bins = int(n_bins)
-    if distances_m.ndim != 2 or zeniths_rad.ndim != 1 or n_bins <= 0:
-        return _mta_default_traits()
-    if distances_m.shape[1] != zeniths_rad.size:
-        return _mta_default_traits()
+    LI-COR LAI-2200-style MTA.
 
-    lo = math.radians(float(lo_deg))
-    hi = math.radians(float(hi_deg))
-    if not (np.isfinite(lo) and np.isfinite(hi)) or hi <= lo:
-        return _mta_default_traits()
+    Uses five LI-COR-style rings and regresses the recovered projection
+    function:
 
-    abs_zeniths = np.abs(zeniths_rad)
-    breaks = np.linspace(lo, hi, n_bins + 1)
-    centers: list[float] = []
-    contacts: list[float] = []
-    xs: list[float] = []
-    ys: list[float] = []
+        G(theta) = -ln(P) * cos(theta) / L
 
-    for bin_i in range(n_bins):
-        in_bin = (abs_zeniths >= breaks[bin_i]) & (abs_zeniths < breaks[bin_i + 1])
-        if not np.any(in_bin):
-            continue
-        rays = distances_m[:, in_bin].ravel()
-        rays = rays[np.isfinite(rays)]
-        if rays.size < int(min_rays_per_bin):
-            continue
-        gap_fraction = float(np.mean(rays > float(gap_distance_m)))
-        if not (0.0 < gap_fraction < 1.0):
-            continue
+    against ring center angle in radians, then maps the slope through the
+    LI-COR MTA polynomial.
 
-        center = float((breaks[bin_i] + breaks[bin_i + 1]) / 2.0)
-        contact = float(-math.log(gap_fraction))
-        centers.append(math.degrees(center))
-        contacts.append(contact)
-        xs.append(float(1.0 / max(math.cos(center), 1e-12)))
-        ys.append(contact)
+    This intentionally does not use the exploratory fine-bin LiDAR regression.
+    """
+    nan = float("nan")
 
-    used_bins = len(centers)
-    if used_bins == 0:
-        return _mta_default_traits()
+    if not np.isfinite(lai_ref) or lai_ref <= 0.0:
+        return {
+            "mta_deg": nan,
+            "mta_sem_deg": nan,
+            "slope": nan,
+            "n_bins": 0,
+        }
 
-    centers_arr = np.asarray(centers, dtype=float)
-    weights = np.asarray(contacts, dtype=float)
-    if np.sum(weights) <= 0.0:
-        mta_deg = float(np.mean(centers_arr))
-        sem_deg = float(np.std(centers_arr, ddof=1) / math.sqrt(used_bins)) if used_bins > 1 else float("nan")
+    centers_rad = np.deg2rad(np.array([7.0, 23.0, 38.0, 53.0, 68.0], dtype=float))
+    cos_c = np.cos(centers_rad)
+
+    # Use the same five-ring scheme as the capped/uneven LAI output.
+    breaks = SCHEMES["lai_uneven"][0]
+
+    n_total, n_gap = _scheme_counts(
+        distances_m,
+        zeniths_rad,
+        breaks,
+        gap_distance_m,
+        treat_no_return_as_gap,
+    )
+
+    n_total = np.asarray(n_total, dtype=float)
+    n_gap = np.asarray(n_gap, dtype=float)
+
+    # _scheme_counts returns scan x ring counts for normal LAI.
+    # MTA needs one count per ring, summed across scans.
+    if n_total.ndim == 2:
+        n_total = np.nansum(n_total, axis=0)
     else:
-        mta_deg = float(np.average(centers_arr, weights=weights))
-        variance = float(np.average((centers_arr - mta_deg) ** 2, weights=weights))
-        sem_deg = math.sqrt(variance / used_bins) if used_bins > 1 else float("nan")
+        n_total = n_total.ravel()
 
-    slope = float("nan")
-    if used_bins >= 2:
-        slope = float(np.polyfit(np.asarray(xs, dtype=float), np.asarray(ys, dtype=float), 1)[0])
+    if n_gap.ndim == 2:
+        n_gap = np.nansum(n_gap, axis=0)
+    else:
+        n_gap = n_gap.ravel()
+
+    n_total = np.asarray(n_total, dtype=float).ravel()
+    n_gap = np.asarray(n_gap, dtype=float).ravel()
+
+    if n_total.size != centers_rad.size or n_gap.size != centers_rad.size:
+        raise ValueError(
+            f"MTA expected {centers_rad.size} rings, "
+            f"got n_total={n_total.shape}, n_gap={n_gap.shape}"
+        )
+
+    # Gap fraction with the same zero-gap correction style used for LAI.
+    P = np.full(n_total.shape, nan, dtype=float)
+
+    valid_ring = np.isfinite(n_total) & (n_total > 0.0)
+    P[valid_ring] = n_gap[valid_ring] / n_total[valid_ring]
+
+    zero_gap = valid_ring & (n_gap == 0.0)
+    P[zero_gap] = 1.0 / (2.0 * n_total[zero_gap])
+
+    # Keep only physically valid gap fractions.
+    valid_p = valid_ring & np.isfinite(P) & (P > 0.0) & (P <= 1.0)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        G = (-np.log(P) * cos_c) / float(lai_ref)
+
+    valid = (
+        valid_p
+        & np.isfinite(G)
+        & (n_total >= float(min_rays_per_bin))
+    )
+
+    n_valid = int(np.sum(valid))
+
+    if n_valid < 3:
+        return {
+            "mta_deg": nan,
+            "mta_sem_deg": nan,
+            "slope": nan,
+            "n_bins": n_valid,
+        }
+
+    x = centers_rad[valid]
+    y = G[valid]
+
+    x_mean = float(np.mean(x))
+    y_mean = float(np.mean(y))
+    ssx = float(np.sum((x - x_mean) ** 2))
+
+    if not np.isfinite(ssx) or ssx <= 0.0:
+        return {
+            "mta_deg": nan,
+            "mta_sem_deg": nan,
+            "slope": nan,
+            "n_bins": n_valid,
+        }
+
+    slope = float(np.sum((x - x_mean) * (y - y_mean)) / ssx)
+    intercept = float(y_mean - slope * x_mean)
+
+    residuals = y - (intercept + slope * x)
+
+    if n_valid > 2:
+        mse = float(np.sum(residuals ** 2) / (n_valid - 2))
+        slope_se = math.sqrt(mse / ssx) if np.isfinite(mse) and mse >= 0.0 else nan
+    else:
+        slope_se = nan
+
+    mta_deg = _mta_poly(slope)
+
+    if np.isfinite(slope_se):
+        m_for_sem = slope - slope_se if slope > 0.0 else slope + slope_se
+        mta_sem_deg = abs(float(mta_deg) - float(_mta_poly(m_for_sem)))
+    else:
+        mta_sem_deg = nan
 
     return {
-        "lai_mta_deg": mta_deg,
-        "lai_mta_sem_deg": sem_deg,
-        "lai_mta_slope": slope,
-        "lai_mta_n_bins": used_bins,
+        "mta_deg": float(mta_deg),
+        "mta_sem_deg": float(mta_sem_deg),
+        "slope": float(slope),
+        "n_bins": n_valid,
+    }
+
+# --- Per-scheme LAI ---------------------------------------------------------
+
+def _ring_index(zeniths_rad: np.ndarray, breaks_rad: np.ndarray) -> tuple[np.ndarray, int, np.ndarray]:
+    n_rings = len(breaks_rad) - 1
+    idx = np.digitize(zeniths_rad, breaks_rad)
+    in_range = (idx >= 1) & (idx <= n_rings) & np.isfinite(zeniths_rad)
+    idx = np.where(in_range, idx, 0)
+    return idx, n_rings, in_range
+
+
+def _scheme_counts(distances, zeniths_rad, breaks_rad, gap_distance_m, treat_no_return_as_gap):
+    distances = np.atleast_2d(np.asarray(distances, dtype=float))
+    zeniths_rad = np.asarray(zeniths_rad, dtype=float).ravel()
+
+    if distances.shape[1] != zeniths_rad.size:
+        raise ValueError(
+            f"distances columns {distances.shape[1]} must match "
+            f"zenith count {zeniths_rad.size}"
+        )
+
+    idx, n_rings, in_range = _ring_index(zeniths_rad, breaks_rad)
+
+    finite_d = np.isfinite(distances) & (distances > 0.0)
+    is_gap = (distances >= float(gap_distance_m)) | (
+        bool(treat_no_return_as_gap) & ~finite_d
+    )
+    is_hit = finite_d & (distances < float(gap_distance_m))
+    countable = is_gap | is_hit
+
+    idx2 = np.broadcast_to(idx, distances.shape)
+    inr2 = np.broadcast_to(in_range, distances.shape)
+
+    n_scans = distances.shape[0]
+    n_total = np.zeros((n_scans, n_rings), dtype=float)
+    n_gap = np.zeros((n_scans, n_rings), dtype=float)
+
+    for r in range(1, n_rings + 1):
+        sel = inr2 & (idx2 == r)
+        n_total[:, r - 1] = (sel & countable).sum(axis=1)
+        n_gap[:, r - 1] = (sel & is_gap).sum(axis=1)
+
+    return n_total, n_gap
+
+def _gap_to_contact(P, cos_centers):
+    K = np.full(P.shape, np.nan)
+    ok = np.isfinite(P) & (P > 0.0)
+    K[ok] = -np.log(P[ok]) * cos_centers[ok]
+    return K
+
+
+def _lai_scheme(n_total, n_gap, breaks_rad, weights_override=None, difn_override=None):
+    n_rings = len(breaks_rad) - 1
+    centers = 0.5 * (breaks_rad[:-1] + breaks_rad[1:])
+    cos_c = np.cos(centers)
+
+    def weights_for(active):
+        return _weights(breaks_rad, weights_override, active)
+
+    tot = n_total.sum(axis=0)
+    gap = n_gap.sum(axis=0)
+    P = np.full(n_rings, np.nan)
+    valid = tot > 0
+    P[valid] = gap[valid] / tot[valid]
+    corrected = False
+    zero = valid & (gap == 0)
+    if np.any(zero):
+        P[zero] = 1.0 / (2.0 * tot[zero])
+        corrected = True
+
+    K = _gap_to_contact(P, cos_c)
+    active = valid & np.isfinite(K)
+    W = weights_for(active)
+    lai_pooled = float(2.0 * np.sum(K[active] * W[active])) if np.any(active) else float("nan")
+
+    n_scans = n_total.shape[0]
+    lai_eff = lai_pooled
+    lai_clumped = lai_pooled
+    clumping = 1.0
+    sel = float("nan")
+
+    if n_scans > 1:
+        Ps = np.full(n_total.shape, np.nan)
+        v = n_total > 0
+        Ps[v] = n_gap[v] / n_total[v]
+        z = v & (n_gap == 0)
+        Ps[z] = 1.0 / (2.0 * n_total[z])
+        with np.errstate(invalid="ignore"), warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            Pbar = np.nanmean(np.where(v, Ps, np.nan), axis=0)
+            K_eff = _gap_to_contact(Pbar, cos_c)
+            act_e = np.isfinite(K_eff)
+            W_e = weights_for(act_e)
+            lai_eff = float(2.0 * np.sum(K_eff[act_e] * W_e[act_e])) if np.any(act_e) else float("nan")
+            Kln = np.where(v, -np.log(np.where(v, Ps, 1.0)), np.nan) * cos_c[None, :]
+            K_act = np.nanmean(Kln, axis=0)
+        act_c = np.isfinite(K_act)
+        W_c = weights_for(act_c)
+        lai_clumped = float(2.0 * np.sum(K_act[act_c] * W_c[act_c])) if np.any(act_c) else float("nan")
+        if np.isfinite(lai_eff) and np.isfinite(lai_clumped) and lai_clumped > 0:
+            clumping = float(lai_eff / lai_clumped)
+        per_scan = []
+        for s in range(n_scans):
+            Ks = _gap_to_contact(Ps[s], cos_c)
+            a_s = np.isfinite(Ks)
+            if np.any(a_s):
+                w_s = weights_for(a_s)
+                per_scan.append(2.0 * np.sum(Ks[a_s] * w_s[a_s]))
+        per_scan = np.asarray(per_scan, dtype=float)
+        if per_scan.size > 1:
+            sel = float(np.nanstd(per_scan, ddof=1) / math.sqrt(per_scan.size))
+
+    lai = lai_clumped  # reported = log-averaged form (10-7); == pooled for 1 scan
+
+    difn_active = valid & np.isfinite(P)
+    Wp = _difn_weights(breaks_rad, difn_override, difn_active)
+    difn = float(2.0 * np.sum(np.where(difn_active, Wp * P, 0.0))) if np.any(difn_active) else float("nan")
+
+    return {
+        "lai": lai,
+        "lai_pooled": lai_pooled,
+        "lai_effective": lai_eff,
+        "lai_clumped": lai_clumped,
+        "clumping": clumping,
+        "sel": sel,
+        "difn": difn,
+        "corrected_zero_gap_bins": bool(corrected),
+        "gap_fraction": P,
+        "contact_number": K,
+        "n_rays": tot,
     }
 
 
 def compute_lai_all_schemes(
     *,
-    distances_m: np.ndarray,
-    zeniths_rad: np.ndarray,
+    distances_m,
+    zeniths_rad,
+    gap_distance_m=30.0,
+    treat_no_return_as_gap=True,
+    run_mta: bool = False,
+    mta_lo_deg: float = 25.0,
+    mta_hi_deg: float = 65.0,
+    mta_n_bins: int = 8,
+    mta_min_rays_per_bin: int = 30,
+):
+    distances_m = np.atleast_2d(np.asarray(distances_m, dtype=float))
+    zeniths_rad = np.asarray(zeniths_rad, dtype=float).ravel()
+
+    if distances_m.shape[1] != zeniths_rad.shape[0]:
+        raise ValueError(
+            f"distances columns {distances_m.shape} must match zeniths {zeniths_rad.shape}"
+        )
+
+    out: dict[str, Any] = {}
+
+    for name, (breaks, wov, dov) in SCHEMES.items():
+        n_total, n_gap = _scheme_counts(
+            distances_m,
+            zeniths_rad,
+            breaks,
+            gap_distance_m,
+            treat_no_return_as_gap,
+        )
+        out[name] = _lai_scheme(
+            n_total,
+            n_gap,
+            breaks,
+            weights_override=wov,
+            difn_override=dov,
+        )
+
+    if run_mta:
+        # One robust MTA, normalized by the most G-independent available L.
+        lai_ref = out.get("lai_uneven", {}).get("lai", float("nan"))
+        if not np.isfinite(lai_ref):
+            lai_ref = out.get("lai_even", {}).get("lai", float("nan"))
+
+        out["_mta"] = _robust_mta(
+            distances_m,
+            zeniths_rad,
+            gap_distance_m,
+            treat_no_return_as_gap,
+            lai_ref,
+            lo_deg=mta_lo_deg,
+            hi_deg=mta_hi_deg,
+            n_bins=mta_n_bins,
+            min_rays_per_bin=mta_min_rays_per_bin,
+        )
+    else:
+        out["_mta"] = {
+            "mta_deg": float("nan"),
+            "mta_sem_deg": float("nan"),
+            "slope": float("nan"),
+            "n_bins": 0,
+        }
+
+    return out
+
+# --- Trait flattening -------------------------------------------------------
+
+def _scheme_keys(prefix):
+    keys = [
+        prefix, f"{prefix}_pooled", f"{prefix}_effective", f"{prefix}_clumped",
+        f"{prefix}_clumping", f"{prefix}_sel", f"{prefix}_difn",
+        f"{prefix}_corrected_zero_gap_bins",
+    ]
+    for i in range(1, _LAI_GAP_FRACTION_RINGS + 1):
+        keys += [f"{prefix}_gap_fraction_ring_{i}", f"{prefix}_contact_number_ring_{i}", f"{prefix}_n_rays_ring_{i}"]
+    return keys
+
+
+def _empty_lai_traits(*, gap_distance_m, angle_column=None, distance_column=None,
+                      n_missing_range=0, n_missing_angle=0, n_no_return=0):
+    traits: dict[str, Any] = {
+        "lai_n_scans": 0, "lai_n_angles": 0, "lai_n_rays": 0,
+        "lai_gap_distance_m": float(gap_distance_m),
+        "lai_angle_column_used": angle_column, "lai_distance_column_used": distance_column,
+        "lai_n_missing_range": int(n_missing_range), "lai_n_missing_angle": int(n_missing_angle),
+        "lai_n_no_return": int(n_no_return),
+        "lai_mta_deg": float("nan"), "lai_mta_sem_deg": float("nan"),
+        "lai_mta_slope": float("nan"), "lai_mta_n_bins": 0,
+    }
+    for prefix in SCHEMES:
+        for key in _scheme_keys(prefix):
+            traits[key] = False if key.endswith("_corrected_zero_gap_bins") else float("nan")
+    return traits
+
+
+def _flatten(schemes, *, gap_distance_m, n_scans, n_angles, n_rays,
+             angle_column=None, distance_column=None, n_missing_range=0, n_missing_angle=0, n_no_return=0):
+    traits = _empty_lai_traits(gap_distance_m=gap_distance_m, angle_column=angle_column,
+                               distance_column=distance_column, n_missing_range=n_missing_range,
+                               n_missing_angle=n_missing_angle, n_no_return=n_no_return)
+    traits["lai_n_scans"] = int(n_scans)
+    traits["lai_n_angles"] = int(n_angles)
+    traits["lai_n_rays"] = int(n_rays)
+
+    mta = schemes.get("_mta", {})
+    traits["lai_mta_deg"] = float(mta.get("mta_deg", float("nan")))
+    traits["lai_mta_sem_deg"] = float(mta.get("mta_sem_deg", float("nan")))
+    traits["lai_mta_slope"] = float(mta.get("slope", float("nan")))
+    traits["lai_mta_n_bins"] = int(mta.get("n_bins", 0))
+
+    for prefix, res in schemes.items():
+        if prefix == "_mta":
+            continue
+        traits[prefix] = float(res["lai"])
+        traits[f"{prefix}_pooled"] = float(res["lai_pooled"])
+        traits[f"{prefix}_effective"] = float(res["lai_effective"])
+        traits[f"{prefix}_clumped"] = float(res["lai_clumped"])
+        traits[f"{prefix}_clumping"] = float(res["clumping"])
+        traits[f"{prefix}_sel"] = float(res["sel"])
+        traits[f"{prefix}_difn"] = float(res["difn"])
+        traits[f"{prefix}_corrected_zero_gap_bins"] = bool(res["corrected_zero_gap_bins"])
+        gf = np.asarray(res["gap_fraction"], float).ravel()
+        kn = np.asarray(res["contact_number"], float).ravel()
+        nr = np.asarray(res["n_rays"], float).ravel()
+        for i in range(1, _LAI_GAP_FRACTION_RINGS + 1):
+            traits[f"{prefix}_gap_fraction_ring_{i}"] = float(gf[i - 1]) if i <= gf.size else float("nan")
+            traits[f"{prefix}_contact_number_ring_{i}"] = float(kn[i - 1]) if i <= kn.size else float("nan")
+            traits[f"{prefix}_n_rays_ring_{i}"] = float(nr[i - 1]) if i <= nr.size else float("nan")
+    return traits
+
+
+# --- Angle convention -------------------------------------------------------
+
+def _zenith_from_angle(angle_rad: np.ndarray, convention: str) -> np.ndarray:
+    """
+    Map a beam angle column to LAI zenith (0 = straight up/sky).
+
+    'sick'      : SICK cart theta, 0 = down, +-90 = horizon, +-180 = sky.
+                  zenith = pi - |wrap(theta)|  (0 at sky, pi at ground).
+    'elevation' : legacy phi-style, zenith = |pi/2 - angle|.
+    """
+    if convention == "sick":
+        wrapped = (angle_rad + np.pi) % (2.0 * np.pi) - np.pi
+        return np.pi - np.abs(wrapped)
+    if convention == "elevation":
+        return np.abs(0.5 * np.pi - angle_rad)
+    raise ValueError(f"unknown zenith_convention {convention!r}")
+
+
+_DISTANCE_COLUMNS = ("range_m", "dist_mm")
+_ANGLE_COLUMNS = ("theta", "phi")
+
+
+def _extract_range_and_angle(rows, distance_columns, angle_columns):
+    """Pull range (m) and angle (rad) arrays from a DataFrame-like or dict-like."""
+    cols = getattr(rows, "columns", None)
+    has = (lambda c: c in cols) if cols is not None else (lambda c: c in rows)
+
+    distance_column = None
+    for c in distance_columns:
+        if has(c):
+            distance_column = c
+            break
+    if distance_column is None:
+        return None, None, None, None
+
+    arr = np.asarray(rows[distance_column], dtype=float)
+    distances_m = arr / 1000.0 if distance_column == "dist_mm" else arr
+
+    angle_column = next((c for c in angle_columns if has(c)), None)
+    if angle_column is None:
+        return distances_m, None, distance_column, None
+
+    angle = np.asarray(rows[angle_column], dtype=float)
+    finite_angle = angle[np.isfinite(angle)]
+    if finite_angle.size and np.nanmax(np.abs(finite_angle)) > (2.0 * math.pi + 1e-6):
+        angle = np.deg2rad(angle)  # degrees -> radians
+    return distances_m, angle, distance_column, angle_column
+
+
+# --- Entry points -----------------------------------------------------------
+
+def compute_lai_trait_from_beam_rows(
+    beam_rows=None,
+    *,
+    distances_m: np.ndarray | None = None,
+    theta_rad: np.ndarray | None = None,
+    phi_rad: np.ndarray | None = None,
     gap_distance_m: float = 30.0,
+    treat_no_return_as_gap: bool = True,
+    zenith_convention: str = "sick",
+    distance_column: str | None = None,
+    angle_column: str | None = None,
+    distance_columns: tuple[str, ...] = _DISTANCE_COLUMNS,
+    angle_columns: tuple[str, ...] = _ANGLE_COLUMNS,
     run_mta: bool = False,
     mta_lo_deg: float = 25.0,
     mta_hi_deg: float = 65.0,
@@ -187,51 +591,161 @@ def compute_lai_all_schemes(
     mta_min_rays_per_bin: int = 30,
 ) -> dict[str, Any]:
     """
-    Compute normal legacy LAI and optional MTA traits.
+    PRIMARY entry point: compute LAI traits for one plot's beam rows.
 
-    MTA is opt-in so the default LAI outputs remain the existing even/uneven
-    columns unless callers explicitly request the extra MTA fields.
+    Supports both call styles:
+
+    1. Current pipeline_core.py keyword-array style:
+       compute_lai_trait_from_beam_rows(
+           distances_m=...,      # already in meters
+           theta_rad=...,
+           gap_distance_m=30.0,
+           distance_column="dist_mm",   # label only here
+           run_mta=True/False,
+       )
+
+    2. DataFrame/dict style:
+       compute_lai_trait_from_beam_rows(beam_rows)
+
+       In this path, a 'dist_mm' column is converted from mm to m.
     """
-    even = legacy_lai(
-        distances_m=distances_m,
-        zeniths_rad=zeniths_rad,
-        zenith_breaks_rad=EVEN_ZENITH_BREAKS_RAD,
-        gap_distance_m=gap_distance_m,
-    )
 
-    uneven = legacy_lai(
-        distances_m=distances_m,
-        zeniths_rad=zeniths_rad,
-        zenith_breaks_rad=UNEVEN_ZENITH_BREAKS_RAD,
-        gap_distance_m=gap_distance_m,
-    )
+    # ------------------------------------------------------------------
+    # Current pipeline_core.py path: distances_m + theta_rad/phi_rad
+    # ------------------------------------------------------------------
+    if distances_m is not None:
+        distances_m = np.asarray(distances_m, dtype=float).ravel()
 
-    traits: dict[str, Any] = {
-        "lai_even": even.lai,
-        "lai_uneven": uneven.lai,
-        "lai_even_gap_fraction": even.gap_fraction,
-        "lai_uneven_gap_fraction": uneven.gap_fraction,
-        "lai_n_scans": even.n_scans,
-        "lai_n_angles": even.n_angles,
-        "lai_gap_distance_m": gap_distance_m,
-        "lai_even_corrected_zero_gap_bins": even.corrected_zero_gap_bins,
-        "lai_uneven_corrected_zero_gap_bins": uneven.corrected_zero_gap_bins,
-    }
-    if run_mta:
-        traits.update(
-            _robust_mta(
-                distances_m=distances_m,
-                zeniths_rad=zeniths_rad,
-                gap_distance_m=gap_distance_m,
-                lo_deg=mta_lo_deg,
-                hi_deg=mta_hi_deg,
-                n_bins=mta_n_bins,
-                min_rays_per_bin=mta_min_rays_per_bin,
+        if theta_rad is not None:
+            angle = np.asarray(theta_rad, dtype=float).ravel()
+            angle_column = angle_column or "theta"
+        elif phi_rad is not None:
+            angle = np.asarray(phi_rad, dtype=float).ravel()
+            angle_column = angle_column or "phi"
+        else:
+            raise ValueError("distances_m requires theta_rad or phi_rad")
+
+        if angle.size != distances_m.size:
+            raise ValueError(
+                f"distances_m and angle arrays must have same length; "
+                f"got {distances_m.size} and {angle.size}"
             )
-        )
+
+        distance_column = distance_column or "distance_m"
+
+    # ------------------------------------------------------------------
+    # DataFrame/dict path: beam_rows
+    # ------------------------------------------------------------------
     else:
-        traits.update(_mta_default_traits())
-    return traits
+        if beam_rows is None or len(beam_rows) == 0:
+            return _empty_lai_traits(gap_distance_m=gap_distance_m)
+
+        distances_m, angle, distance_column, angle_column = _extract_range_and_angle(
+            beam_rows,
+            distance_columns,
+            angle_columns,
+        )
+
+        if distances_m is None:
+            return _empty_lai_traits(gap_distance_m=gap_distance_m)
+
+        if angle is None:
+            return _empty_lai_traits(
+                gap_distance_m=gap_distance_m,
+                distance_column=distance_column,
+                n_missing_angle=len(beam_rows),
+            )
+
+        distances_m = np.asarray(distances_m, dtype=float).ravel()
+        angle = np.asarray(angle, dtype=float).ravel()
+
+        if angle.size != distances_m.size:
+            raise ValueError(
+                f"beam row distance and angle arrays must have same length; "
+                f"got {distances_m.size} and {angle.size}"
+            )
+
+    # ------------------------------------------------------------------
+    # Shared angle handling
+    # ------------------------------------------------------------------
+    finite_angle = angle[np.isfinite(angle)]
+    if finite_angle.size and np.nanmax(np.abs(finite_angle)) > (2.0 * math.pi + 1e-6):
+        angle = np.deg2rad(angle)
+
+    zeniths_rad = _zenith_from_angle(angle, zenith_convention)
+
+    range_ok = np.isfinite(distances_m) & (distances_m > 0.0)
+    angle_ok = np.isfinite(zeniths_rad)
+
+    n_missing_angle = int((~angle_ok).sum())
+    n_no_return = int((angle_ok & ~range_ok).sum())
+
+    if not np.any(angle_ok):
+        return _empty_lai_traits(
+            gap_distance_m=gap_distance_m,
+            angle_column=angle_column,
+            distance_column=distance_column,
+            n_missing_range=int((~range_ok).sum()),
+            n_missing_angle=n_missing_angle,
+            n_no_return=n_no_return,
+        )
+
+    # Keep all rays with valid angles.
+    # Non-finite or zero ranges stay in the array and are counted as gaps
+    # when treat_no_return_as_gap=True.
+    keep = angle_ok
+
+    schemes = compute_lai_all_schemes(
+        distances_m=distances_m[keep][None, :],
+        zeniths_rad=zeniths_rad[keep],
+        gap_distance_m=gap_distance_m,
+        treat_no_return_as_gap=treat_no_return_as_gap,
+        run_mta=run_mta,
+        mta_lo_deg=mta_lo_deg,
+        mta_hi_deg=mta_hi_deg,
+        mta_n_bins=mta_n_bins,
+        mta_min_rays_per_bin=mta_min_rays_per_bin,
+    )
+
+    return _flatten(
+        schemes,
+        gap_distance_m=gap_distance_m,
+        n_scans=1,
+        n_angles=int(keep.sum()),
+        n_rays=int(keep.sum()),
+        angle_column=angle_column,
+        distance_column=distance_column,
+        n_missing_range=int((~range_ok).sum()),
+        n_missing_angle=n_missing_angle,
+        n_no_return=n_no_return,
+    )
+
+def compute_lai_trait_from_target(target, *, gap_distance_m: float = 30.0, **kwargs) -> dict[str, Any]:
+    """Compatibility wrapper: pulls AnalysisTarget.raw_points and delegates."""
+    points = getattr(target, "raw_points", None)
+    if points is None or len(points) == 0:
+        return _empty_lai_traits(gap_distance_m=gap_distance_m)
+    return compute_lai_trait_from_beam_rows(points, gap_distance_m=gap_distance_m, **kwargs)
+
+
+def compute_lai_trait_from_lidar_data(lidar_data, *, gap_distance_m: float = 30.0,
+                                      treat_no_return_as_gap: bool = True) -> dict[str, Any]:
+    """
+    Compatibility wrapper for a dict with already-computed zeniths.
+      lidar_data["distances"] -> (n_scans, n_angles) meters
+      lidar_data["zeniths"]   -> (n_angles,) radians (true zenith, 0 = up)
+    """
+    if "distances" not in lidar_data or "zeniths" not in lidar_data:
+        raise ValueError("lidar_data needs 'distances' and 'zeniths'")
+    distances = np.atleast_2d(np.asarray(lidar_data["distances"], dtype=float))
+    zeniths = np.asarray(lidar_data["zeniths"], dtype=float).ravel()
+    n_no_return = int(np.sum(~(np.isfinite(distances) & (distances > 0.0))))
+    schemes = compute_lai_all_schemes(
+        distances_m=distances, zeniths_rad=zeniths,
+        gap_distance_m=gap_distance_m, treat_no_return_as_gap=treat_no_return_as_gap,
+    )
+    return _flatten(schemes, gap_distance_m=gap_distance_m, n_scans=distances.shape[0],
+                    n_angles=distances.shape[1], n_rays=int(distances.size), n_no_return=n_no_return)
 
 
 def compute_legacy_lai_pair(
@@ -239,220 +753,14 @@ def compute_legacy_lai_pair(
     distances_m: np.ndarray,
     zeniths_rad: np.ndarray,
     gap_distance_m: float = 30.0,
-) -> dict[str, Any]:
+    treat_no_return_as_gap: bool = True,
+) -> dict[str, dict[str, Any]]:
     """
-    Compute both old LAI variants:
-      - even zenith bins: 0, 15, 30, 45, 60, 90 degrees
-      - uneven zenith bins: 0, 13, 28, 43, 58, 90 degrees
-
-    This is the first-pass legacy behavior.
+    Backward-compatible alias for older imports from lidar_analysis.lai.
     """
     return compute_lai_all_schemes(
         distances_m=distances_m,
         zeniths_rad=zeniths_rad,
         gap_distance_m=gap_distance_m,
-        run_mta=False,
-    )
-
-
-def compute_lai_trait_from_lidar_data(
-    lidar_data: dict[str, Any],
-    *,
-    gap_distance_m: float = 30.0,
-    run_mta: bool = False,
-    mta_lo_deg: float = 25.0,
-    mta_hi_deg: float = 65.0,
-    mta_n_bins: int = 8,
-    mta_min_rays_per_bin: int = 30,
-) -> dict[str, Any]:
-    """
-    Pipeline-friendly wrapper for old-style lidar_data dict.
-
-    Expects:
-      lidar_data["distances"] -> n_scans x n_angles, meters
-      lidar_data["zeniths"]   -> n_angles, radians
-
-    This matches the old uploaded LAI function's input shape.
-    """
-    if "distances" not in lidar_data:
-        raise ValueError("lidar_data missing 'distances'")
-    if "zeniths" not in lidar_data:
-        raise ValueError("lidar_data missing 'zeniths'")
-
-    distances = np.asarray(lidar_data["distances"], dtype=float)
-    zeniths = np.asarray(lidar_data["zeniths"], dtype=float)
-    pair = compute_lai_all_schemes(
-        distances_m=distances,
-        zeniths_rad=zeniths,
-        gap_distance_m=gap_distance_m,
-        run_mta=run_mta,
-        mta_lo_deg=mta_lo_deg,
-        mta_hi_deg=mta_hi_deg,
-        mta_n_bins=mta_n_bins,
-        mta_min_rays_per_bin=mta_min_rays_per_bin,
-    )
-    return _flatten_lai_pair(
-        pair,
-        gap_distance_m=gap_distance_m,
-        n_rays=int(distances.size),
-    )
-
-
-def compute_lai_trait_from_beam_rows(
-    *,
-    distances_m: np.ndarray,
-    theta_rad: np.ndarray,
-    gap_distance_m: float = 30.0,
-    distance_column: str | None = "dist_mm",
-    run_mta: bool = False,
-    mta_lo_deg: float = 25.0,
-    mta_hi_deg: float = 65.0,
-    mta_n_bins: int = 8,
-    mta_min_rays_per_bin: int = 30,
-) -> dict[str, Any]:
-    """Compute legacy LAI from emitted LiDAR beam rows.
-
-    LAI uses the SICK cap's sky-facing theta half, not endpoint-selected
-    reconstructed target points.  SICK distance zero is treated as a no-return
-    / gap beam by converting it to the legacy gap sentinel before calling the
-    old LAI math.
-    """
-    distances_m = np.asarray(distances_m, dtype=float)
-    theta = np.asarray(theta_rad, dtype=float)
-
-    if distances_m.size == 0:
-        return _empty_lai_traits(
-            gap_distance_m=gap_distance_m,
-            angle_column="theta_sky_half",
-            distance_column=distance_column,
-        )
-    if theta.size != distances_m.size:
-        raise ValueError(
-            "LAI distances_m and theta_rad must have the same number of rows "
-            f"({distances_m.size} != {theta.size})"
-        )
-
-    angle_column = "theta_sky_half"
-
-    # Legacy comparison LAI sky-facing sector for the cart-mounted SICK.
-    #
-    # Physical cap orientation:
-    #   theta =   0 deg  -> down / ground
-    #   theta = +90 deg  -> side / horizon
-    #   theta = -90 deg  -> side / horizon
-    #   theta = +/-180   -> up / sky
-    #
-    # Therefore legacy zenith-from-sky is:
-    #   theta = +/-180 deg -> zenith = 0 deg
-    #   theta = +/-90 deg  -> zenith = 90 deg
-    #
-    # We exclude the downward half near theta = 0.
-    # This is still legacy comparison LAI, not world-zenith-corrected geometry.
-    finite_theta = theta[np.isfinite(theta)]
-    if finite_theta.size and np.nanmax(np.abs(finite_theta)) > (2.0 * math.pi + 1e-6):
-        theta = np.deg2rad(theta)
-
-    # Normalize theta to [-pi, pi].
-    theta = ((theta + math.pi) % (2.0 * math.pi)) - math.pi
-
-    # Distance from the sky/up direction at +/-pi.
-    zeniths_rad = math.pi - np.abs(theta)
-
-    # Keep only the sky-facing half: zenith 0..90 degrees.
-    theta_sector = (zeniths_rad >= 0.0) & (zeniths_rad <= math.radians(75.0))
-
-    range_ok = np.isfinite(distances_m)
-    angle_ok = np.isfinite(zeniths_rad)
-    valid = range_ok & angle_ok & theta_sector
-    n_missing_range = int((~range_ok).sum())
-    n_missing_angle = int((~angle_ok).sum())
-
-    if not np.any(valid):
-        return _empty_lai_traits(
-            gap_distance_m=gap_distance_m,
-            angle_column=angle_column,
-            distance_column=distance_column,
-            n_missing_range=n_missing_range,
-            n_missing_angle=n_missing_angle,
-        )
-
-    distances_scan = distances_m[valid].copy()
-
-    # SICK raw CSVs appear to encode no-return / no-hit beams as distance 0.
-    # The legacy LAI algorithm expects gaps to be distances > gap_distance_m.
-    # Convert zero-distance sky-sector rays to a legacy gap sentinel so the
-    # old gap-fraction calculation can see them as canopy escapes.
-    zero_distance_as_gap = distances_scan <= 0.0
-    distances_scan[zero_distance_as_gap] = gap_distance_m + 1.0
-    distances_scan = distances_scan[None, :]
-
-    zeniths_scan = zeniths_rad[valid]
-    pair = compute_lai_all_schemes(
-        distances_m=distances_scan,
-        zeniths_rad=zeniths_scan,
-        gap_distance_m=gap_distance_m,
-        run_mta=run_mta,
-        mta_lo_deg=mta_lo_deg,
-        mta_hi_deg=mta_hi_deg,
-        mta_n_bins=mta_n_bins,
-        mta_min_rays_per_bin=mta_min_rays_per_bin,
-    )
-    return _flatten_lai_pair(
-        pair,
-        gap_distance_m=gap_distance_m,
-        n_rays=int(valid.sum()),
-        angle_column=angle_column,
-        distance_column=distance_column,
-        n_missing_range=n_missing_range,
-        n_missing_angle=n_missing_angle,
-    )
-
-
-def compute_lai_trait_from_target(
-    target: Any,
-    *,
-    gap_distance_m: float = 30.0,
-    run_mta: bool = False,
-    mta_lo_deg: float = 25.0,
-    mta_hi_deg: float = 65.0,
-    mta_n_bins: int = 8,
-    mta_min_rays_per_bin: int = 30,
-) -> dict[str, Any]:
-    """
-    Compute legacy LAI traits from an AnalysisTarget's raw point rows.
-
-    Prefer compute_lai_trait_from_beam_rows for pipeline plot-level LAI, because
-    AnalysisTarget rows are endpoint-selected and can omit no-return beams.
-    """
-    points = getattr(target, "raw_points", None)
-    if points is None or len(points) == 0:
-        return _empty_lai_traits(gap_distance_m=gap_distance_m)
-
-    if "range_m" in points.columns:
-        distance_column = "range_m"
-        distances_m = points["range_m"].to_numpy(dtype=float, copy=False)
-    elif "dist_mm" in points.columns:
-        distance_column = "dist_mm"
-        distances_m = points["dist_mm"].to_numpy(dtype=float, copy=False) / 1000.0
-    else:
-        return _empty_lai_traits(gap_distance_m=gap_distance_m)
-
-    if "theta" not in points.columns:
-        return _empty_lai_traits(
-            gap_distance_m=gap_distance_m,
-            distance_column=distance_column,
-            n_missing_angle=len(points),
-        )
-
-    theta = points["theta"].to_numpy(dtype=float, copy=False)
-    return compute_lai_trait_from_beam_rows(
-        distances_m=distances_m,
-        theta_rad=theta,
-        gap_distance_m=gap_distance_m,
-        distance_column=distance_column,
-        run_mta=run_mta,
-        mta_lo_deg=mta_lo_deg,
-        mta_hi_deg=mta_hi_deg,
-        mta_n_bins=mta_n_bins,
-        mta_min_rays_per_bin=mta_min_rays_per_bin,
+        treat_no_return_as_gap=treat_no_return_as_gap,
     )
