@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -17,18 +16,14 @@ except Exception:
     QhullError = Exception
 
 
-@dataclass
-class _BackendResolver:
-    default_backend: str = "scipy"
-
-    def resolve(self, op_cfg: dict[str, Any], legacy_backend: str | None = None) -> str:
-        backend = op_cfg.get("backend") or legacy_backend or self.default_backend
-        b = str(backend).strip().lower()
-        if b == "scipy":
-            return b
-        if b in {"pcl", "pclpy", "python_pcl"}:
-            raise ValueError(f"Backend {b!r} requested but not implemented. Only 'scipy' is available.")
-        raise ValueError(f"Unsupported pointcloud backend '{backend}' for op={op_cfg.get('op')}")
+def _resolve_backend(op_cfg: dict[str, Any], default_backend: str = "scipy") -> str:
+    backend = op_cfg.get("backend") or default_backend
+    b = str(backend).strip().lower()
+    if b == "scipy":
+        return b
+    if b in {"pcl", "pclpy", "python_pcl"}:
+        raise ValueError(f"Backend {b!r} requested but not implemented. Only 'scipy' is available.")
+    raise ValueError(f"Unsupported pointcloud backend '{backend}' for op={op_cfg.get('op')}")
 
 
 _SUPPORTED_OPS = {
@@ -262,12 +257,12 @@ def _topology_trait(df: pd.DataFrame, op_cfg: dict[str, Any], target_obj) -> dic
 
 
 def _voxel_count(df: pd.DataFrame, op_cfg: dict[str, Any]) -> int:
-    size_m = float(
-        op_cfg.get(
-            "voxel_size_m",
-            op_cfg.get("voxel_size", op_cfg.get("leaf_size", 0.05)),
-        )
-    )
+    if op_cfg.get("voxel_size_m") is not None:
+        size_m = float(op_cfg["voxel_size_m"])
+    elif op_cfg.get("voxel_size") is not None:
+        size_m = float(op_cfg["voxel_size"]) / 1000.0
+    else:
+        size_m = float(op_cfg.get("leaf_size", 0.05))
 
     if size_m <= 0:
         raise ValueError(f"voxel size must be > 0; got {size_m}")
@@ -275,8 +270,8 @@ def _voxel_count(df: pd.DataFrame, op_cfg: dict[str, Any]) -> int:
     if len(df) == 0:
         return 0
 
-    # pipeline_core stores X/Y/Z in millimeters.
-    # voxel_size_m is meters, so convert coordinates to meters.
+    # pipeline_core stores X/Y/Z in millimeters; public voxel_size_m is meters.
+    # Legacy voxel_size follows raw point units, so it was converted above.
     xyz_m = df[["X", "Y", "Z"]].to_numpy(dtype=float, copy=False) / 1000.0
 
     idx = np.floor(xyz_m / size_m).astype(np.int64)
@@ -419,10 +414,9 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
         df = _as_df(target)
         target_obj = None
     ops = ops_config or []
-    resolver = _BackendResolver(default_backend=default_backend or "scipy")
-    legacy_backend = None
-    if isinstance(context, dict):
-        legacy_backend = context.get("pcl_backend_name")
+    backend_default = default_backend or (
+        context.get("pcl_backend_name") if isinstance(context, dict) else None
+    ) or "scipy"
 
     diagnostics = {
         "available_scalar_columns_before": [c for c in df.columns if c not in {"X","Y","Z"}],
@@ -442,7 +436,7 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
             continue
         if op not in _SUPPORTED_OPS:
             raise ValueError(f"Unsupported pointcloud op '{op}'")
-        backend = resolver.resolve(op_cfg, legacy_backend=legacy_backend)
+        backend = _resolve_backend(op_cfg, backend_default)
         diagnostics["operation_order"].append(op)
         diagnostics["backend_used"].append({"op": op, "backend": backend})
 

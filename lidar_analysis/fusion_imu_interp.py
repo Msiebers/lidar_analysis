@@ -5,59 +5,14 @@ import warnings
 import numpy as np
 
 try:
-    from .fusion import fuse_by_time  # kept for import compatibility, not normally used here
+    from .fusion import _interp_columns as _shared_interp_columns
+    from .fusion import _unwrap_deg, fuse_by_time  # kept for import compatibility
 except ImportError:
-    from fusion import fuse_by_time
+    from fusion import _interp_columns as _shared_interp_columns
+    from fusion import _unwrap_deg, fuse_by_time
 
 
 _CLAMP_WARNED = False
-
-
-def _unwrap_deg(arr: np.ndarray) -> np.ndarray:
-    """Unwrap degrees before interpolation to avoid 359/-1 discontinuities."""
-    arr = np.asarray(arr, dtype=np.float64)
-    return np.rad2deg(np.unwrap(np.deg2rad(arr)))
-
-
-def _dedupe_average_source(
-    x: np.ndarray,
-    y: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Sort source timestamps and average duplicate timestamp values.
-
-    This avoids silently keeping only the first duplicate timestamp.
-    """
-    x = np.asarray(x, dtype=np.float64)
-    y = np.asarray(y, dtype=np.float64)
-
-    if y.ndim == 1:
-        y = y[:, None]
-
-    valid = np.isfinite(x) & np.all(np.isfinite(y), axis=1)
-    x = x[valid]
-    y = y[valid]
-
-    if x.size == 0:
-        return x, y
-
-    order = np.argsort(x, kind="mergesort")
-    x = x[order]
-    y = y[order]
-
-    xu, inverse = np.unique(x, return_inverse=True)
-
-    if xu.size == x.size:
-        return x, y
-
-    ysum = np.zeros((xu.size, y.shape[1]), dtype=np.float64)
-    counts = np.zeros(xu.size, dtype=np.float64)
-
-    np.add.at(ysum, inverse, y)
-    np.add.at(counts, inverse, 1.0)
-
-    yu = ysum / counts[:, None]
-    return xu, yu
 
 
 def _interp_columns(
@@ -83,26 +38,13 @@ def _interp_columns(
     """
     global _CLAMP_WARNED
 
-    xq = np.asarray(xq, dtype=np.float64)
-    x, y = _dedupe_average_source(x, y)
-
-    if y.ndim == 1:
-        y = y[:, None]
-
-    out = np.full((xq.size, y.shape[1]), np.nan, dtype=np.float64)
-
-    # One source sample is not a real interpolation interval. Treat as invalid
-    # in both trim and non-trim modes rather than broadcasting one frozen value.
-    if x.size < 2:
-        return out, np.zeros(xq.size, dtype=bool), 0
-
-    valid_q = np.isfinite(xq)
-    outside = valid_q & ((xq < x[0]) | (xq > x[-1]))
-    n_clamped = int(np.count_nonzero(outside))
-
-    if trim_to_overlap:
-        valid_q &= ~outside
-    elif n_clamped > 0 and warn_on_clamp and not _CLAMP_WARNED:
+    out, valid_q, n_clamped = _shared_interp_columns(
+        xq,
+        x,
+        y,
+        trim_to_overlap=trim_to_overlap,
+    )
+    if (not trim_to_overlap) and n_clamped > 0 and warn_on_clamp and not _CLAMP_WARNED:
         warnings.warn(
             "fuse_by_imu_interp used endpoint clamping because trim_to_overlap=False. "
             f"Clamped {n_clamped} query rows in this interpolation call. "
@@ -111,13 +53,6 @@ def _interp_columns(
             stacklevel=2,
         )
         _CLAMP_WARNED = True
-
-    if not np.any(valid_q):
-        return out, valid_q, n_clamped
-
-    for j in range(y.shape[1]):
-        out[valid_q, j] = np.interp(xq[valid_q], x, y[:, j])
-
     return out, valid_q, n_clamped
 
 

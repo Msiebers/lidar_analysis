@@ -4,6 +4,12 @@ import pandas as pd
 from .imagepers import persistence
 
 
+class TopologyResult(dict):
+    def __iter__(self):
+        yield self["count"]
+        yield self["points"]
+
+
 def topology_stand_count(
     point_cloud,
     min_persistence: float = 0.35,
@@ -22,7 +28,7 @@ def topology_stand_count(
         {"count": count_per_meter, "points": birth_points, "count_raw": raw_count}
     """
     if point_cloud is None:
-        return {"count": float("nan"), "points": [], "count_raw": float("nan")}
+        return TopologyResult({"count": float("nan"), "points": [], "count_raw": float("nan")})
 
     if isinstance(point_cloud, pd.DataFrame):
         df = point_cloud.copy()
@@ -38,12 +44,12 @@ def topology_stand_count(
         arr = arr[:, :3]
 
     if arr.shape[0] == 0:
-        return {"count": float("nan"), "points": [], "count_raw": float("nan")}
+        return TopologyResult({"count": float("nan"), "points": [], "count_raw": float("nan")})
 
     z = arr[:, 2]
     distance = float(np.nanmax(z) - np.nanmin(z))
     if not np.isfinite(distance) or distance <= 0:
-        return {"count": float("nan"), "points": [], "count_raw": float("nan")}
+        return TopologyResult({"count": float("nan"), "points": [], "count_raw": float("nan")})
 
     df = pd.DataFrame(arr, columns=("x", "y", "z"))
     # Legacy behavior: 0.02 m x bins.
@@ -90,7 +96,7 @@ def topology_stand_count(
 
     max_im = float(np.max(im))
     if max_im <= 0:
-        return {"count": float("nan"), "points": [], "count_raw": float("nan")}
+        return TopologyResult({"count": float("nan"), "points": [], "count_raw": float("nan")})
     im = im / max_im
 
     g0 = persistence(im)
@@ -119,8 +125,8 @@ def topology_stand_count(
         # If none dropped below threshold, count all components.
         raw_count = len(g0)
 
-    return {
+    return TopologyResult({
         "count": float(raw_count) / distance,
         "points": birth_points,
         "count_raw": float(raw_count),
-    }
+    })

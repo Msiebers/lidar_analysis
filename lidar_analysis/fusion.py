@@ -5,9 +5,76 @@ import numpy as np
 
 
 def _unwrap_deg(arr: np.ndarray) -> np.ndarray:
-    """Unwrap degrees to avoid 359→-359 discontinuities before interpolation."""
+    """Unwrap degrees before interpolation to avoid 359/-1 discontinuities."""
     arr = np.asarray(arr, np.float64)
     return np.rad2deg(np.unwrap(np.deg2rad(arr)))
+
+
+def _dedupe_average_source(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Sort source timestamps and average duplicate timestamp values."""
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+
+    if y.ndim == 1:
+        y = y[:, None]
+
+    valid = np.isfinite(x) & np.all(np.isfinite(y), axis=1)
+    x = x[valid]
+    y = y[valid]
+
+    if x.size == 0:
+        return x, y
+
+    order = np.argsort(x, kind="mergesort")
+    x = x[order]
+    y = y[order]
+
+    xu, inverse = np.unique(x, return_inverse=True)
+    if xu.size == x.size:
+        return x, y
+
+    ysum = np.zeros((xu.size, y.shape[1]), dtype=np.float64)
+    counts = np.zeros(xu.size, dtype=np.float64)
+    np.add.at(ysum, inverse, y)
+    np.add.at(counts, inverse, 1.0)
+    return xu, ysum / counts[:, None]
+
+
+def _interp_columns(
+    xq: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    *,
+    trim_to_overlap: bool = True,
+) -> tuple[np.ndarray, np.ndarray, int]:
+    """Interpolate columns, returning values, valid query mask, and clamped count."""
+    xq = np.asarray(xq, dtype=np.float64)
+    x, y = _dedupe_average_source(x, y)
+
+    if y.ndim == 1:
+        y = y[:, None]
+
+    out = np.full((xq.size, y.shape[1]), np.nan, dtype=np.float64)
+    if x.size < 2:
+        return out, np.zeros(xq.size, dtype=bool), 0
+
+    valid_q = np.isfinite(xq)
+    outside = valid_q & ((xq < x[0]) | (xq > x[-1]))
+    n_clamped = int(np.count_nonzero(outside))
+
+    if trim_to_overlap:
+        valid_q &= ~outside
+
+    if not np.any(valid_q):
+        return out, valid_q, n_clamped
+
+    for j in range(y.shape[1]):
+        out[valid_q, j] = np.interp(xq[valid_q], x, y[:, j])
+
+    return out, valid_q, n_clamped
 
 
 def _lin_interp(xq: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
@@ -18,16 +85,8 @@ def _lin_interp(xq: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
     - x : sample locations
     - y : sample values
     """
-    x = np.asarray(x, np.float64)
-    y = np.asarray(y, np.float64)
-    xq = np.asarray(xq, np.float64)
-
-    if x.size == 0:
-        return np.full_like(xq, np.nan, dtype=np.float64)
-
-    xu, idx = np.unique(x, return_index=True)
-    yu = y[idx]
-    return np.interp(xq, xu, yu)
+    values, _valid, _clamped = _interp_columns(xq, x, y, trim_to_overlap=False)
+    return values[:, 0]
 
 
 def fuse_by_time(

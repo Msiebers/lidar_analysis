@@ -30,13 +30,10 @@ central_watcher.py         Watches staged data and handles processing / publishi
 config.py                  AnalysisConfig dataclass and configuration options
 fusion.py                  Time-based LiDAR/Pico fusion
 fusion_pps.py              PPS-based LiDAR/Pico fusion
-io_utils.py                File loading / utility helpers
 local_run.py               Local processing helper
 mark_splitting.py          Marker-aware splitting utilities
 orchestrator.py            High-level pipeline orchestration
 pipeline_core.py           Core reconstruction, filtering, splitting, and output logic
-pipeline_stages.py         Stage-based processing wrapper
-results_manager.py         Results aggregation / output management
 run_experiment_date.py     Run one experiment/date bundle
 run_manifest.py            Manifest-based run helper
 scaffold_experiments.py    Experiment scaffolding utilities

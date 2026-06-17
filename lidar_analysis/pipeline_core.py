@@ -23,6 +23,7 @@ try:
         build_mark_segments,
         find_marker_file_for_scan,
         marker_buffer_mm,
+        marker_count_to_z_mm,
     )
     from .pointcloud_ops import apply_pointcloud_ops
     from .analysis_target import AnalysisTarget
@@ -43,6 +44,7 @@ except Exception:
         build_mark_segments,
         find_marker_file_for_scan,
         marker_buffer_mm,
+        marker_count_to_z_mm,
     )
     from pointcloud_ops import apply_pointcloud_ops
     from analysis_target import AnalysisTarget
@@ -526,7 +528,7 @@ def normalize_rssi_by_phi_zscore(phi: np.ndarray, rssi: np.ndarray, decimals: in
 
     phi_key = np.round(phi, decimals=decimals)
 
-    EXP_ALPHA = 1.0
+    EXP_ALPHA = 3.0
 
     for ph in np.unique(phi_key):
         m = (phi_key == ph)
@@ -543,7 +545,9 @@ def normalize_rssi_by_phi_zscore(phi: np.ndarray, rssi: np.ndarray, decimals: in
         else:
             z = ((vals - mu) / sd).astype(np.float32)
 
-        out[m] = np.exp(EXP_ALPHA * z).astype(np.float32)
+        #out[m] = np.exp(EXP_ALPHA * z).astype(np.float32)
+        out[m] = np.sqrt(np.clip(z, 0, None)).astype(np.float32)
+        #out[m] = z.astype(np.float32)
 
     return out
 
@@ -1061,22 +1065,6 @@ def write_scan_outputs(scan_base: str, cfg: AnalysisConfig, plot: Plot) -> None:
 
 
 
-def marker_count_to_z_mm(encoder_count, *, step_mm: float, lidar_wheel_offset_mm: float) -> float:
-    """
-    Convert a marker encoder_count to world Z in mm using the same convention
-    used by marker splitting.
-
-    Encoder travel distance is count * step_mm. The LiDAR is offset from the
-    wheel reference, so subtract lidar_wheel_offset_mm to express the marker
-    in LiDAR/world Z coordinates.
-    """
-    try:
-        c = float(encoder_count)
-    except Exception:
-        return float("nan")
-    return (c * float(step_mm)) - float(lidar_wheel_offset_mm)
-
-
 def write_marker_reference_points(scan_base: str, marker_path: str, out_dir: str, step_mm: float, lidar_wheel_offset_mm: float) -> None:
     try:
         df = pd.read_csv(marker_path)
@@ -1182,7 +1170,7 @@ def analyze_plot(
     row_options: list[str],
     lidar_height_mm: float,
     step_mm: float,
-    beam_diag,
+    beam_diag=None,
     roll_offset: float = 0.0,
     pitch_offset: float = 0.0,
 ) -> dict:
@@ -1216,8 +1204,6 @@ def analyze_plot(
     stand_topo_right_count = float("nan")
     stand_topo_left_per_m = float("nan")
     stand_topo_right_per_m = float("nan")
-    n_points_o3d = 0
-    voxel_count_o3d = float("nan")
     plot_idx = np.empty((0,), dtype=np.int32)
     lai_plot_idx = np.empty((0,), dtype=np.int32)
     fad_traits = {}
@@ -1225,28 +1211,32 @@ def analyze_plot(
     topo_object_points = []
     write_topology_objects = False
 
-    if not np.any(mask):
-        goto_open3d = False
-    else:
-        goto_open3d = True
+    if np.any(mask):
         p.cloud = data[mask]
 
         plot_idx = keep_idx[mask]
         fused_plot = fused_np[plot_idx]
+        def _fused_col(idx: int, default: float = 0.0) -> np.ndarray:
+            if fused_plot.ndim == 2 and fused_plot.shape[1] > idx:
+                return fused_plot[:, idx]
+            return np.full(plot_idx.shape[0], default, dtype=np.float32)
         points_df = pd.DataFrame(p.cloud[:, :4], columns=["X", "Y", "Z", "RSSI"])
         if p.cloud.shape[1] > 4:
             points_df["rssi_norm"] = p.cloud[:, 4]
         points_df["source_index"] = plot_idx
-        points_df["time_s"] = fused_plot[:, 0]
-        points_df["phi"] = fused_plot[:, 1]
-        points_df["theta"] = fused_plot[:, 2]
-        points_df["dist_mm"] = fused_plot[:, 3]
-        points_df["range_m"] = fused_plot[:, 3] / 1000.0
-        points_df["encoder"] = fused_plot[:, 5]
-        points_df["roll_deg"] = fused_plot[:, 6]
-        points_df["pitch_deg"] = fused_plot[:, 7]
-        points_df["yaw_deg"] = fused_plot[:, 8]
-        beam_id_plot = beam_diag.beam_id_by_row[plot_idx]
+        points_df["time_s"] = _fused_col(0)
+        points_df["phi"] = _fused_col(1)
+        points_df["theta"] = _fused_col(2)
+        points_df["dist_mm"] = _fused_col(3)
+        points_df["range_m"] = _fused_col(3) / 1000.0
+        points_df["encoder"] = _fused_col(5)
+        points_df["roll_deg"] = _fused_col(6)
+        points_df["pitch_deg"] = _fused_col(7)
+        points_df["yaw_deg"] = _fused_col(8)
+        if beam_diag is None:
+            beam_id_plot = np.zeros(plot_idx.shape[0], dtype=np.int32)
+        else:
+            beam_id_plot = beam_diag.beam_id_by_row[plot_idx]
         points_df["beam_id"] = beam_id_plot.astype(np.int32, copy=False)
 
         ops_cfg = getattr(cfg, "pointcloud_ops", None) or []
@@ -1455,23 +1445,6 @@ def analyze_plot(
             f"returns={returns} no_returns={no_returns} "
             f"height={height_result.height_m:.3f} fad={fad_value:.3f}"
         )
-
-    topo_input = np.empty((0, 3), dtype=float)
-    if goto_open3d:
-        if cfg.run_o3d_metrics:
-            scan_index_plot = fused_np[plot_idx, 5].astype(np.float64)
-            n_points_o3d = int(p.cloud.shape[0])
-            voxel_count_o3d = float("nan")
-        else:
-            n_points_o3d = 0
-            voxel_count_o3d = float("nan")
-
-        if cfg.run_topology:
-            topo_input = p.cloud[:, :3].astype(float, copy=False)
-    else:
-        n_points_o3d = 0
-        voxel_count_o3d = float("nan")
-        topo_input = np.empty((0, 3), dtype=float)
 
     z_min, z_max = p.min_z, p.max_z
     plot_length_m = max((float(z_max) - float(z_min)) / 1000.0, 0.0)

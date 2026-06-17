@@ -25,7 +25,6 @@ Do not change coordinate conventions.
 - `lidar_analysis/fusion.py`: time-based LiDAR/Pico fusion
 - `lidar_analysis/fusion_pps.py`: PPS-based fusion
 - `lidar_analysis/mark_splitting.py`: existing marker-related logic
-- `lidar_analysis/pipeline_stages.py`: pipeline stage wrapper
 - `lidar_analysis/orchestrator.py`: high-level orchestration
 - `lidar_analysis/example_data/2026_04_28_1/`: tiny three-plant real fixture
 

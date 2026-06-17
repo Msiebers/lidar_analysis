@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
-import sys
 from pathlib import Path
 
 
@@ -40,40 +38,21 @@ def call_runner(args: argparse.Namespace, input_dir: Path, config_path: Path) ->
     except Exception:
         import central_runner  # type: ignore
 
-    if hasattr(central_runner, "run_experiment_date"):
-        experiment_config = central_runner._load_yaml(config_path)
-        analysis_cfg = central_runner.extract_analysis_cfg(experiment_config)
-        central_runner.run_experiment_date(
-            experiment=args.experiment,
-            date_name=args.date,
-            input_dir=input_dir,
-            working_dir=Path(args.working).resolve(),
-            output_dir=Path(args.output).resolve(),
-            experiment_config=experiment_config,
-            experiment_analysis=analysis_cfg,
-            cart_id=args.cart_id,
-            force=bool(args.force),
-            fusion_method=args.fusion,
-        )
-        return 0
-
-    runner_py = Path(central_runner.__file__).resolve()
-    cmd = [
-        sys.executable,
-        str(runner_py),
-        "--experiment", args.experiment,
-        "--date", args.date,
-        "--input", str(input_dir),
-        "--working", str(Path(args.working).resolve()),
-        "--output", str(Path(args.output).resolve()),
-        "--config", str(config_path),
-        "--fusion", args.fusion,
-    ]
-    if args.cart_id:
-        cmd.extend(["--cart-id", args.cart_id])
-    if args.force:
-        cmd.append("--force")
-    return subprocess.run(cmd, check=False).returncode
+    experiment_config = central_runner._load_yaml(config_path)
+    analysis_cfg = central_runner.extract_analysis_cfg(experiment_config)
+    central_runner.run_experiment_date(
+        experiment=args.experiment,
+        date_name=args.date,
+        input_dir=input_dir,
+        working_dir=Path(args.working).resolve(),
+        output_dir=Path(args.output).resolve(),
+        experiment_config=experiment_config,
+        experiment_analysis=analysis_cfg,
+        cart_id=args.cart_id,
+        force=bool(args.force),
+        fusion_method=args.fusion,
+    )
+    return 0
 
 
 def main() -> None:

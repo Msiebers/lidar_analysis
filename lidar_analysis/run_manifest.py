@@ -1,18 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
 import yaml
-
-
-@dataclass(frozen=True)
-class ManifestKey:
-    experiment: str
-    date_name: str
 
 
 def utc_now() -> str:

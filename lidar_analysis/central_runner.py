@@ -7,15 +7,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+import numpy as np
 import yaml
 
 try:
     from .config import AnalysisConfig, normalize_rssi_mode, map_deprecated_analysis_keys
-    from .pipeline_stages import DEFAULT_STAGES, StageContext
     from . import pipeline_core
 except Exception:
     from config import AnalysisConfig, normalize_rssi_mode, map_deprecated_analysis_keys
-    from pipeline_stages import DEFAULT_STAGES, StageContext
     import pipeline_core
 
 @dataclass
@@ -605,21 +604,6 @@ def run_experiment_date(
     x_min_m = None if cfg.x_min_u is None else pipeline_core._to_m_units(cfg.x_min_u, cfg.dim_units)
     min_radius_m = None if cfg.min_radius_u is None else pipeline_core._to_m_units(cfg.min_radius_u, cfg.dim_units)
 
-    context = StageContext(
-        experiment=experiment,
-        date_name=date_name,
-        date_dir=input_dir,
-        output_dir=output_dir,
-        cfg=cfg,
-        calibration=calibration,
-        width_mm=row_width_m * 1000.0,
-        x_min_mm=None if x_min_m is None else x_min_m * 1000.0,
-        start_mm_global=0.0 if start_m is None else start_m * 1000.0,
-        end_buffer_mm=end_buffer_m * 1000.0,
-        y_max_mm=None if max_y_m is None else max_y_m * 1000.0,
-        min_radius_mm=None if min_radius_m is None else min_radius_m * 1000.0,
-    )
-
     pointcloud_out = output_dir / "pointclouds"
     pointcloud_out.mkdir(parents=True, exist_ok=True)
     results_csv = output_dir / "results.csv"
@@ -627,10 +611,25 @@ def run_experiment_date(
 
     for scan_id, lidar_fp, pico_fp in pairs:
         print(f"[Run] Processing scan {scan_id}")
-        trait_rows: list[dict] = []
-        for stage in DEFAULT_STAGES:
-            result = stage.run(context, scan_id, lidar_fp, pico_fp)
-            trait_rows.extend(result.trait_rows)
+        trait_rows = pipeline_core.process_scan(
+            scan_base=scan_id,
+            lidar_path=str(lidar_fp),
+            pico_path=str(pico_fp),
+            out_dir=str(pointcloud_out),
+            cfg=cfg,
+            width_mm=row_width_m * 1000.0,
+            start_mm_global=0.0 if start_m is None else start_m * 1000.0,
+            end_buffer_mm=end_buffer_m * 1000.0,
+            y_max_mm=None if max_y_m is None else max_y_m * 1000.0,
+            x_min_mm=None if x_min_m is None else x_min_m * 1000.0,
+            min_radius_mm=None if min_radius_m is None else min_radius_m * 1000.0,
+            step_mm=calibration["step_mm"],
+            lidar_height_mm=calibration["lidar_height_mm"],
+            lidar_wheel_offset_mm=calibration["lidar_wheel_offset_mm"],
+            roll_offset=calibration["roll_offset_deg"],
+            pitch_offset=calibration["pitch_offset_deg"],
+            imu_offset_mm=np.asarray(calibration["imu_offset_mm"], dtype=float),
+        ) or []
         append_trait_rows(results_csv, experiment, date_name, scan_id, trait_rows, cfg)
         print(f"[Success] {scan_id}: wrote {len(trait_rows)} phenotype row(s)")
 

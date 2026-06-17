@@ -3,15 +3,11 @@ from __future__ import annotations
 import numpy as np
 
 try:
-    from .fusion import fuse_by_time  # kept only for direct import compatibility elsewhere
+    from .fusion import _interp_columns as _shared_interp_columns
+    from .fusion import _unwrap_deg, fuse_by_time  # kept for direct import compatibility
 except ImportError:
-    from fusion import fuse_by_time
-
-
-def _unwrap_deg(arr: np.ndarray) -> np.ndarray:
-    """Unwrap degrees before interpolation to avoid 359/-1 discontinuities."""
-    arr = np.asarray(arr, dtype=np.float64)
-    return np.rad2deg(np.unwrap(np.deg2rad(arr)))
+    from fusion import _interp_columns as _shared_interp_columns
+    from fusion import _unwrap_deg, fuse_by_time
 
 
 def _sort_by_pps_time(arr: np.ndarray, ts_col: int, pps_col: int) -> np.ndarray:
@@ -154,49 +150,6 @@ def _phase_time(
     return out
 
 
-def _dedupe_average_source(
-    x: np.ndarray,
-    y: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Sort source timestamps and average duplicate timestamp values.
-
-    This avoids np.unique(..., return_index=True), which silently keeps only
-    the first duplicate timestamp.
-    """
-    x = np.asarray(x, dtype=np.float64)
-    y = np.asarray(y, dtype=np.float64)
-
-    if y.ndim == 1:
-        y = y[:, None]
-
-    valid = np.isfinite(x) & np.all(np.isfinite(y), axis=1)
-    x = x[valid]
-    y = y[valid]
-
-    if x.size == 0:
-        return x, y
-
-    order = np.argsort(x, kind="mergesort")
-    x = x[order]
-    y = y[order]
-
-    xu, inverse = np.unique(x, return_inverse=True)
-
-    if xu.size == x.size:
-        return x, y
-
-    ysum = np.zeros((xu.size, y.shape[1]), dtype=np.float64)
-    counts = np.zeros(xu.size, dtype=np.float64)
-
-    np.add.at(ysum, inverse, y)
-    np.add.at(counts, inverse, 1.0)
-
-    yu = ysum / counts[:, None]
-
-    return xu, yu
-
-
 def _interp_columns(
     xq: np.ndarray,
     x: np.ndarray,
@@ -210,28 +163,7 @@ def _interp_columns(
     If trim_to_overlap=True, query rows outside the source range are invalid.
     This avoids silent endpoint clamping.
     """
-    xq = np.asarray(xq, dtype=np.float64)
-    x, y = _dedupe_average_source(x, y)
-
-    if y.ndim == 1:
-        y = y[:, None]
-
-    out = np.full((xq.size, y.shape[1]), np.nan, dtype=np.float64)
-
-    if x.size < 2:
-        return out, np.zeros(xq.size, dtype=bool)
-
-    valid_q = np.isfinite(xq)
-
-    if trim_to_overlap:
-        valid_q &= (xq >= x[0]) & (xq <= x[-1])
-
-    if not np.any(valid_q):
-        return out, valid_q
-
-    for j in range(y.shape[1]):
-        out[valid_q, j] = np.interp(xq[valid_q], x, y[:, j])
-
+    out, valid_q, _n_clamped = _shared_interp_columns(xq, x, y, trim_to_overlap=trim_to_overlap)
     return out, valid_q
 
 
