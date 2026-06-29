@@ -76,7 +76,8 @@ def default_analysis_yaml_dict() -> dict:
         d.pop(k,None)
     d["generate_pointclouds"] = d.pop("make_point_cloud")
     d["overwrite_pointclouds"] = d.pop("overwrite_outputs")
-    d# Backward compatibility:
+
+    # Backward compatibility:
     # Older configs may use apply_imu, but AnalysisConfig uses use_imu.
     if "apply_imu" in d and "use_imu" not in d:
         d["use_imu"] = d.pop("apply_imu")

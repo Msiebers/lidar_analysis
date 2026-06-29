@@ -288,6 +288,9 @@ def _plot_interval_indices_from_fused(
     return np.flatnonzero(mask).astype(np.int32, copy=False)
 
 def _to_cartesian_mm(phi, theta, r_mm):
+    # Project coordinate convention after sign flips:
+    # X = left/right, Y = vertical height, Z = travel direction.
+    # These signs affect every reconstructed point and downstream trait.
     x = r_mm * np.cos(phi) * np.sin(theta)
     y = r_mm * np.cos(phi) * np.cos(theta)
     z = r_mm * np.sin(phi)
@@ -562,6 +565,9 @@ def normalize_rssi_by_phi_percentile(phi: np.ndarray, rssi: np.ndarray, decimals
 
 
 def choose_fusion_method(cfg: AnalysisConfig, lidar_np: np.ndarray, pico_np: np.ndarray) -> np.ndarray:
+    # Fused rows are a positional contract used throughout this module:
+    # [time_s, phi, theta, dist_mm, rssi, encoder, roll_deg, pitch_deg, yaw_deg].
+    # Keep this order stable unless all reconstruction, LAI, and output code is updated.
     if cfg.fusion_method == "pps":
         return fuse_by_pps(
             lidar_np,
@@ -627,6 +633,8 @@ def reconstruct_world_points(
     min_radius_mm: float | None = None,
     lidar_wheel_offset_mm: float = 0.0,  # kept in signature if you want, but unused here
 ) -> tuple[np.ndarray, np.ndarray]:
+    # `fused_np` follows the column contract documented in choose_fusion_method.
+    # Output `data` remains in millimeters until Plot.write converts X/Y/Z to meters.
     phi = fused_np[:, 1]
     theta = fused_np[:, 2]
     dist = fused_np[:, 3]
