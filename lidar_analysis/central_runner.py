@@ -446,7 +446,7 @@ def phenotype_columns(cfg: AnalysisConfig) -> list[str]:
     if bool(getattr(cfg, "run_fad", False)):
         cols.append("fad_app_m2_m3")
         if bool(getattr(cfg, "fad_run_layers", False)):
-            cols.extend(["fad_lai_from_layers", "fad_n_layers"])
+            cols.extend(["fad_lai_from_layers", "fad_integrated_m2_m2", "fad_n_layers"])
 
     cols.extend([
         "point_density_m2",
@@ -497,13 +497,38 @@ def append_trait_rows(
     recs: Iterable[dict],
     cfg: AnalysisConfig,
 ) -> None:
-    fieldnames = phenotype_columns(cfg)
+    recs = list(recs)
+    base_fields = phenotype_columns(cfg)
+    with open(results_csv, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        existing_fields = reader.fieldnames or []
+        existing_rows = list(reader)
+
+    layer_fields = sorted({
+        key
+        for key in existing_fields
+        if key.startswith("fad_layer_") and key.endswith("_m2_m3")
+    } | {
+        key
+        for rec in recs
+        for key in rec
+        if key.startswith("fad_layer_") and key.endswith("_m2_m3")
+    })
+    insert_at = base_fields.index("fad_n_layers") + 1 if "fad_n_layers" in base_fields else len(base_fields)
+    fieldnames = base_fields[:insert_at] + layer_fields + base_fields[insert_at:]
+
+    if fieldnames != existing_fields:
+        with open(results_csv, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows({key: row.get(key) for key in fieldnames} for row in existing_rows)
 
     with open(results_csv, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
 
         for rec in recs:
-            row = {
+            row = dict(rec)
+            row.update({
                 "experiment": experiment,
                 "date": date_str,
                 "scan_id": rec.get("scan", scan_id),
@@ -538,6 +563,7 @@ def append_trait_rows(
                 # "lai_n_missing_angle": rec.get("lai_n_missing_angle"),
                 "fad_app_m2_m3": rec.get("fad_app_m2_m3"),
                 "fad_lai_from_layers": rec.get("fad_lai_from_layers"),
+                "fad_integrated_m2_m2": rec.get("fad_integrated_m2_m2"),
                 "fad_n_layers": rec.get("fad_n_layers"),
                 "point_density_m2": rec.get("point_density_m2"),
                 "plot_length_m": rec.get("plot_length_m"),
@@ -554,7 +580,7 @@ def append_trait_rows(
                 "points": rec.get("points"),
                 "lidar_scans": rec.get("lidar_scans"),
                 "lidar_angles": rec.get("lidar_angles"),
-            }
+            })
 
             writer.writerow({k: row.get(k) for k in fieldnames})
 

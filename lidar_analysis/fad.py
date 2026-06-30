@@ -879,9 +879,6 @@ def layered_fad_result_to_traits(
         label = f"{cm0:03d}_{cm1:03d}"
 
         traits[f"{p}_layer_{label}_m2_m3"] = float(result.fad_m2_m3[i])
-        traits[f"{p}_layer_{label}_path_m"] = float(result.total_free_path_length_m[i])
-        traits[f"{p}_layer_{label}_hits"] = int(result.n_hits_inside_box[i])
-        traits[f"{p}_layer_{label}_observed_rays"] = int(result.n_rays_observed_in_box[i])
 
     return traits
 
