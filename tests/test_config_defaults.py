@@ -56,5 +56,36 @@ def test_fad_phenotype_columns_include_layer_summaries_when_enabled():
     assert cfg.fad_run_layers is True
     assert "fad_app_m2_m3" in cols
     assert "fad_lai_from_layers" in cols
+    assert "fad_integrated_m2_m2" in cols
     assert "fad_n_layers" in cols
     assert not any(c.startswith("fad_layer_") for c in cols)
+
+
+def test_results_csv_adds_dynamic_fad_layer_columns(tmp_path):
+    import csv
+
+    from lidar_analysis.central_runner import append_trait_rows, build_config, ensure_results_csv
+
+    cfg = build_config(
+        {"run_fad": True, "fad_run_layers": True, "fad_include_layer_columns": True},
+        force=False,
+        cart_id="CART",
+        data_dir=tmp_path,
+    )
+    path = tmp_path / "results.csv"
+    ensure_results_csv(path, cfg)
+    append_trait_rows(path, "experiment", "2026_06_18", "scan", [{
+        "scan": "scan",
+        "fad_lai_from_layers": 2.0,
+        "fad_integrated_m2_m2": 2.0,
+        "fad_layer_010_035_m2_m3": 3.0,
+        "fad_layer_035_060_m2_m3": 4.0,
+        "fad_layer_010_035_hits": 99,
+    }], cfg)
+
+    with open(path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        row = next(reader)
+
+    assert "fad_layer_010_035_m2_m3" in reader.fieldnames
+    assert "fad_layer_035_060_m2_m3" in reader.fieldnames

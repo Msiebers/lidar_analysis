@@ -511,16 +511,18 @@ class Plot:
 # Core process
 # ======================================================================
 
+
+
 def normalize_rssi_by_phi_zscore(phi: np.ndarray, rssi: np.ndarray, decimals: int = 3) -> np.ndarray:
     """
-    Per-phi z-score, followed by an exponential transform.
+    Per-phi RSSI normalization.
 
-    Output is positive:
-      exp(0) = 1
-      positive z -> > 1
-      negative z -> between 0 and 1
+    Pick ONE transform below:
+      1. exponential transform
+      2. square-root transform
+      3. no transform, just z-score
 
-    This makes bright-above-average returns stand out more strongly.
+    Current active option: square-root transform.
     """
     phi = np.asarray(phi, dtype=np.float32)
     rssi = np.asarray(rssi, dtype=np.float32)
@@ -528,10 +530,8 @@ def normalize_rssi_by_phi_zscore(phi: np.ndarray, rssi: np.ndarray, decimals: in
 
     phi_key = np.round(phi, decimals=decimals)
 
-    EXP_ALPHA = 3.0
-
     for ph in np.unique(phi_key):
-        m = (phi_key == ph)
+        m = phi_key == ph
         vals = rssi[m]
 
         if vals.size == 0:
@@ -540,44 +540,36 @@ def normalize_rssi_by_phi_zscore(phi: np.ndarray, rssi: np.ndarray, decimals: in
         mu = np.mean(vals, dtype=np.float64)
         sd = np.std(vals, dtype=np.float64)
 
-        if sd == 0.0:
+        if not np.isfinite(sd) or sd == 0.0:
             z = np.zeros_like(vals, dtype=np.float32)
         else:
             z = ((vals - mu) / sd).astype(np.float32)
 
-        #out[m] = np.exp(EXP_ALPHA * z).astype(np.float32)
-        out[m] = np.sqrt(np.clip(z, 0, None)).astype(np.float32)
-        #out[m] = z.astype(np.float32)
+        # ============================================================
+        # PICK ONE RSSI TRANSFORM
+        # Leave exactly one transformed = ... block uncommented.
+        # ============================================================
+
+        # Option 1: exponential transform
+        # Strongly emphasizes unusually bright returns.
+        # Output is positive; z = 0 becomes 1.
+        # transformed = np.exp(3.0 * z).astype(np.float32)
+
+        # Option 2: square-root transform
+        # Softer than exponential. Output is clipped at 0.
+        # z = 0 becomes 1; positive z becomes >1; negative z becomes <1.
+        transformed = np.maximum(
+            1.0 + np.sign(z) * np.sqrt(np.abs(z)),
+            0.0
+        ).astype(np.float32)
+
+        # Option 3: no transform
+        # Plain per-phi z-score. Can be negative.
+        # transformed = z.astype(np.float32)
+
+        out[m] = transformed
 
     return out
-
-
-def normalize_rssi_by_phi_percentile(phi: np.ndarray, rssi: np.ndarray, decimals: int = 3) -> np.ndarray:
-    phi = np.asarray(phi, dtype=np.float32)
-    rssi = np.asarray(rssi, dtype=np.float32)
-    out = np.zeros_like(rssi, dtype=np.float32)
-
-    phi_key = np.round(phi, decimals=decimals)
-
-    for ph in np.unique(phi_key):
-        m = (phi_key == ph)
-        vals = rssi[m]
-
-        n = vals.size
-        if n == 0:
-            continue
-        if n == 1:
-            out[m] = 0.5
-            continue
-
-        order = np.argsort(vals, kind="mergesort")
-        ranks = np.empty(n, dtype=np.float32)
-        ranks[order] = np.arange(n, dtype=np.float32)
-        ranks /= float(n - 1)
-        out[m] = ranks
-
-    return out
-
 
 def choose_fusion_method(cfg: AnalysisConfig, lidar_np: np.ndarray, pico_np: np.ndarray) -> np.ndarray:
     if cfg.fusion_method == "pps":
@@ -1435,6 +1427,8 @@ def analyze_plot(
                 include_layer_columns=cfg.fad_include_layer_columns if cfg.fad_run_layers else False,
             )
         )
+        if "fad_lai_from_layers" in fad_traits:
+            fad_traits["fad_integrated_m2_m2"] = fad_traits["fad_lai_from_layers"]
 
         fad_value = float(fad_traits.get("fad_app_m2_m3", float("nan")))
         returns = int(np.sum(raw_hit_mask))
