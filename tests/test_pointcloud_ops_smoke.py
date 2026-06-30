@@ -107,11 +107,21 @@ def test_voxel_count_after_height_range_filter_uses_filtered_points():
     assert out.traits["voxel_count"] == 1
 
 
-def test_zscore_no_clip_and_source_has_no_clip_call():
+def test_zscore_square_root_transform_and_source_has_no_clip_call():
     phi = np.array([0,0,0,0],dtype=np.float32)
     rssi = np.array([1,1,1,10000],dtype=np.float32)
     out = normalize_rssi_by_phi_zscore(phi,rssi)
-    assert out.max() > np.exp(4.0)
+
+    mu = np.mean(rssi, dtype=np.float64)
+    sd = np.std(rssi, dtype=np.float64)
+    z = ((rssi - mu) / sd).astype(np.float32)
+    expected = np.maximum(
+        1.0 + np.sign(z) * np.sqrt(np.abs(z)),
+        0.0
+    ).astype(np.float32)
+
+    np.testing.assert_allclose(out, expected)
+
     import inspect
     src = inspect.getsource(normalize_rssi_by_phi_zscore)
     assert 'np.clip' not in src
