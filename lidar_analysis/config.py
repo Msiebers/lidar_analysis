@@ -40,6 +40,8 @@ class AnalysisConfig:
     local_ground_quantile: float = 0.03
     local_ground_smooth_bins: int = 3
     local_ground_min_points_per_bin: int = 20
+    local_ground_pre_y_min_m: float | None = None
+    local_ground_pre_y_max_m: float | None = None
     min_height_agl_m: float = 0.08
     rssi_min: float | None = None
     rssi_max: float | None = None

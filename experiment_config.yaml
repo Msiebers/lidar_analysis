@@ -53,6 +53,10 @@ analysis:
   local_ground_quantile: 0.03
   local_ground_smooth_bins: 3
   local_ground_min_points_per_bin: 20
+  # Coarse absolute-Y cleanup before estimating local ground. This prevents
+  # very low noise/outside clutter from pulling the ground profile downward.
+  local_ground_pre_y_min_m: 0.0
+  local_ground_pre_y_max_m: 0.8
   min_height_agl_m: 0.08
 
   # RSSI normalization

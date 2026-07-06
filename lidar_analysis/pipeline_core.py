@@ -1242,13 +1242,77 @@ def analyze_plot(
         def _apply_local_ground_if_enabled(target):
             if not bool(getattr(cfg, "use_local_ground_filter", False)):
                 return target
+
+            z_bin_mm = float(getattr(cfg, "local_ground_z_bin_m", 0.15)) * 1000.0
+            min_height_agl_mm = float(getattr(cfg, "min_height_agl_m", 0.08)) * 1000.0
+            ground_quantile = float(getattr(cfg, "local_ground_quantile", 0.03))
+            smooth_bins = int(getattr(cfg, "local_ground_smooth_bins", 3))
+            min_points_per_bin = int(getattr(cfg, "local_ground_min_points_per_bin", 20))
+            pre_y_min_m = getattr(cfg, "local_ground_pre_y_min_m", None)
+            pre_y_max_m = getattr(cfg, "local_ground_pre_y_max_m", None)
+            pre_y_min_mm = None if pre_y_min_m is None else float(pre_y_min_m) * 1000.0
+            pre_y_max_mm = None if pre_y_max_m is None else float(pre_y_max_m) * 1000.0
+
+            before = int(target.current_points.shape[0])
+            work = target.current_points.copy()
+            pre_before = before
+            if pre_y_min_mm is not None or pre_y_max_mm is not None:
+                if "Y" not in work.columns:
+                    raise ValueError("local ground pre-filter requires column 'Y'")
+                y_vals = pd.to_numeric(work["Y"], errors="coerce")
+                keep_y = pd.Series(True, index=work.index)
+                if pre_y_min_mm is not None:
+                    keep_y &= y_vals >= pre_y_min_mm
+                if pre_y_max_mm is not None:
+                    keep_y &= y_vals <= pre_y_max_mm
+                work = work.loc[keep_y].copy()
+            pre_after = int(work.shape[0])
+
             target.current_points = local_ground_filter(
-                target.current_points,
-                bin_size_m=float(getattr(cfg, "local_ground_z_bin_m", 0.15)) * 1000.0,
-                ground_quantile=float(getattr(cfg, "local_ground_quantile", 0.03)),
-                smooth_bins=int(getattr(cfg, "local_ground_smooth_bins", 3)),
-                min_points_per_bin=int(getattr(cfg, "local_ground_min_points_per_bin", 20)),
-                min_height_agl_m=float(getattr(cfg, "min_height_agl_m", 0.08)) * 1000.0,
+                work,
+                bin_size_m=z_bin_mm,
+                ground_quantile=ground_quantile,
+                smooth_bins=smooth_bins,
+                min_points_per_bin=min_points_per_bin,
+                min_height_agl_m=min_height_agl_mm,
+            )
+
+            after = int(target.current_points.shape[0])
+            height_stats = {
+                "height_agl_min": float("nan"),
+                "height_agl_median": float("nan"),
+                "height_agl_max": float("nan"),
+            }
+            if "height_agl" in target.current_points.columns and after > 0:
+                h = pd.to_numeric(target.current_points["height_agl"], errors="coerce")
+                height_stats = {
+                    "height_agl_min": float(h.min()),
+                    "height_agl_median": float(h.median()),
+                    "height_agl_max": float(h.max()),
+                }
+
+            diag = {
+                "points_before_local_ground": before,
+                "points_after_local_ground": after,
+                "points_removed_local_ground": before - after,
+                "points_before_local_ground_pre_filter": pre_before,
+                "points_after_local_ground_pre_filter": pre_after,
+                "points_removed_local_ground_pre_filter": pre_before - pre_after,
+                "local_ground_pre_y_min_mm": pre_y_min_mm,
+                "local_ground_pre_y_max_mm": pre_y_max_mm,
+                "local_ground_z_bin_mm": z_bin_mm,
+                "min_height_agl_mm": min_height_agl_mm,
+                "local_ground_quantile": ground_quantile,
+                "local_ground_smooth_bins": smooth_bins,
+                "local_ground_min_points_per_bin": min_points_per_bin,
+            }
+            diag.update(height_stats)
+            target.diagnostics["local_ground_filter"] = diag
+
+            print(
+                f"[LOCAL_GROUND] target={target.target_id} "
+                f"before={before} after={after} removed={before - after} "
+                f"min_height_agl_mm={min_height_agl_mm:.1f}"
             )
             return target
 

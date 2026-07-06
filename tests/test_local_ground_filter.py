@@ -71,4 +71,6 @@ def test_default_config_local_ground_filter_disabled():
     cfg = AnalysisConfig(data_dirs=[], calibration_dir=".", cart_id="CART")
     assert cfg.use_local_ground_filter is False
     assert cfg.local_ground_z_bin_m == 0.15
+    assert cfg.local_ground_pre_y_min_m is None
+    assert cfg.local_ground_pre_y_max_m is None
     assert cfg.min_height_agl_m == 0.08
