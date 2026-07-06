@@ -561,14 +561,14 @@ def normalize_rssi_by_phi_zscore(phi: np.ndarray, rssi: np.ndarray, decimals: in
         # Option 2: square-root transform
         # Softer than exponential. Output is clipped at 0.
         # z = 0 becomes 1; positive z becomes >1; negative z becomes <1.
-        transformed = np.maximum(
-            1.0 + np.sign(z) * np.sqrt(np.abs(z)),
-            0.0
-        ).astype(np.float32)
+        #transformed = np.maximum(
+        #    1.0 + np.sign(z) * np.sqrt(np.abs(z)),
+        #    0.0
+        #).astype(np.float32)
 
         # Option 3: no transform
         # Plain per-phi z-score. Can be negative.
-        # transformed = z.astype(np.float32)
+        transformed = z.astype(np.float32)
 
         out[m] = transformed
 
