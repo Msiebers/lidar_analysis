@@ -17,24 +17,52 @@ except Exception:
 
 
 
+def _robust_line_fit_x_ground(
+    x: np.ndarray,
+    y: np.ndarray,
+    *,
+    min_x_bins_per_z: int,
+) -> tuple[float, float]:
+    """Fit ground_Y = slope * X + intercept with one MAD outlier rejection pass."""
+    if x.size < min_x_bins_per_z:
+        return 0.0, float(np.median(y))
+
+    slope, intercept = np.polyfit(x, y, deg=1)
+    residuals = y - (slope * x + intercept)
+    med = float(np.median(residuals))
+    mad = float(np.median(np.abs(residuals - med)))
+    if np.isfinite(mad) and mad > 0.0:
+        keep = np.abs(residuals - med) <= (3.0 * 1.4826 * mad)
+        if int(np.sum(keep)) >= min_x_bins_per_z:
+            slope, intercept = np.polyfit(x[keep], y[keep], deg=1)
+
+    return float(slope), float(intercept)
+
+
 def add_local_ground_height(
     points,
-    z_col="Z",
+    x_col="X",
     y_col="Y",
-    bin_size_m=0.15,
-    ground_quantile=0.03,
-    smooth_bins=3,
-    min_points_per_bin=20,
+    z_col="Z",
+    z_bin_size_m=0.25,
+    x_bin_size_m=0.10,
+    ground_quantile=0.10,
+    smooth_bins=5,
+    min_points_per_xz_bin=10,
+    min_x_bins_per_z=3,
+    seed_y_min=None,
+    seed_y_max=None,
 ):
-    """Estimate local ground along Z and add ground_Y/height_agl columns.
+    """Estimate a ZX-aware local ground surface and add ground_Y/height_agl.
 
-    Coordinates are interpreted in the units already present in ``points``.
-    In this project, pipeline point clouds use millimetres, so callers from the
-    pipeline pass metre config values converted to millimetres.
+    Despite the ``*_m`` suffixes kept for public API readability, this function
+    operates in the coordinate units already present in ``points``. Pipeline
+    callers convert metre config values to millimetres before calling.
     """
     df = _as_df(points)
-    if z_col not in df.columns or y_col not in df.columns:
-        missing = [c for c in (z_col, y_col) if c not in df.columns]
+    required = (x_col, y_col, z_col)
+    if any(c not in df.columns for c in required):
+        missing = [c for c in required if c not in df.columns]
         raise ValueError(f"add_local_ground_height missing required column(s): {missing}")
 
     if len(df) == 0:
@@ -43,51 +71,118 @@ def add_local_ground_height(
         out["height_agl"] = pd.Series(dtype=float, index=out.index)
         return out
 
-    bin_size = float(bin_size_m)
-    if not np.isfinite(bin_size) or bin_size <= 0:
-        raise ValueError("bin_size_m must be > 0")
+    x_bin_size = float(x_bin_size_m)
+    z_bin_size = float(z_bin_size_m)
+    if not np.isfinite(x_bin_size) or x_bin_size <= 0:
+        raise ValueError("x_bin_size_m must be > 0")
+    if not np.isfinite(z_bin_size) or z_bin_size <= 0:
+        raise ValueError("z_bin_size_m must be > 0")
     q = float(ground_quantile)
     if not 0.0 <= q <= 1.0:
         raise ValueError("ground_quantile must be between 0 and 1")
     smooth = max(int(smooth_bins), 1)
-    min_pts = max(int(min_points_per_bin), 1)
+    min_points = max(int(min_points_per_xz_bin), 1)
+    min_x_bins = max(int(min_x_bins_per_z), 1)
 
     out = df.copy()
-    z = pd.to_numeric(out[z_col], errors="coerce").to_numpy(dtype=float)
-    y = pd.to_numeric(out[y_col], errors="coerce").to_numpy(dtype=float)
-    finite = np.isfinite(z) & np.isfinite(y)
+    x_all = pd.to_numeric(out[x_col], errors="coerce").to_numpy(dtype=float)
+    y_all = pd.to_numeric(out[y_col], errors="coerce").to_numpy(dtype=float)
+    z_all = pd.to_numeric(out[z_col], errors="coerce").to_numpy(dtype=float)
+    finite_all = np.isfinite(x_all) & np.isfinite(y_all) & np.isfinite(z_all)
+
+    seed_mask = finite_all.copy()
+    if seed_y_min is not None:
+        seed_mask &= y_all >= float(seed_y_min)
+    if seed_y_max is not None:
+        seed_mask &= y_all <= float(seed_y_max)
 
     ground = np.full(len(out), np.nan, dtype=float)
-    if not finite.any():
+    if not seed_mask.any():
         out["ground_Y"] = ground
-        out["height_agl"] = y - ground
+        out["height_agl"] = y_all - ground
         return out
 
-    z_f = z[finite]
-    y_f = y[finite]
-    z0 = float(np.nanmin(z_f))
-    bin_idx = np.floor((z_f - z0) / bin_size).astype(int)
-    grouped = pd.DataFrame({"bin": bin_idx, "z": z_f, "y": y_f}).groupby("bin", sort=True)
-    profile = grouped.agg(z_center=("z", "mean"), n=("y", "size"), ground=("y", lambda s: float(s.quantile(q))))
-    profile.loc[profile["n"] < min_pts, "ground"] = np.nan
-    if profile["ground"].notna().sum() == 0:
-        profile["ground"] = grouped["y"].quantile(q).to_numpy(dtype=float)
-    profile["ground"] = profile["ground"].interpolate(method="linear", limit_direction="both")
-    profile["ground_smooth"] = (
-        profile["ground"]
+    seed_x = x_all[seed_mask]
+    seed_y = y_all[seed_mask]
+    seed_z = z_all[seed_mask]
+    x0 = float(np.nanmin(seed_x))
+    z0 = float(np.nanmin(seed_z))
+    x_bin = np.floor((seed_x - x0) / x_bin_size).astype(int)
+    z_bin = np.floor((seed_z - z0) / z_bin_size).astype(int)
+
+    cells = (
+        pd.DataFrame({"x_bin": x_bin, "z_bin": z_bin, "x": seed_x, "z": seed_z, "y": seed_y})
+        .groupby(["z_bin", "x_bin"], sort=True)
+        .agg(
+            x_center=("x", "mean"),
+            z_center=("z", "mean"),
+            n=("y", "size"),
+            ground_candidate=("y", lambda s: float(s.quantile(q))),
+        )
+        .reset_index()
+    )
+    valid_cells = cells.loc[cells["n"] >= min_points].copy()
+    if valid_cells.empty:
+        # If the configured cell population is too strict for a sparse target,
+        # fall back to a flat estimate from all seed points rather than returning
+        # all-NaN ground heights.
+        flat = float(pd.Series(seed_y).quantile(q))
+        ground[finite_all] = flat
+        out["ground_Y"] = ground
+        out["height_agl"] = y_all - ground
+        return out
+
+    profile_rows: list[dict[str, float]] = []
+    for z_bin_value, group in valid_cells.groupby("z_bin", sort=True):
+        gx = group["x_center"].to_numpy(dtype=float)
+        gy = group["ground_candidate"].to_numpy(dtype=float)
+        gz = float(group["z_center"].median())
+        if group.shape[0] >= min_x_bins:
+            slope, intercept = _robust_line_fit_x_ground(
+                gx,
+                gy,
+                min_x_bins_per_z=min_x_bins,
+            )
+        else:
+            slope = 0.0
+            intercept = float(np.median(gy))
+        profile_rows.append(
+            {
+                "z_bin": float(z_bin_value),
+                "z_center": gz,
+                "slope_x": slope,
+                "intercept": intercept,
+            }
+        )
+
+    profile = pd.DataFrame(profile_rows).sort_values("z_center")
+    profile["slope_x"] = (
+        profile["slope_x"]
+        .rolling(window=smooth, center=True, min_periods=1)
+        .median()
+        .interpolate(method="linear", limit_direction="both")
+    )
+    profile["intercept"] = (
+        profile["intercept"]
         .rolling(window=smooth, center=True, min_periods=1)
         .median()
         .interpolate(method="linear", limit_direction="both")
     )
 
-    ground_f = np.interp(z_f, profile["z_center"].to_numpy(dtype=float), profile["ground_smooth"].to_numpy(dtype=float))
-    ground[finite] = ground_f
+    z_profile = profile["z_center"].to_numpy(dtype=float)
+    slope_profile = profile["slope_x"].to_numpy(dtype=float)
+    intercept_profile = profile["intercept"].to_numpy(dtype=float)
+
+    slope_at_z = np.interp(z_all[finite_all], z_profile, slope_profile)
+    intercept_at_z = np.interp(z_all[finite_all], z_profile, intercept_profile)
+    ground[finite_all] = slope_at_z * x_all[finite_all] + intercept_at_z
+
     out["ground_Y"] = ground
-    out["height_agl"] = y - ground
+    out["height_agl"] = y_all - ground
     return out
 
 
-def height_agl_filter(points, min_height_agl_m=0.08, height_col="height_agl"):
+def height_agl_filter(points, min_height_agl_m=0.10, height_col="height_agl"):
     """Return points whose height above local ground meets the threshold."""
     df = _as_df(points)
     if height_col not in df.columns:
@@ -96,9 +191,30 @@ def height_agl_filter(points, min_height_agl_m=0.08, height_col="height_agl"):
     return df.loc[pd.to_numeric(df[height_col], errors="coerce") >= threshold].copy()
 
 
-def local_ground_filter(points, min_height_agl_m=0.08, **kwargs):
+def local_ground_filter(
+    points,
+    min_height_agl_m=0.10,
+    x_bin_size_m=0.10,
+    z_bin_size_m=0.25,
+    ground_quantile=0.10,
+    smooth_bins=5,
+    min_points_per_xz_bin=10,
+    min_x_bins_per_z=3,
+    seed_y_min=None,
+    seed_y_max=None,
+):
     """Add local ground columns, then filter by height_agl while retaining them."""
-    with_ground = add_local_ground_height(points, **kwargs)
+    with_ground = add_local_ground_height(
+        points,
+        x_bin_size_m=x_bin_size_m,
+        z_bin_size_m=z_bin_size_m,
+        ground_quantile=ground_quantile,
+        smooth_bins=smooth_bins,
+        min_points_per_xz_bin=min_points_per_xz_bin,
+        min_x_bins_per_z=min_x_bins_per_z,
+        seed_y_min=seed_y_min,
+        seed_y_max=seed_y_max,
+    )
     return height_agl_filter(with_ground, min_height_agl_m=min_height_agl_m)
 
 def _resolve_backend(op_cfg: dict[str, Any], default_backend: str = "scipy") -> str:

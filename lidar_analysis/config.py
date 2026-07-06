@@ -36,13 +36,15 @@ class AnalysisConfig:
     rssi_norm_mode: str = "percentile"
     use_rssi_filter: bool = False
     use_local_ground_filter: bool = False
-    local_ground_z_bin_m: float = 0.15
-    local_ground_quantile: float = 0.03
-    local_ground_smooth_bins: int = 3
-    local_ground_min_points_per_bin: int = 20
-    local_ground_pre_y_min_m: float | None = None
-    local_ground_pre_y_max_m: float | None = None
-    min_height_agl_m: float = 0.08
+    local_ground_x_bin_m: float = 0.10
+    local_ground_z_bin_m: float = 0.25
+    local_ground_quantile: float = 0.10
+    local_ground_smooth_bins: int = 5
+    local_ground_min_points_per_xz_bin: int = 10
+    local_ground_min_x_bins_per_z: int = 3
+    local_ground_seed_y_min_m: float | None = None
+    local_ground_seed_y_max_m: float | None = None
+    min_height_agl_m: float = 0.10
     rssi_min: float | None = None
     rssi_max: float | None = None
     fusion_method: str = "interp"
@@ -120,4 +122,14 @@ def map_deprecated_analysis_keys(analysis_cfg: dict) -> dict:
     if "rssi_norm_scope" in out:
         warnings.warn("rssi_norm_scope is deprecated and ignored; normalization runs after global masks.")
         out.pop("rssi_norm_scope", None)
+    if "local_ground_pre_y_min_m" in out and "local_ground_seed_y_min_m" not in out:
+        warnings.warn("local_ground_pre_y_min_m is deprecated; use local_ground_seed_y_min_m.")
+        out["local_ground_seed_y_min_m"] = out.pop("local_ground_pre_y_min_m")
+    else:
+        out.pop("local_ground_pre_y_min_m", None)
+    if "local_ground_pre_y_max_m" in out and "local_ground_seed_y_max_m" not in out:
+        warnings.warn("local_ground_pre_y_max_m is deprecated; use local_ground_seed_y_max_m.")
+        out["local_ground_seed_y_max_m"] = out.pop("local_ground_pre_y_max_m")
+    else:
+        out.pop("local_ground_pre_y_max_m", None)
     return out

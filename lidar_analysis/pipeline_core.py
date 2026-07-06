@@ -1243,37 +1243,29 @@ def analyze_plot(
             if not bool(getattr(cfg, "use_local_ground_filter", False)):
                 return target
 
-            z_bin_mm = float(getattr(cfg, "local_ground_z_bin_m", 0.15)) * 1000.0
-            min_height_agl_mm = float(getattr(cfg, "min_height_agl_m", 0.08)) * 1000.0
-            ground_quantile = float(getattr(cfg, "local_ground_quantile", 0.03))
-            smooth_bins = int(getattr(cfg, "local_ground_smooth_bins", 3))
-            min_points_per_bin = int(getattr(cfg, "local_ground_min_points_per_bin", 20))
-            pre_y_min_m = getattr(cfg, "local_ground_pre_y_min_m", None)
-            pre_y_max_m = getattr(cfg, "local_ground_pre_y_max_m", None)
-            pre_y_min_mm = None if pre_y_min_m is None else float(pre_y_min_m) * 1000.0
-            pre_y_max_mm = None if pre_y_max_m is None else float(pre_y_max_m) * 1000.0
+            x_bin_mm = float(getattr(cfg, "local_ground_x_bin_m", 0.10)) * 1000.0
+            z_bin_mm = float(getattr(cfg, "local_ground_z_bin_m", 0.25)) * 1000.0
+            min_height_agl_mm = float(getattr(cfg, "min_height_agl_m", 0.10)) * 1000.0
+            ground_quantile = float(getattr(cfg, "local_ground_quantile", 0.10))
+            smooth_bins = int(getattr(cfg, "local_ground_smooth_bins", 5))
+            min_points_per_xz_bin = int(getattr(cfg, "local_ground_min_points_per_xz_bin", 10))
+            min_x_bins_per_z = int(getattr(cfg, "local_ground_min_x_bins_per_z", 3))
+            seed_y_min_m = getattr(cfg, "local_ground_seed_y_min_m", None)
+            seed_y_max_m = getattr(cfg, "local_ground_seed_y_max_m", None)
+            seed_y_min_mm = None if seed_y_min_m is None else float(seed_y_min_m) * 1000.0
+            seed_y_max_mm = None if seed_y_max_m is None else float(seed_y_max_m) * 1000.0
 
             before = int(target.current_points.shape[0])
-            work = target.current_points.copy()
-            pre_before = before
-            if pre_y_min_mm is not None or pre_y_max_mm is not None:
-                if "Y" not in work.columns:
-                    raise ValueError("local ground pre-filter requires column 'Y'")
-                y_vals = pd.to_numeric(work["Y"], errors="coerce")
-                keep_y = pd.Series(True, index=work.index)
-                if pre_y_min_mm is not None:
-                    keep_y &= y_vals >= pre_y_min_mm
-                if pre_y_max_mm is not None:
-                    keep_y &= y_vals <= pre_y_max_mm
-                work = work.loc[keep_y].copy()
-            pre_after = int(work.shape[0])
-
             target.current_points = local_ground_filter(
-                work,
-                bin_size_m=z_bin_mm,
+                target.current_points,
+                x_bin_size_m=x_bin_mm,
+                z_bin_size_m=z_bin_mm,
                 ground_quantile=ground_quantile,
                 smooth_bins=smooth_bins,
-                min_points_per_bin=min_points_per_bin,
+                min_points_per_xz_bin=min_points_per_xz_bin,
+                min_x_bins_per_z=min_x_bins_per_z,
+                seed_y_min=seed_y_min_mm,
+                seed_y_max=seed_y_max_mm,
                 min_height_agl_m=min_height_agl_mm,
             )
 
@@ -1292,25 +1284,25 @@ def analyze_plot(
                 }
 
             diag = {
+                "local_ground_algorithm": "zx_line",
                 "points_before_local_ground": before,
                 "points_after_local_ground": after,
                 "points_removed_local_ground": before - after,
-                "points_before_local_ground_pre_filter": pre_before,
-                "points_after_local_ground_pre_filter": pre_after,
-                "points_removed_local_ground_pre_filter": pre_before - pre_after,
-                "local_ground_pre_y_min_mm": pre_y_min_mm,
-                "local_ground_pre_y_max_mm": pre_y_max_mm,
+                "local_ground_x_bin_mm": x_bin_mm,
                 "local_ground_z_bin_mm": z_bin_mm,
+                "local_ground_seed_y_min_mm": seed_y_min_mm,
+                "local_ground_seed_y_max_mm": seed_y_max_mm,
                 "min_height_agl_mm": min_height_agl_mm,
                 "local_ground_quantile": ground_quantile,
                 "local_ground_smooth_bins": smooth_bins,
-                "local_ground_min_points_per_bin": min_points_per_bin,
+                "local_ground_min_points_per_xz_bin": min_points_per_xz_bin,
+                "local_ground_min_x_bins_per_z": min_x_bins_per_z,
             }
             diag.update(height_stats)
             target.diagnostics["local_ground_filter"] = diag
 
             print(
-                f"[LOCAL_GROUND] target={target.target_id} "
+                f"[LOCAL_GROUND] algorithm=zx_line target={target.target_id} "
                 f"before={before} after={after} removed={before - after} "
                 f"min_height_agl_mm={min_height_agl_mm:.1f}"
             )

@@ -49,15 +49,17 @@ analysis:
   # height_agl before trait calculations and point-cloud ops. This is useful for
   # sloped plots or variable cart pitch/height.
   use_local_ground_filter: true
-  local_ground_z_bin_m: 0.15
-  local_ground_quantile: 0.03
-  local_ground_smooth_bins: 3
-  local_ground_min_points_per_bin: 20
-  # Coarse absolute-Y cleanup before estimating local ground. This prevents
-  # very low noise/outside clutter from pulling the ground profile downward.
-  local_ground_pre_y_min_m: 0.0
-  local_ground_pre_y_max_m: 0.8
-  min_height_agl_m: 0.08
+  local_ground_x_bin_m: 0.10
+  local_ground_z_bin_m: 0.25
+  local_ground_quantile: 0.10
+  local_ground_smooth_bins: 5
+  local_ground_min_points_per_xz_bin: 10
+  local_ground_min_x_bins_per_z: 3
+  # Seed-only absolute-Y bounds for fitting the ZX ground surface. These do not
+  # directly discard canopy points before height_agl is computed.
+  local_ground_seed_y_min_m: -0.05
+  local_ground_seed_y_max_m: 0.30
+  min_height_agl_m: 0.10
 
   # RSSI normalization
   normalize_rssi: true
