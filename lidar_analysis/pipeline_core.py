@@ -25,7 +25,7 @@ try:
         marker_buffer_mm,
         marker_count_to_z_mm,
     )
-    from .pointcloud_ops import apply_pointcloud_ops
+    from .pointcloud_ops import apply_pointcloud_ops, local_ground_filter
     from .analysis_target import AnalysisTarget
     from .beam_diagnostics import compute_beam_diagnostics, write_beam_diagnostics_csv
     from .fad import (
@@ -46,7 +46,7 @@ except Exception:
         marker_buffer_mm,
         marker_count_to_z_mm,
     )
-    from pointcloud_ops import apply_pointcloud_ops
+    from pointcloud_ops import apply_pointcloud_ops, local_ground_filter
     from analysis_target import AnalysisTarget
     from beam_diagnostics import compute_beam_diagnostics, write_beam_diagnostics_csv
     from fad import (
@@ -561,14 +561,14 @@ def normalize_rssi_by_phi_zscore(phi: np.ndarray, rssi: np.ndarray, decimals: in
         # Option 2: square-root transform
         # Softer than exponential. Output is clipped at 0.
         # z = 0 becomes 1; positive z becomes >1; negative z becomes <1.
-        #transformed = np.maximum(
-        #    1.0 + np.sign(z) * np.sqrt(np.abs(z)),
-        #    0.0
-        #).astype(np.float32)
+        transformed = np.maximum(
+            1.0 + np.sign(z) * np.sqrt(np.abs(z)),
+            0.0
+        ).astype(np.float32)
 
         # Option 3: no transform
         # Plain per-phi z-score. Can be negative.
-        transformed = z.astype(np.float32)
+        # transformed = z.astype(np.float32)
 
         out[m] = transformed
 
@@ -1239,6 +1239,19 @@ def analyze_plot(
             beam_id_plot = beam_diag.beam_id_by_row[plot_idx]
         points_df["beam_id"] = beam_id_plot.astype(np.int32, copy=False)
 
+        def _apply_local_ground_if_enabled(target):
+            if not bool(getattr(cfg, "use_local_ground_filter", False)):
+                return target
+            target.current_points = local_ground_filter(
+                target.current_points,
+                bin_size_m=float(getattr(cfg, "local_ground_z_bin_m", 0.15)) * 1000.0,
+                ground_quantile=float(getattr(cfg, "local_ground_quantile", 0.03)),
+                smooth_bins=int(getattr(cfg, "local_ground_smooth_bins", 3)),
+                min_points_per_bin=int(getattr(cfg, "local_ground_min_points_per_bin", 20)),
+                min_height_agl_m=float(getattr(cfg, "min_height_agl_m", 0.08)) * 1000.0,
+            )
+            return target
+
         ops_cfg = getattr(cfg, "pointcloud_ops", None) or []
         if ops_cfg:
             target = AnalysisTarget.from_points(
@@ -1251,6 +1264,7 @@ def analyze_plot(
                 plot=p.letter,
                 side=getattr(p, "side_label", None),
             )
+            target = _apply_local_ground_if_enabled(target)
             target = apply_pointcloud_ops(
                 target,
                 ops_cfg,
@@ -1303,6 +1317,9 @@ def analyze_plot(
                 plot=p.letter,
                 side=getattr(p, "side_label", None),
             )
+            p.analysis_target = _apply_local_ground_if_enabled(p.analysis_target)
+            if bool(getattr(cfg, "use_local_ground_filter", False)):
+                p.cloud = p.analysis_target.current_points[["X", "Y", "Z", "RSSI"]].to_numpy(dtype=np.float32, copy=False)
 
         n_points = int(p.analysis_target.current_points.shape[0])
         if cfg.run_height:

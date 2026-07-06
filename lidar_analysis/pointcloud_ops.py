@@ -16,6 +16,91 @@ except Exception:
     QhullError = Exception
 
 
+
+def add_local_ground_height(
+    points,
+    z_col="Z",
+    y_col="Y",
+    bin_size_m=0.15,
+    ground_quantile=0.03,
+    smooth_bins=3,
+    min_points_per_bin=20,
+):
+    """Estimate local ground along Z and add ground_Y/height_agl columns.
+
+    Coordinates are interpreted in the units already present in ``points``.
+    In this project, pipeline point clouds use millimetres, so callers from the
+    pipeline pass metre config values converted to millimetres.
+    """
+    df = _as_df(points)
+    if z_col not in df.columns or y_col not in df.columns:
+        missing = [c for c in (z_col, y_col) if c not in df.columns]
+        raise ValueError(f"add_local_ground_height missing required column(s): {missing}")
+
+    if len(df) == 0:
+        out = df.copy()
+        out["ground_Y"] = pd.Series(dtype=float, index=out.index)
+        out["height_agl"] = pd.Series(dtype=float, index=out.index)
+        return out
+
+    bin_size = float(bin_size_m)
+    if not np.isfinite(bin_size) or bin_size <= 0:
+        raise ValueError("bin_size_m must be > 0")
+    q = float(ground_quantile)
+    if not 0.0 <= q <= 1.0:
+        raise ValueError("ground_quantile must be between 0 and 1")
+    smooth = max(int(smooth_bins), 1)
+    min_pts = max(int(min_points_per_bin), 1)
+
+    out = df.copy()
+    z = pd.to_numeric(out[z_col], errors="coerce").to_numpy(dtype=float)
+    y = pd.to_numeric(out[y_col], errors="coerce").to_numpy(dtype=float)
+    finite = np.isfinite(z) & np.isfinite(y)
+
+    ground = np.full(len(out), np.nan, dtype=float)
+    if not finite.any():
+        out["ground_Y"] = ground
+        out["height_agl"] = y - ground
+        return out
+
+    z_f = z[finite]
+    y_f = y[finite]
+    z0 = float(np.nanmin(z_f))
+    bin_idx = np.floor((z_f - z0) / bin_size).astype(int)
+    grouped = pd.DataFrame({"bin": bin_idx, "z": z_f, "y": y_f}).groupby("bin", sort=True)
+    profile = grouped.agg(z_center=("z", "mean"), n=("y", "size"), ground=("y", lambda s: float(s.quantile(q))))
+    profile.loc[profile["n"] < min_pts, "ground"] = np.nan
+    if profile["ground"].notna().sum() == 0:
+        profile["ground"] = grouped["y"].quantile(q).to_numpy(dtype=float)
+    profile["ground"] = profile["ground"].interpolate(method="linear", limit_direction="both")
+    profile["ground_smooth"] = (
+        profile["ground"]
+        .rolling(window=smooth, center=True, min_periods=1)
+        .median()
+        .interpolate(method="linear", limit_direction="both")
+    )
+
+    ground_f = np.interp(z_f, profile["z_center"].to_numpy(dtype=float), profile["ground_smooth"].to_numpy(dtype=float))
+    ground[finite] = ground_f
+    out["ground_Y"] = ground
+    out["height_agl"] = y - ground
+    return out
+
+
+def height_agl_filter(points, min_height_agl_m=0.08, height_col="height_agl"):
+    """Return points whose height above local ground meets the threshold."""
+    df = _as_df(points)
+    if height_col not in df.columns:
+        raise ValueError(f"height_agl_filter requires column {height_col!r}; call add_local_ground_height first")
+    threshold = float(min_height_agl_m)
+    return df.loc[pd.to_numeric(df[height_col], errors="coerce") >= threshold].copy()
+
+
+def local_ground_filter(points, min_height_agl_m=0.08, **kwargs):
+    """Add local ground columns, then filter by height_agl while retaining them."""
+    with_ground = add_local_ground_height(points, **kwargs)
+    return height_agl_filter(with_ground, min_height_agl_m=min_height_agl_m)
+
 def _resolve_backend(op_cfg: dict[str, Any], default_backend: str = "scipy") -> str:
     backend = op_cfg.get("backend") or default_backend
     b = str(backend).strip().lower()

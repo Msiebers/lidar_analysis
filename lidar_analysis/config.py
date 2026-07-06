@@ -35,6 +35,12 @@ class AnalysisConfig:
     normalize_rssi: bool = False
     rssi_norm_mode: str = "percentile"
     use_rssi_filter: bool = False
+    use_local_ground_filter: bool = False
+    local_ground_z_bin_m: float = 0.15
+    local_ground_quantile: float = 0.03
+    local_ground_smooth_bins: int = 3
+    local_ground_min_points_per_bin: int = 20
+    min_height_agl_m: float = 0.08
     rssi_min: float | None = None
     rssi_max: float | None = None
     fusion_method: str = "interp"
