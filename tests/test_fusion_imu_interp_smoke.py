@@ -5,7 +5,7 @@ from lidar_analysis.fusion import fuse_by_time
 from lidar_analysis.fusion_imu_interp import fuse_by_imu_interp
 
 
-def main() -> None:
+def test_fusion_imu_interp_smoke() -> None:
     lidar = np.array([
         [0.0, 0.1, 0.2, 1000.0, 50.0, 1.0],
         [1.0, 0.1, 0.2, 1000.0, 50.0, 1.0],
@@ -34,8 +34,7 @@ def main() -> None:
     out_fallback_same = fuse_by_imu_interp(lidar, pico_same)
     assert np.allclose(out_fallback_same, out_interp, equal_nan=True)
 
-    print('PASS')
-
 
 if __name__ == '__main__':
-    main()
+    test_fusion_imu_interp_smoke()
+    print('PASS')

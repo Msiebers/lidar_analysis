@@ -30,6 +30,12 @@ Many project data folders already include `cart_config.yaml` but do not include 
 
 ## Main Command
 
+Install dependencies first:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
 ```bash
 python3 -m lidar_analysis.central_runner \
   --experiment EXPERIMENT_NAME \
@@ -113,7 +119,7 @@ Also confirm:
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `ModuleNotFoundError: No module named 'yaml'` | `central_runner.py` and `pipeline_core.py` import `yaml` | Install PyYAML in the active environment |
+| `ModuleNotFoundError: No module named 'yaml'` | `central_runner.py` and `pipeline_core.py` import `yaml` | Install dependencies with `python3 -m pip install -r requirements.txt` |
 | `Missing cart config YAML` | `INPUT_DIR/cart_config.yaml` is absent | Add the cart calibration file to `INPUT_DIR` |
 | `Experiment config not found` | Many data folders include `cart_config.yaml` but not `experiment_config.yaml`; no `--config` was supplied | Provide `--config CONFIG_YAML`, copy a config to `INPUT_DIR/experiment_config.yaml`, or place it at `INPUT_DIR/source/experiment_config.yaml` |
 | No scan pairs found | File names do not end with matching `_lidar.csv` and `_pico.csv` | Rename or place files at the input root |

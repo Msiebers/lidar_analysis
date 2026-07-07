@@ -5,7 +5,7 @@ from lidar_analysis.pipeline_core import Plot, analyze_plot
 from lidar_analysis.config import AnalysisConfig
 
 
-def main() -> None:
+def test_additional_scan_side_split_smoke() -> None:
     cfg = AnalysisConfig(
         data_dirs=[],
         calibration_dir='.',
@@ -39,8 +39,7 @@ def main() -> None:
     assert rec_l['points'] == 2, rec_l
     assert rec_r['scan'] == 'scan_001_right', rec_r
     assert rec_l['scan'] == 'scan_001_left', rec_l
-    print('PASS')
-
 
 if __name__ == '__main__':
-    main()
+    test_additional_scan_side_split_smoke()
+    print('PASS')

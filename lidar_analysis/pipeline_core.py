@@ -471,6 +471,8 @@ class Plot:
         if (not overwrite_outputs) and os.path.exists(self.csv_out):
             return
 
+        # Internal point coordinates are millimeters; point-cloud CSV outputs
+        # write X/Y/Z in meters for visualization and downstream tooling.
         if self.analysis_target is not None:
             df = self.analysis_target.current_points.copy()
             if df.empty:
