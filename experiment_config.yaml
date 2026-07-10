@@ -44,6 +44,23 @@ analysis:
   roll_sign: 1.0
   pitch_sign: -1.0
 
+  # Local ground filtering (optional)
+  # Estimates ground_Y within each plot/row cloud after splitting and filters by
+  # height_agl before trait calculations and point-cloud ops. This is useful for
+  # sloped plots or variable cart pitch/height.
+  use_local_ground_filter: true
+  local_ground_x_bin_m: 0.10
+  local_ground_z_bin_m: 0.25
+  local_ground_quantile: 0.10
+  local_ground_smooth_bins: 5
+  local_ground_min_points_per_xz_bin: 10
+  local_ground_min_x_bins_per_z: 3
+  # Seed-only absolute-Y bounds for fitting the ZX ground surface. These do not
+  # directly discard canopy points before height_agl is computed.
+  local_ground_seed_y_min_m: -0.05
+  local_ground_seed_y_max_m: 0.30
+  min_height_agl_m: 0.10
+
   # RSSI normalization
   normalize_rssi: true
   rssi_norm_mode: zscore
@@ -84,10 +101,12 @@ analysis:
   
   pointcloud_ops:
     
+    # Local ground filtering above handles the lower height threshold; this
+    # optional fixed-Y filter is left enabled only as an upper canopy/clutter cap.
     - name: height_range_filter
       enabled: true
       axis: Y
-      min_m: 0.1
+      min_m: null
       max_m: 0.8
       
     - name: bilateral_scalar_filter

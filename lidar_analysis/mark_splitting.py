@@ -142,7 +142,6 @@ def _load_markers(marker_path: str | Path) -> pd.DataFrame:
 
     return df
 
-
 def build_mark_segments(
     marker_path: str | Path,
     *,
@@ -159,23 +158,91 @@ def build_mark_segments(
         return []
 
     target_type = str(target_type).strip().lower()
+    if target_type == "free":
+        raise ValueError(
+            "mark_target_type='free' is not valid for output segments. "
+            "Use mark_target_type='plot' and free_marks_as='plot' "
+            "to convert sequential free marks into plot segments."
+        )
+
     if target_type not in ("auto", "plot", "plant"):
         raise ValueError(f"Unknown mark_target_type={target_type!r}")
 
     free_mode = str(free_marks_as).strip().lower()
+    if free_mode not in ("none", "plant", "plot"):
+        raise ValueError(f"Unknown free_marks_as={free_marks_as!r}")
+
+    free_roles = {"mark", "center", "point", "plant"}
+
+    # ------------------------------------------------------------
+    # Convert free marks into plant center marks.
+    # Each free mark becomes one plant center.
+    # ------------------------------------------------------------
     if free_mode == "plant" and target_type in ("auto", "plant"):
-        free_df = df[(df["_target_type"] == "free") & (df["_mark_role"].isin({"mark", "center", "point", "plant"}))].copy()
+        free_df = df[
+            (df["_target_type"] == "free")
+            & (df["_mark_role"].isin(free_roles))
+        ].copy()
+
         if not free_df.empty:
             seq = 1
             for idx, row in free_df.sort_values("_sort").iterrows():
+                df.at[idx, "_target_type"] = "plant"
+
                 if str(row["_target_number"]).strip() == "":
-                    df.at[idx, "_target_type"] = "plant"
                     df.at[idx, "_target_number"] = str(seq)
                     seq += 1
-                else:
-                    df.at[idx, "_target_type"] = "plant"
 
-    if target_type != "auto":
+    # ------------------------------------------------------------
+    # Convert sequential free marks into plot start/stop pairs.
+    #
+    # Example:
+    #   free mark 1 + free mark 2 -> plot 1
+    #   free mark 3 + free mark 4 -> plot 2
+    #   free mark 5 + free mark 6 -> plot 3
+    # ------------------------------------------------------------
+    if free_mode == "plot" and target_type in ("auto", "plot"):
+        free_df = df[
+            (df["_target_type"] == "free")
+            & (
+                df["_mark_role"].isin(
+                    free_roles | {"start", "begin", "beg", "stop", "end", "finish"}
+                )
+            )
+        ].copy()
+
+        free_df = free_df.sort_values("_sort")
+
+        if len(free_df) % 2 != 0:
+            raise ValueError(
+                f"free_marks_as='plot' requires an even number of free marks. "
+                f"Found {len(free_df)} in {marker_path}."
+            )
+
+        seq = 1
+        free_indices = list(free_df.index)
+
+        for i in range(0, len(free_indices), 2):
+            start_idx = free_indices[i]
+            stop_idx = free_indices[i + 1]
+
+            df.at[start_idx, "_target_type"] = "plot"
+            df.at[start_idx, "_target_number"] = str(seq)
+            df.at[start_idx, "_mark_role"] = "start"
+
+            df.at[stop_idx, "_target_type"] = "plot"
+            df.at[stop_idx, "_target_number"] = str(seq)
+            df.at[stop_idx, "_mark_role"] = "stop"
+
+            seq += 1
+
+    if target_type == "plot":
+        # In plot mode, marker rows are physical plot boundaries paired in file
+        # order. Accept both explicit plot markers and free/boundary markers so
+        # operators do not need an additional conversion toggle.
+        df = df[df["_target_type"].isin({"plot", "free"})].copy()
+        df["_target_type"] = "plot"
+    elif target_type != "auto":
         df = df[df["_target_type"] == target_type].copy()
 
     if df.empty:
@@ -189,13 +256,63 @@ def build_mark_segments(
         )
     )
 
+    if target_type == "plot":
+        plot_df = df.sort_values("_sort").reset_index(drop=True)
+        if len(plot_df) % 2 != 0:
+            raise ValueError(
+                f"mark_target_type='plot' requires an even number of plot boundary marks. "
+                f"Found {len(plot_df)} in {marker_path}."
+            )
+
+        segments: list[MarkSegment] = []
+        for i in range(0, len(plot_df), 2):
+            a = plot_df.iloc[i]
+            b = plot_df.iloc[i + 1]
+            z_a = float(a["_z_mm"])
+            z_b = float(b["_z_mm"])
+            raw_lo = min(z_a, z_b)
+            raw_hi = max(z_a, z_b)
+
+            lo = max(0.0, raw_lo + float(z_buffer_mm))
+            hi = raw_hi - float(z_buffer_mm)
+            if zmax_clip is not None:
+                hi = min(float(zmax_clip), hi)
+
+            label = str((i // 2) + 1)
+            print(
+                f"[MARKS] plot {label}: raw={raw_lo:.1f}->{raw_hi:.1f} "
+                f"buffered={lo:.1f}->{hi:.1f} buffer={float(z_buffer_mm):.1f}"
+            )
+
+            if hi <= lo:
+                raise ValueError(
+                    f"Invalid buffered plot marker segment {label} from {marker_path}: "
+                    f"raw={raw_lo:.1f}->{raw_hi:.1f} mm, "
+                    f"buffered={lo:.1f}->{hi:.1f} mm, "
+                    f"buffer={float(z_buffer_mm):.1f} mm."
+                )
+
+            segments.append(
+                MarkSegment(
+                    target_type="plot",
+                    target_number=label,
+                    label=label,
+                    min_z=lo,
+                    max_z=hi,
+                )
+            )
+
+        return segments
+
     start_roles = {"start", "begin", "beg"}
     stop_roles = {"stop", "end", "finish"}
     center_roles = {"center", "mark", "point", "plant"}
 
     segments: list[MarkSegment] = []
 
-    for (ttype, number), group in df.groupby(["_target_type", "_target_number"], sort=False):
+    for (ttype, number), group in df.groupby(
+        ["_target_type", "_target_number"], sort=False
+    ):
         group = group.sort_values("_sort")
 
         pending_start: float | None = None
@@ -240,8 +357,10 @@ def build_mark_segments(
         if not made_pair:
             for _, row in group.iterrows():
                 role = str(row["_mark_role"])
+
                 if role in start_roles or role in stop_roles:
                     continue
+
                 if role not in center_roles and str(ttype) == "plot":
                     continue
 

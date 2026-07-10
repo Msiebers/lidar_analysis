@@ -18,6 +18,89 @@ def _sort_by_pps_time(arr: np.ndarray, ts_col: int, pps_col: int) -> np.ndarray:
     return arr[order]
 
 
+def _pps_from_integer_changes(raw_pps: np.ndarray) -> np.ndarray:
+    """
+    Convert a raw PPS label stream into ordinal PPS windows.
+
+    This is for Pico PPS slip, where the Pico appears to detect each PPS edge
+    but the counter sometimes jumps by more than 1.
+
+    Example:
+        raw:   0, 0, 1, 1, 2, 2, 5, 5, 6, 6, 8, 8
+        fixed: 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5
+
+    Rules:
+      - first valid PPS window becomes 0
+      - repeated raw PPS values stay in the same ordinal window
+      - any positive integer increase increments the ordinal PPS by exactly 1
+      - non-finite or negative values become NaN
+    """
+    raw = np.asarray(raw_pps, dtype=np.float64)
+    out = np.full(raw.shape, np.nan, dtype=np.float64)
+
+    valid = np.isfinite(raw) & (raw >= 0)
+
+    if not np.any(valid):
+        return out
+
+    ordinal = -1
+    last_raw: int | None = None
+
+    for i in range(raw.shape[0]):
+        if not valid[i]:
+            continue
+
+        current = int(raw[i])
+
+        if last_raw is None:
+            ordinal = 0
+            last_raw = current
+        elif current > last_raw:
+            ordinal += 1
+            last_raw = current
+        elif current < last_raw:
+            # Reset/wrap/out-of-order case. Treat as a new observed window.
+            ordinal += 1
+            last_raw = current
+        # else current == last_raw: same PPS window
+
+        out[i] = float(ordinal)
+
+    return out
+
+
+def _pps_slip_diagnostics(raw_pps: np.ndarray, fixed_pps: np.ndarray) -> dict[str, float]:
+    """Small verbose-mode diagnostic summary for Pico PPS slip correction."""
+    raw = np.asarray(raw_pps, dtype=np.float64)
+    fixed = np.asarray(fixed_pps, dtype=np.float64)
+
+    valid = np.isfinite(raw) & np.isfinite(fixed) & (raw >= 0) & (fixed >= 0)
+    if np.count_nonzero(valid) < 2:
+        return {
+            "raw_unique": 0.0,
+            "fixed_unique": 0.0,
+            "raw_non1_jumps": 0.0,
+            "raw_extra_counts": 0.0,
+        }
+
+    raw_u = np.array([int(x) for x in raw[valid]], dtype=np.int64)
+    fixed_u = np.array([int(x) for x in fixed[valid]], dtype=np.int64)
+
+    raw_unique = np.unique(raw_u)
+    fixed_unique = np.unique(fixed_u)
+
+    raw_diffs = np.diff(raw_unique)
+    raw_non1_jumps = int(np.count_nonzero(raw_diffs != 1))
+    raw_extra_counts = int(np.sum(np.maximum(raw_diffs - 1, 0))) if raw_diffs.size else 0
+
+    return {
+        "raw_unique": float(raw_unique.size),
+        "fixed_unique": float(fixed_unique.size),
+        "raw_non1_jumps": float(raw_non1_jumps),
+        "raw_extra_counts": float(raw_extra_counts),
+    }
+
+
 def _pps_bounds(pps_sorted: np.ndarray) -> dict[int, tuple[int, int]]:
     """Return start/end slice bounds for each unique PPS value in a sorted PPS array."""
     uniq, idx, cnts = np.unique(pps_sorted, return_index=True, return_counts=True)
@@ -34,6 +117,7 @@ def _stream_first_times(
 ) -> tuple[np.ndarray, np.ndarray, dict[int, tuple[int, int]]]:
     """
     Return PPS values, first timestamp per PPS bucket, and bounds.
+
     arr_sorted must already be sorted by PPS then timestamp.
     """
     pps = arr_sorted[:, pps_col].astype(np.int64, copy=False)
@@ -176,6 +260,7 @@ def _window_from_bucket_map(
 ) -> np.ndarray:
     """
     Return rows from PPS buckets [p-k, ..., p+k] using precomputed bounds.
+
     This avoids scanning the whole stream for every LiDAR bucket.
     """
     parts: list[np.ndarray] = []
@@ -239,6 +324,7 @@ def _choose_imu_timestamp(
 ) -> tuple[np.ndarray, str]:
     """
     Use imu_time_s if present, finite, and meaningfully different from Pico row time.
+
     Otherwise use Pico time_s for IMU.
     """
     pico_ts = pico_np[:, pico_ts_col].astype(np.float64, copy=False)
@@ -282,6 +368,7 @@ def _edge_disagreement_stats(
 def fuse_by_pps(
     lidar_np: np.ndarray,
     pico_np: np.ndarray,
+    pico_pps_slip: bool = True,
     lidar_ts_col: int = 0,
     pico_ts_col: int = 0,
     lidar_pps_col: int = 5,
@@ -357,9 +444,26 @@ def fuse_by_pps(
     lid_pps = L[:, lidar_pps_col].astype(np.int64, copy=False)
     lid_map = _pps_bounds(lid_pps)
 
-    # Encoder stream: Pico time_s.
+    # Encoder/IMU stream: Pico time_s.
     pico_ts = pico_np[:, pico_ts_col].astype(np.float64, copy=False)
-    pico_pps = pico_np[:, pico_pps_col].astype(np.float64, copy=False)
+    pico_pps_raw = pico_np[:, pico_pps_col].astype(np.float64, copy=False)
+
+    if pico_pps_slip:
+        pico_pps = _pps_from_integer_changes(pico_pps_raw)
+    else:
+        pico_pps = pico_pps_raw
+
+    if verbose and pico_pps_slip:
+        slip_diag = _pps_slip_diagnostics(pico_pps_raw, pico_pps)
+        print(
+            "[PPS_FUSION] "
+            "pico_pps_slip=True "
+            f"pico_raw_unique={slip_diag['raw_unique']:.0f} "
+            f"pico_fixed_unique={slip_diag['fixed_unique']:.0f} "
+            f"pico_raw_non1_jumps={slip_diag['raw_non1_jumps']:.0f} "
+            f"pico_raw_extra_counts={slip_diag['raw_extra_counts']:.0f}"
+        )
+
     encoder = pico_np[:, 1].astype(np.float64, copy=False)
 
     enc_table = _build_value_stream(
@@ -418,7 +522,11 @@ def fuse_by_pps(
         )
     except ValueError as e:
         if verbose:
-            print(f"[PPS_FUSION] {e}")
+            print(
+                "[PPS_FUSION] "
+                f"pico_pps_slip={pico_pps_slip} "
+                f"{e}"
+            )
         return np.empty((0, 9), dtype=np.float32)
 
     shared_pps = np.intersect1d(lid_pps, enc_pps)
@@ -433,6 +541,7 @@ def fuse_by_pps(
     if verbose:
         print(
             "[PPS_FUSION] "
+            f"pico_pps_slip={pico_pps_slip} "
             f"lidar_buckets={len(lid_map)} "
             f"encoder_buckets={len(enc_map)} "
             f"imu_buckets={len(imu_map)} "
