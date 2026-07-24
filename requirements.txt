@@ -1,0 +1,12 @@
+# Dependencies inferred from imports in lidar_analysis/ and tests/.
+# Versions are intentionally unpinned because this repository does not yet
+# provide owner-approved package versions or a locked environment.
+numpy
+pandas
+PyYAML
+scipy
+
+# Test runner used by tests/.
+pytest
+
+# Optional: scripts/plot_pcl_summary.py also imports matplotlib.

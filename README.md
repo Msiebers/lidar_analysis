@@ -24,11 +24,14 @@ Encoder counts are converted into travel distance using cart calibration.
 
 ## Important Files
 
+Unless otherwise noted, these source files live under `lidar_analysis/`.
+
 ```text
 central_runner.py          Main central runner / entry point for local processing
 central_watcher.py         Watches staged data and handles processing / publishing workflow
 config.py                  AnalysisConfig dataclass and configuration options
 fusion.py                  Time-based LiDAR/Pico fusion
+fusion_imu_interp.py       IMU-interpolated LiDAR/Pico fusion
 fusion_pps.py              PPS-based LiDAR/Pico fusion
 local_run.py               Local processing helper
 mark_splitting.py          Marker-aware splitting utilities
@@ -37,5 +40,17 @@ pipeline_core.py           Core reconstruction, filtering, splitting, and output
 run_experiment_date.py     Run one experiment/date bundle
 run_manifest.py            Manifest-based run helper
 scaffold_experiments.py    Experiment scaffolding utilities
-topology.py                Optional topology / trait helper code
+topology/                  Optional topology / trait helper code
 yaml_loader.py             YAML config loading
+```
+
+## Documentation
+
+- `docs/OVERVIEW.md`: practical repository and data-flow overview
+- `docs/RUNNING_THE_PIPELINE.md`: local run instructions and known prerequisites
+- `docs/CONFIGURATION.md`: config keys, defaults, aliases, and examples
+- `docs/CODE_WALKTHROUGH.md`: source-code walkthrough and call graph
+- `docs/CLOUDCOMPARE.md`: point-cloud CSV visualization workflow
+- `docs/TROUBLESHOOTING.md`: common errors and fixes
+- `docs/cleanup/CLEANUP_AUDIT.md`: cleanup opportunities classified by risk
+- `docs/cleanup/CLEANUP_PLAN.md`: staged cleanup plan

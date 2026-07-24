@@ -21,7 +21,7 @@ sys.modules.setdefault("open3d", types.ModuleType("open3d"))
 from lidar_analysis.central_runner import resolve_splitting_style, resolve_buffer_u
 
 
-def main() -> None:
+def test_splitting_style_resolution_smoke() -> None:
     # ---- canonical splitting_style ----
     assert resolve_splitting_style({"splitting_style": "distance"}) == ("distance", "auto")
     assert resolve_splitting_style({"splitting_style": "plant"}) == ("marks", "plant")
@@ -63,8 +63,7 @@ def main() -> None:
     # Same intent expressed canonically collapses to one key:
     assert resolve_splitting_style({"splitting_style": "plot"}) == ("marks", "plot")
 
-    print("PASS")
-
 
 if __name__ == "__main__":
-    main()
+    test_splitting_style_resolution_smoke()
+    print("PASS")

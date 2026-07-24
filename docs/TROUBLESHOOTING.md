@@ -2,8 +2,8 @@
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `ModuleNotFoundError: No module named 'yaml'` | PyYAML is missing; `central_runner.py`, `pipeline_core.py`, `orchestrator.py`, and `run_manifest.py` import `yaml` | Install PyYAML in the active Python environment |
-| Missing dependency errors for `numpy`, `pandas`, or `scipy` | Core pipeline imports these packages | Install the missing package before running tests or analysis |
+| `ModuleNotFoundError: No module named 'yaml'` | PyYAML is missing; `central_runner.py`, `pipeline_core.py`, `orchestrator.py`, and `run_manifest.py` import `yaml` | Install dependencies with `python3 -m pip install -r requirements.txt` |
+| Missing dependency errors for `numpy`, `pandas`, or `scipy` | Core pipeline imports these packages | Install dependencies with `python3 -m pip install -r requirements.txt` |
 | `Missing cart config YAML` | `central_runner.run_experiment_date` requires `INPUT_DIR/cart_config.yaml` | Add `cart_config.yaml` to the input directory |
 | `Experiment config not found` | The data folder may include `cart_config.yaml` but not `experiment_config.yaml`; `central_runner.resolve_config_path` cannot find `--config`, `INPUT_DIR/experiment_config.yaml`, or `INPUT_DIR/source/experiment_config.yaml` | Pass an external config with `--config CONFIG_YAML`, copy a config to `INPUT_DIR/experiment_config.yaml`, or place it at `INPUT_DIR/source/experiment_config.yaml` |
 | No scan pairs found | `central_runner.discover_scan_pairs` only matches top-level `*_lidar.csv` and `*_pico.csv` pairs | Confirm both files share the same scan base name and are in `INPUT_DIR` |
@@ -23,4 +23,4 @@ Many project data folders are expected to contain `cart_config.yaml` but not `ex
 
 The example fixture at `lidar_analysis/example_data/2026_04_28_1/` is not directly runnable end to end because the required `cart_config.yaml` and `experiment_config.yaml` are not present in that folder.
 
-The repository currently has no dependency manifest. Dependency installation must be inferred from imports until a project-level dependency file is added.
+The dependency manifest is intentionally unpinned because the repository does not provide owner-approved package versions or a locked environment. Pin versions after validating a known-good analysis environment.

@@ -11,7 +11,7 @@ def read_rows(p: Path):
         return list(csv.DictReader(f))
 
 
-def main() -> None:
+def test_marker_reference_points_smoke() -> None:
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         m1 = root / 'scan_001_markers.csv'
@@ -34,8 +34,7 @@ def main() -> None:
         write_marker_reference_points('scan_003', str(m3), str(root), step_mm=1.0, lidar_wheel_offset_mm=0.0)
         assert not (root / 'scan_003_marker_points.csv').exists()
 
-    print('PASS')
-
 
 if __name__ == '__main__':
-    main()
+    test_marker_reference_points_smoke()
+    print('PASS')

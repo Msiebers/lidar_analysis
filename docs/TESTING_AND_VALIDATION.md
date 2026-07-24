@@ -1,25 +1,28 @@
 # Testing And Validation
 
-The repository includes tests under `tests/`, but does not include a dependency manifest such as `requirements.txt`, `pyproject.toml`, or `environment.yml`.
+The repository includes tests under `tests/` and a minimal `requirements.txt` based on imports found in `lidar_analysis/` and `tests/`.
 
 ## Dependencies
 
-Imports in the code and tests indicate these Python packages are required:
+`requirements.txt` includes these packages:
 
 ```text
 numpy
 pandas
-scipy
 PyYAML
+scipy
 pytest
-matplotlib   # only for scripts/plot_pcl_summary.py
 ```
 
-Install commands are environment-specific. This inferred command matches the observed imports:
+Install command:
 
 ```bash
-python3 -m pip install numpy pandas scipy PyYAML pytest matplotlib
+python3 -m pip install -r requirements.txt
 ```
+
+The dependency file is intentionally unpinned because the repository does not provide owner-approved package versions or a locked environment. For scientific reproducibility, pin versions after the team validates a known-good environment.
+
+Optional script dependency: `scripts/plot_pcl_summary.py` imports `matplotlib`. Install it separately with `python3 -m pip install matplotlib` if that plotting helper is needed.
 
 ## Existing Tests
 
@@ -42,7 +45,7 @@ Recommended test command:
 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider tests
 ```
 
-Observed limitation in the local environment: test collection fails when PyYAML is missing because `central_runner.py` and `pipeline_core.py` import `yaml`.
+Observed limitation in the local environment before installing `requirements.txt`: test collection fails when PyYAML is missing because `central_runner.py` and `pipeline_core.py` import `yaml`.
 
 ## Syntax Check
 
