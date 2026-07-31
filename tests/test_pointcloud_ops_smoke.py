@@ -9,7 +9,7 @@ from lidar_analysis.topology.stand_count import topology_stand_count
 
 
 def _target(df):
-    return AnalysisTarget.from_points(target_id='t1', target_type='plot', scan_id='s1', points_df=df, source_indices=np.array([0,1,2,3]))
+    return AnalysisTarget.from_points(target_id='t1', target_type='plot', scan_id='s1', points_df=df, source_indices=np.arange(len(df)))
 
 
 def test_ops_alias_enabled_and_named_scalar_filter():
@@ -32,6 +32,110 @@ def test_bilateral_rssi_norm_columns_and_missing_scalar_error():
     with pytest.raises(ValueError) as e:
         apply_pointcloud_ops(_target(df),[{"op":"scalar_range_filter","input_scalar":"missing","min":0}])
     assert 'Available columns' in str(e.value)
+
+
+def test_bilateral_drops_impossible_neighbor_index(monkeypatch):
+    import lidar_analysis.pointcloud_ops as ops
+
+    class BadIndexTree:
+        def __init__(self, xyz):
+            self.xyz = xyz
+
+        def query_ball_point(self, p, r):
+            return [0, 36028797019004799]
+
+    monkeypatch.setattr(ops, "cKDTree", BadIndexTree)
+    df = pd.DataFrame({
+        "X": [0.0, 10.0],
+        "Y": [0.0, 0.0],
+        "Z": [0.0, 0.0],
+        "RSSI": [5.0, 7.0],
+        "rssi_norm": [1.0, 2.0],
+    })
+    out = apply_pointcloud_ops(_target(df), [{
+        "op": "bilateral_scalar_filter",
+        "field": "rssi_norm",
+        "min_neighbors": 2,
+    }])
+    pd.testing.assert_series_equal(out.current_points["rssi_norm"], df["rssi_norm"])
+    diag = out.diagnostics["pointcloud_ops"]["bilateral_scalar_filter"][0]
+    assert diag["invalid_neighbor_indices_dropped"] == 2
+    assert diag["points_unchanged_too_few_neighbors"] == 2
+
+
+def test_bilateral_preserves_rows_with_nonfinite_centers_and_neighbors():
+    df = pd.DataFrame({
+        "X": [0.0, np.nan, 20.0, 30.0],
+        "Y": [0.0, 0.0, 0.0, 0.0],
+        "Z": [0.0, 0.0, 0.0, 0.0],
+        "RSSI": [5.0, 6.0, 7.0, 8.0],
+        "rssi_norm": [1.0, 2.0, np.inf, 4.0],
+    })
+    out = apply_pointcloud_ops(_target(df), [{
+        "op": "bilateral_scalar_filter",
+        "field": "rssi_norm",
+        "output_scalar": "rssi_norm_bilateral",
+        "replace_scalar": False,
+        "radius": 0.05,
+    }])
+    assert list(out.current_points.index) == list(df.index)
+    assert len(out.current_points) == len(df)
+    assert out.current_points.loc[1, "rssi_norm_bilateral"] == 2.0
+    assert np.isinf(out.current_points.loc[2, "rssi_norm_bilateral"])
+    diag = out.diagnostics["pointcloud_ops"]["bilateral_scalar_filter"][0]
+    assert diag["points_skipped_invalid_center"] == 2
+
+
+def test_bilateral_all_invalid_centers_still_writes_output_scalar():
+    df = pd.DataFrame({
+        "X": [np.nan, np.inf],
+        "Y": [0.0, 0.0],
+        "Z": [0.0, 0.0],
+        "RSSI": [5.0, 7.0],
+        "rssi_norm": [1.0, 2.0],
+    })
+    out = apply_pointcloud_ops(_target(df), [{
+        "op": "bilateral_scalar_filter",
+        "field": "rssi_norm",
+        "output_scalar": "rssi_norm_bilateral",
+        "replace_scalar": False,
+    }])
+    assert "rssi_norm_bilateral" in out.current_points.columns
+    pd.testing.assert_series_equal(out.current_points["rssi_norm_bilateral"], df["rssi_norm"], check_names=False)
+    diag = out.diagnostics["pointcloud_ops"]["bilateral_scalar_filter"][0]
+    assert diag["points_skipped_invalid_center"] == 2
+
+
+def test_bilateral_sigma_s_sigma_r_aliases_match_canonical_keys():
+    df = pd.DataFrame({
+        "X": [0.0, 10.0, 20.0],
+        "Y": [0.0, 0.0, 0.0],
+        "Z": [0.0, 0.0, 0.0],
+        "RSSI": [5.0, 6.0, 7.0],
+        "rssi_norm": [1.0, 5.0, 9.0],
+    })
+    alias = apply_pointcloud_ops(_target(df), [{
+        "op": "bilateral_scalar_filter",
+        "field": "rssi_norm",
+        "output_scalar": "filtered",
+        "replace_scalar": False,
+        "sigma_s": 0.03,
+        "sigma_r": 1.5,
+        "radius": 0.05,
+    }])
+    canonical = apply_pointcloud_ops(_target(df), [{
+        "op": "bilateral_scalar_filter",
+        "field": "rssi_norm",
+        "output_scalar": "filtered",
+        "replace_scalar": False,
+        "sigma_spatial": 0.03,
+        "sigma_range": 1.5,
+        "radius": 0.05,
+    }])
+    np.testing.assert_allclose(
+        alias.current_points["filtered"].to_numpy(),
+        canonical.current_points["filtered"].to_numpy(),
+    )
 
 
 def test_plot_write_uses_analysis_target_all_columns(tmp_path):

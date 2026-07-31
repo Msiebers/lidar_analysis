@@ -1,0 +1,34 @@
+experiment_name: imu_test_001_no_imu_interp
+processing_mode: local
+config_reviewed: true
+config_note: Baseline. Uses time interpolation but does not apply IMU correction.
+
+analysis:
+  split_source: marks
+  marks:
+    target_type: plant
+    buffer_u: 0.5
+    missing_file: error
+    write_pointcloud: true
+  mark_target_type: plant
+  mark_z_buffer_u: 0.5
+  markers_required: true
+  write_marker_pointcloud: true
+
+  generate_pointclouds: true
+  overwrite_pointclouds: true
+  run_height: true
+  run_lai: false
+  normalize_rssi: false
+  use_rssi_filter: false
+  pointcloud_ops: []
+
+  dim_units: m
+  row_width_u: 5.0
+  start_u: 0.0
+  split_u: 0.0
+  end_buffer_u: 0.5
+
+  fusion_method: interp
+  use_imu: false
+  use_heading: false

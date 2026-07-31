@@ -289,12 +289,12 @@ def _voxel_count(df: pd.DataFrame, op_cfg: dict[str, Any]) -> int:
     return int(np.unique(idx, axis=0).shape[0])
 
 
-def _bilateral_scalar_filter(df: pd.DataFrame, op_cfg: dict[str, Any]) -> tuple[pd.DataFrame, str]:
+def _bilateral_scalar_filter(df: pd.DataFrame, op_cfg: dict[str, Any]) -> tuple[pd.DataFrame, str, dict[str, Any]]:
     field = _require_scalar(df, _resolve_scalar_name(op_cfg), "bilateral_scalar_filter")
 
     # Config values are in meters / scalar units.
-    sigma_s = float(op_cfg.get("sigma_spatial", op_cfg.get("spatial_sigma_m", 0.03)))
-    sigma_r = float(op_cfg.get("sigma_range", op_cfg.get("scalar_sigma", 2.5)))
+    sigma_s = float(op_cfg.get("sigma_spatial", op_cfg.get("spatial_sigma_m", op_cfg.get("sigma_s", 0.03))))
+    sigma_r = float(op_cfg.get("sigma_range", op_cfg.get("scalar_sigma", op_cfg.get("sigma_r", 2.5))))
 
     # PCL-style default: radius search at 2 * spatial sigma.
     radius = float(op_cfg.get("radius", op_cfg.get("radius_m", sigma_s * 2.0)))
@@ -310,45 +310,81 @@ def _bilateral_scalar_filter(df: pd.DataFrame, op_cfg: dict[str, Any]) -> tuple[
     if radius <= 0:
         raise ValueError(f"radius must be > 0; got {radius}")
 
+    diag: dict[str, Any] = {
+        "field": field,
+        "points_total": int(len(df)),
+        "points_processed": 0,
+        "points_skipped_invalid_center": 0,
+        "points_unchanged_too_few_neighbors": 0,
+        "invalid_neighbor_indices_dropped": 0,
+        "nonfinite_neighbors_dropped": 0,
+    }
+
     if len(df) == 0:
-        return df.copy(), field
+        return df.copy(), field, diag
 
     # pipeline_core stores X/Y/Z in millimeters.
     # Bilateral config uses meters, so convert coordinates to meters here.
     xyz_m = df[["X", "Y", "Z"]].to_numpy(dtype=float, copy=False) / 1000.0
     vals = df[field].to_numpy(dtype=float, copy=False)
 
-    tree = cKDTree(xyz_m)
     out_vals = vals.copy()
+    center_finite = np.isfinite(xyz_m).all(axis=1) & np.isfinite(vals)
+    tree_rows = np.flatnonzero(np.isfinite(xyz_m).all(axis=1))
 
     spatial_denom = max(2.0 * sigma_s * sigma_s, 1e-12)
     scalar_denom = max(2.0 * sigma_r * sigma_r, 1e-12)
 
-    for i, p in enumerate(xyz_m):
-        nbr_idx = tree.query_ball_point(p, r=radius)
+    if tree_rows.size == 0:
+        diag["points_skipped_invalid_center"] = int(len(df))
+    else:
+        tree_xyz = xyz_m[tree_rows]
+        tree = cKDTree(tree_xyz)
+        tree_size = int(tree_xyz.shape[0])
 
-        if len(nbr_idx) < min_neighbors:
-            continue
+        for i, p in enumerate(xyz_m):
+            if not center_finite[i]:
+                diag["points_skipped_invalid_center"] += 1
+                continue
 
-        nbr_idx = np.asarray(nbr_idx, dtype=int)
+            nbr_idx = tree.query_ball_point(p, r=radius)
 
-        # Optional cap, only if explicitly requested.
-        if max_neighbors > 0 and nbr_idx.size > max_neighbors:
-            d2_all = np.sum((xyz_m[nbr_idx] - p) ** 2, axis=1)
-            keep_order = np.argsort(d2_all, kind="mergesort")[:max_neighbors]
-            nbr_idx = nbr_idx[keep_order]
+            nbr_idx = np.asarray(nbr_idx, dtype=np.int64)
+            in_bounds = (nbr_idx >= 0) & (nbr_idx < tree_size)
+            diag["invalid_neighbor_indices_dropped"] += int(np.count_nonzero(~in_bounds))
+            nbr_idx = nbr_idx[in_bounds]
 
-        d2 = np.sum((xyz_m[nbr_idx] - p) ** 2, axis=1)
-        spatial_w = np.exp(-d2 / spatial_denom)
+            if nbr_idx.size == 0:
+                diag["points_unchanged_too_few_neighbors"] += 1
+                continue
 
-        scalar_d2 = (vals[nbr_idx] - vals[i]) ** 2
-        scalar_w = np.exp(-scalar_d2 / scalar_denom)
+            nbr_orig_idx = tree_rows[nbr_idx]
+            finite_neighbor = np.isfinite(vals[nbr_orig_idx])
+            diag["nonfinite_neighbors_dropped"] += int(np.count_nonzero(~finite_neighbor))
+            nbr_orig_idx = nbr_orig_idx[finite_neighbor]
 
-        weights = spatial_w * scalar_w
-        weight_sum = float(np.sum(weights))
+            if nbr_orig_idx.size < min_neighbors:
+                diag["points_unchanged_too_few_neighbors"] += 1
+                continue
 
-        if weight_sum > 0:
-            out_vals[i] = float(np.sum(weights * vals[nbr_idx]) / weight_sum)
+            # Optional cap, only if explicitly requested.
+            if max_neighbors > 0 and nbr_orig_idx.size > max_neighbors:
+                d2_all = np.sum((xyz_m[nbr_orig_idx] - p) ** 2, axis=1)
+                keep_order = np.argsort(d2_all, kind="mergesort")[:max_neighbors]
+                nbr_orig_idx = nbr_orig_idx[keep_order]
+
+            d2 = np.sum((xyz_m[nbr_orig_idx] - p) ** 2, axis=1)
+            spatial_w = np.exp(-d2 / spatial_denom)
+
+            scalar_d2 = (vals[nbr_orig_idx] - vals[i]) ** 2
+            scalar_w = np.exp(-scalar_d2 / scalar_denom)
+
+            weights = spatial_w * scalar_w
+            weight_sum = float(np.sum(weights))
+
+            if weight_sum > 0:
+                out_vals[i] = float(np.sum(weights * vals[nbr_orig_idx]) / weight_sum)
+                diag["points_processed"] += 1
 
     replace_scalar = bool(op_cfg.get("replace_scalar", True))
     output_scalar = op_cfg.get("output_scalar")
@@ -362,7 +398,8 @@ def _bilateral_scalar_filter(df: pd.DataFrame, op_cfg: dict[str, Any]) -> tuple[
         used = field
         out[field] = out_vals
 
-    return out, used
+    diag["output_scalar"] = used
+    return out, used, diag
 
 
 def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=None):
@@ -421,8 +458,9 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
                 pass
         elif op == "bilateral_scalar_filter":
             scalar = _resolve_scalar_name(op_cfg)
-            df, actual_scalar = _bilateral_scalar_filter(df, op_cfg)
+            df, actual_scalar, bilateral_diag = _bilateral_scalar_filter(df, op_cfg)
             diagnostics["scalar_fields_used"].append({"op": op, "scalar": scalar, "output_scalar": actual_scalar})
+            diagnostics.setdefault("bilateral_scalar_filter", []).append(bilateral_diag)
         elif op == "height_range_filter":
             df, hr_diag = _height_range_filter(df, op_cfg)
             diagnostics.setdefault("height_range_filters", []).append(hr_diag)
