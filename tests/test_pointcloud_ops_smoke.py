@@ -35,18 +35,27 @@ def test_bilateral_rssi_norm_columns_and_missing_scalar_error():
 
 
 def test_plot_write_uses_analysis_target_all_columns(tmp_path):
-    df = pd.DataFrame({"X":[1000.0],"Y":[2000.0],"Z":[3000.0],"RSSI":[4.0],"rssi_norm":[1.2],"rssi_norm_bilateral":[1.1]})
+    df = pd.DataFrame({
+        "X": [1000.0], "Y": [2000.0], "Z": [3000.0], "RSSI": [4.0],
+        "rssi_norm": [1.2], "rssi_norm_bilateral": [1.1],
+        "ground_Y": [1750.0], "height_agl": [250.0],
+    })
     plot = Plot('R1','1',(0,1),str(tmp_path),'scan_a')
     plot.analysis_target = AnalysisTarget.from_points(target_id='t', target_type='plot', scan_id='s', points_df=df, source_indices=np.array([0]))
     plot.write(make_point_cloud=True, overwrite_outputs=True, write_o3d_ply=False)
     written = pd.read_csv(plot.csv_out)
-    assert list(written.columns) == ["X","Y","Z","RSSI","rssi_norm","rssi_norm_bilateral"]
+    assert list(written.columns) == [
+        "X", "Y", "Z", "RSSI", "rssi_norm", "rssi_norm_bilateral",
+        "ground_Y", "height_agl",
+    ]
     assert float(written.loc[0,'X']) == 1.0
     assert float(written.loc[0,'Y']) == 2.0
     assert float(written.loc[0,'Z']) == 3.0
     assert float(written.loc[0,'RSSI']) == 4.0
     assert float(written.loc[0,'rssi_norm']) == 1.2
     assert float(written.loc[0,'rssi_norm_bilateral']) == 1.1
+    assert float(written.loc[0,'ground_Y']) == 1.75
+    assert float(written.loc[0,'height_agl']) == 0.25
 
 
 def test_analysis_target_raw_unchanged_current_mutated_by_ops():
