@@ -494,7 +494,11 @@ class Plot:
             for c in ["X", "Y", "Z", "RSSI"]:
                 if c not in df.columns:
                     raise ValueError(f"analysis_target.current_points missing required column {c!r}")
-            df.loc[:, ["X", "Y", "Z"]] = df[["X", "Y", "Z"]] / 1000.0
+            metric_columns = [
+                c for c in ("X", "Y", "Z", "ground_Y", "height_agl")
+                if c in df.columns
+            ]
+            df.loc[:, metric_columns] = df[metric_columns] / 1000.0
             self._write_csv(df)
             return
 
