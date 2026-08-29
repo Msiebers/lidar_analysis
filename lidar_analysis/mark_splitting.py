@@ -236,7 +236,13 @@ def build_mark_segments(
 
             seq += 1
 
-    if target_type != "auto":
+    if target_type == "plot":
+        # In plot mode, marker rows are physical plot boundaries paired in file
+        # order. Accept both explicit plot markers and free/boundary markers so
+        # operators do not need an additional conversion toggle.
+        df = df[df["_target_type"].isin({"plot", "free"})].copy()
+        df["_target_type"] = "plot"
+    elif target_type != "auto":
         df = df[df["_target_type"] == target_type].copy()
 
     if df.empty:
@@ -249,6 +255,54 @@ def build_mark_segments(
             lidar_wheel_offset_mm=lidar_wheel_offset_mm,
         )
     )
+
+    if target_type == "plot":
+        plot_df = df.sort_values("_sort").reset_index(drop=True)
+        if len(plot_df) % 2 != 0:
+            raise ValueError(
+                f"mark_target_type='plot' requires an even number of plot boundary marks. "
+                f"Found {len(plot_df)} in {marker_path}."
+            )
+
+        segments: list[MarkSegment] = []
+        for i in range(0, len(plot_df), 2):
+            a = plot_df.iloc[i]
+            b = plot_df.iloc[i + 1]
+            z_a = float(a["_z_mm"])
+            z_b = float(b["_z_mm"])
+            raw_lo = min(z_a, z_b)
+            raw_hi = max(z_a, z_b)
+
+            lo = max(0.0, raw_lo + float(z_buffer_mm))
+            hi = raw_hi - float(z_buffer_mm)
+            if zmax_clip is not None:
+                hi = min(float(zmax_clip), hi)
+
+            label = str((i // 2) + 1)
+            print(
+                f"[MARKS] plot {label}: raw={raw_lo:.1f}->{raw_hi:.1f} "
+                f"buffered={lo:.1f}->{hi:.1f} buffer={float(z_buffer_mm):.1f}"
+            )
+
+            if hi <= lo:
+                raise ValueError(
+                    f"Invalid buffered plot marker segment {label} from {marker_path}: "
+                    f"raw={raw_lo:.1f}->{raw_hi:.1f} mm, "
+                    f"buffered={lo:.1f}->{hi:.1f} mm, "
+                    f"buffer={float(z_buffer_mm):.1f} mm."
+                )
+
+            segments.append(
+                MarkSegment(
+                    target_type="plot",
+                    target_number=label,
+                    label=label,
+                    min_z=lo,
+                    max_z=hi,
+                )
+            )
+
+        return segments
 
     start_roles = {"start", "begin", "beg"}
     stop_roles = {"stop", "end", "finish"}

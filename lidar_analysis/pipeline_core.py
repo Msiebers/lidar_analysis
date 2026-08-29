@@ -25,7 +25,7 @@ try:
         marker_buffer_mm,
         marker_count_to_z_mm,
     )
-    from .pointcloud_ops import apply_pointcloud_ops
+    from .pointcloud_ops import apply_pointcloud_ops, local_ground_filter
     from .analysis_target import AnalysisTarget
     from .beam_diagnostics import compute_beam_diagnostics, write_beam_diagnostics_csv
     from .fad import (
@@ -46,7 +46,7 @@ except Exception:
         marker_buffer_mm,
         marker_count_to_z_mm,
     )
-    from pointcloud_ops import apply_pointcloud_ops
+    from pointcloud_ops import apply_pointcloud_ops, local_ground_filter
     from analysis_target import AnalysisTarget
     from beam_diagnostics import compute_beam_diagnostics, write_beam_diagnostics_csv
     from fad import (
@@ -494,7 +494,11 @@ class Plot:
             for c in ["X", "Y", "Z", "RSSI"]:
                 if c not in df.columns:
                     raise ValueError(f"analysis_target.current_points missing required column {c!r}")
-            df.loc[:, ["X", "Y", "Z"]] = df[["X", "Y", "Z"]] / 1000.0
+            metric_columns = [
+                c for c in ("X", "Y", "Z", "ground_Y", "height_agl")
+                if c in df.columns
+            ]
+            df.loc[:, metric_columns] = df[metric_columns] / 1000.0
             self._write_csv(df)
             return
 
@@ -561,14 +565,14 @@ def normalize_rssi_by_phi_zscore(phi: np.ndarray, rssi: np.ndarray, decimals: in
         # Option 2: square-root transform
         # Softer than exponential. Output is clipped at 0.
         # z = 0 becomes 1; positive z becomes >1; negative z becomes <1.
-        #transformed = np.maximum(
-        #    1.0 + np.sign(z) * np.sqrt(np.abs(z)),
-        #    0.0
-        #).astype(np.float32)
+        transformed = np.maximum(
+            1.0 + np.sign(z) * np.sqrt(np.abs(z)),
+            0.0
+        ).astype(np.float32)
 
         # Option 3: no transform
         # Plain per-phi z-score. Can be negative.
-        transformed = z.astype(np.float32)
+        # transformed = z.astype(np.float32)
 
         out[m] = transformed
 
@@ -1239,6 +1243,75 @@ def analyze_plot(
             beam_id_plot = beam_diag.beam_id_by_row[plot_idx]
         points_df["beam_id"] = beam_id_plot.astype(np.int32, copy=False)
 
+        def _apply_local_ground_if_enabled(target):
+            if not bool(getattr(cfg, "use_local_ground_filter", False)):
+                return target
+
+            x_bin_mm = float(getattr(cfg, "local_ground_x_bin_m", 0.10)) * 1000.0
+            z_bin_mm = float(getattr(cfg, "local_ground_z_bin_m", 0.25)) * 1000.0
+            min_height_agl_mm = float(getattr(cfg, "min_height_agl_m", 0.10)) * 1000.0
+            ground_quantile = float(getattr(cfg, "local_ground_quantile", 0.10))
+            smooth_bins = int(getattr(cfg, "local_ground_smooth_bins", 5))
+            min_points_per_xz_bin = int(getattr(cfg, "local_ground_min_points_per_xz_bin", 10))
+            min_x_bins_per_z = int(getattr(cfg, "local_ground_min_x_bins_per_z", 3))
+            seed_y_min_m = getattr(cfg, "local_ground_seed_y_min_m", None)
+            seed_y_max_m = getattr(cfg, "local_ground_seed_y_max_m", None)
+            seed_y_min_mm = None if seed_y_min_m is None else float(seed_y_min_m) * 1000.0
+            seed_y_max_mm = None if seed_y_max_m is None else float(seed_y_max_m) * 1000.0
+
+            before = int(target.current_points.shape[0])
+            target.current_points = local_ground_filter(
+                target.current_points,
+                x_bin_size_m=x_bin_mm,
+                z_bin_size_m=z_bin_mm,
+                ground_quantile=ground_quantile,
+                smooth_bins=smooth_bins,
+                min_points_per_xz_bin=min_points_per_xz_bin,
+                min_x_bins_per_z=min_x_bins_per_z,
+                seed_y_min=seed_y_min_mm,
+                seed_y_max=seed_y_max_mm,
+                min_height_agl_m=min_height_agl_mm,
+            )
+
+            after = int(target.current_points.shape[0])
+            height_stats = {
+                "height_agl_min": float("nan"),
+                "height_agl_median": float("nan"),
+                "height_agl_max": float("nan"),
+            }
+            if "height_agl" in target.current_points.columns and after > 0:
+                h = pd.to_numeric(target.current_points["height_agl"], errors="coerce")
+                height_stats = {
+                    "height_agl_min": float(h.min()),
+                    "height_agl_median": float(h.median()),
+                    "height_agl_max": float(h.max()),
+                }
+
+            diag = {
+                "local_ground_algorithm": "zx_line",
+                "points_before_local_ground": before,
+                "points_after_local_ground": after,
+                "points_removed_local_ground": before - after,
+                "local_ground_x_bin_mm": x_bin_mm,
+                "local_ground_z_bin_mm": z_bin_mm,
+                "local_ground_seed_y_min_mm": seed_y_min_mm,
+                "local_ground_seed_y_max_mm": seed_y_max_mm,
+                "min_height_agl_mm": min_height_agl_mm,
+                "local_ground_quantile": ground_quantile,
+                "local_ground_smooth_bins": smooth_bins,
+                "local_ground_min_points_per_xz_bin": min_points_per_xz_bin,
+                "local_ground_min_x_bins_per_z": min_x_bins_per_z,
+            }
+            diag.update(height_stats)
+            target.diagnostics["local_ground_filter"] = diag
+
+            print(
+                f"[LOCAL_GROUND] algorithm=zx_line target={target.target_id} "
+                f"before={before} after={after} removed={before - after} "
+                f"min_height_agl_mm={min_height_agl_mm:.1f}"
+            )
+            return target
+
         ops_cfg = getattr(cfg, "pointcloud_ops", None) or []
         if ops_cfg:
             target = AnalysisTarget.from_points(
@@ -1251,6 +1324,7 @@ def analyze_plot(
                 plot=p.letter,
                 side=getattr(p, "side_label", None),
             )
+            target = _apply_local_ground_if_enabled(target)
             target = apply_pointcloud_ops(
                 target,
                 ops_cfg,
@@ -1303,6 +1377,9 @@ def analyze_plot(
                 plot=p.letter,
                 side=getattr(p, "side_label", None),
             )
+            p.analysis_target = _apply_local_ground_if_enabled(p.analysis_target)
+            if bool(getattr(cfg, "use_local_ground_filter", False)):
+                p.cloud = p.analysis_target.current_points[["X", "Y", "Z", "RSSI"]].to_numpy(dtype=np.float32, copy=False)
 
         n_points = int(p.analysis_target.current_points.shape[0])
         if cfg.run_height:

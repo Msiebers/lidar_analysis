@@ -89,3 +89,36 @@ def test_results_csv_adds_dynamic_fad_layer_columns(tmp_path):
 
     assert "fad_layer_010_035_m2_m3" in reader.fieldnames
     assert "fad_layer_035_060_m2_m3" in reader.fieldnames
+
+
+def test_build_config_maps_local_ground_zx_settings(tmp_path):
+    from lidar_analysis.central_runner import build_config
+
+    cfg = build_config(
+        {
+            "use_local_ground_filter": True,
+            "local_ground_x_bin_m": 0.12,
+            "local_ground_z_bin_m": 0.34,
+            "local_ground_quantile": 0.11,
+            "local_ground_smooth_bins": 7,
+            "local_ground_min_points_per_xz_bin": 8,
+            "local_ground_min_x_bins_per_z": 4,
+            "local_ground_seed_y_min_m": -0.05,
+            "local_ground_seed_y_max_m": 0.30,
+            "min_height_agl_m": 0.10,
+        },
+        force=False,
+        cart_id="CART",
+        data_dir=tmp_path,
+    )
+
+    assert cfg.use_local_ground_filter is True
+    assert cfg.local_ground_x_bin_m == 0.12
+    assert cfg.local_ground_z_bin_m == 0.34
+    assert cfg.local_ground_quantile == 0.11
+    assert cfg.local_ground_smooth_bins == 7
+    assert cfg.local_ground_min_points_per_xz_bin == 8
+    assert cfg.local_ground_min_x_bins_per_z == 4
+    assert cfg.local_ground_seed_y_min_m == -0.05
+    assert cfg.local_ground_seed_y_max_m == 0.30
+    assert cfg.min_height_agl_m == 0.10
