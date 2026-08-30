@@ -37,6 +37,7 @@ local_run.py               Local processing helper
 mark_splitting.py          Marker-aware splitting utilities
 orchestrator.py            High-level pipeline orchestration
 pipeline_core.py           Core reconstruction, filtering, splitting, and output logic
+plant_geometry.py          Experimental crown-connected height, area, and volume traits
 run_experiment_date.py     Run one experiment/date bundle
 run_manifest.py            Manifest-based run helper
 scaffold_experiments.py    Experiment scaffolding utilities

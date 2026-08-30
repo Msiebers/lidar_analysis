@@ -35,6 +35,7 @@ tests/test_fusion_imu_interp_smoke.py
 tests/test_mark_splitting_smoke.py
 tests/test_marker_reference_points_smoke.py
 tests/test_pointcloud_ops_smoke.py
+tests/test_plant_geometry.py
 tests/test_run_experiment_date_wrapper.py
 tests/test_splitting_style_smoke.py
 ```

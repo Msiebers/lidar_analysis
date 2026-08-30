@@ -105,7 +105,38 @@ bilateral_scalar_filter
 height_range_filter
 topology_trait
 slice_structure_trait
+plant_geometry_trait
 ```
+
+### Experimental Meadow-Fescue Geometry
+
+`plant_geometry_trait` is an opt-in, non-destructive operation for tufted
+plants growing through a lower background canopy. It estimates a crown center,
+uses an outer annulus to estimate the background/clover ceiling, retains the
+crown-connected footprint above that ceiling, and reports ground-normalized
+height, footprint area, directional side-profile areas, slice-envelope volume,
+occupied-voxel volume, and QC fields.
+
+The operation is experimental until its parameters are calibrated against
+manual Meadow Fescue measurements. It does not replace `height_m`,
+`stacked_hull_volume_m3`, or `voxel_count`; enabling it adds independent result
+columns for direct comparison.
+
+Important behavior:
+
+- Internal `X`, `Y`, `Z`, `ground_Y`, and `height_agl` values are millimetres.
+- Public geometry settings and output traits use metres.
+- If `height_agl` is absent, the operation adds `ground_Y` and `height_agl`
+  without removing rows.
+- Avoid enabling `use_local_ground_filter` during geometry calibration because
+  its minimum-height threshold removes low crown points before this operation.
+- `canopy_occupied_volume_m3` depends on voxel resolution. Treat it as an
+  explicitly configured structural metric, not literal solid leaf volume.
+- Inspect `geometry_qc_status` and `geometry_confidence` before using a row in
+  downstream research.
+
+See `lidar_analysis/example_configs/meadow_fescue_geometry_experimental.yaml`
+for the initial parameter set and field descriptions.
 
 No active config keys named `run_mta` or `run_fad` were found. FAD/LAI math exists in `lidar_analysis/lai/fad.py`; the active trait toggle is `run_lai`.
 
