@@ -1331,6 +1331,8 @@ def analyze_plot(
                     "pcl_backend_name": ((getattr(cfg, "pcl_backend", {}) or {}).get("name")),
                     "additional_scan_positive_side_label": str(getattr(cfg, "additional_scan_positive_side_label", "right")),
                     "additional_scan_negative_side_label": str(getattr(cfg, "additional_scan_negative_side_label", "left")),
+                    "target_z_min_m": float(p.min_z) / 1000.0,
+                    "target_z_max_m": float(p.max_z) / 1000.0,
                 },
             )
             op_traits = dict(target.traits)
@@ -1572,6 +1574,21 @@ def analyze_plot(
         "stacked_hull_volume_m3": op_traits.get("stacked_hull_volume_m3", float("nan")),
         "max_spread_m": op_traits.get("max_spread_m", float("nan")),
         "spread_at_50_m": op_traits.get("spread_at_50_m", float("nan")),
+        "plant_height_m": op_traits.get("plant_height_m", float("nan")),
+        "plant_height_p90_m": op_traits.get("plant_height_p90_m", float("nan")),
+        "plant_height_p95_m": op_traits.get("plant_height_p95_m", float("nan")),
+        "plant_height_p98_m": op_traits.get("plant_height_p98_m", float("nan")),
+        "plant_height_uncertainty_m": op_traits.get("plant_height_uncertainty_m", float("nan")),
+        "footprint_area_m2": op_traits.get("footprint_area_m2", float("nan")),
+        "profile_area_xy_m2": op_traits.get("profile_area_xy_m2", float("nan")),
+        "profile_area_zy_m2": op_traits.get("profile_area_zy_m2", float("nan")),
+        "profile_area_median_m2": op_traits.get("profile_area_median_m2", float("nan")),
+        "profile_area_min_m2": op_traits.get("profile_area_min_m2", float("nan")),
+        "profile_area_max_m2": op_traits.get("profile_area_max_m2", float("nan")),
+        "canopy_envelope_volume_m3": op_traits.get("canopy_envelope_volume_m3", float("nan")),
+        "canopy_occupied_volume_m3": op_traits.get("canopy_occupied_volume_m3", float("nan")),
+        "geometry_confidence": op_traits.get("geometry_confidence", float("nan")),
+        "geometry_qc_status": op_traits.get("geometry_qc_status"),
     }
     result.update(lai_traits)
     if not bool(getattr(cfg, "run_mta", False)):
@@ -1623,6 +1640,21 @@ def trait_summary_row(rec: dict, cfg: AnalysisConfig) -> dict:
         "stacked_hull_volume_m3": rec.get("stacked_hull_volume_m3", float("nan")),
         "max_spread_m": rec.get("max_spread_m", float("nan")),
         "spread_at_50_m": rec.get("spread_at_50_m", float("nan")),
+        "plant_height_m": rec.get("plant_height_m", float("nan")),
+        "plant_height_p90_m": rec.get("plant_height_p90_m", float("nan")),
+        "plant_height_p95_m": rec.get("plant_height_p95_m", float("nan")),
+        "plant_height_p98_m": rec.get("plant_height_p98_m", float("nan")),
+        "plant_height_uncertainty_m": rec.get("plant_height_uncertainty_m", float("nan")),
+        "footprint_area_m2": rec.get("footprint_area_m2", float("nan")),
+        "profile_area_xy_m2": rec.get("profile_area_xy_m2", float("nan")),
+        "profile_area_zy_m2": rec.get("profile_area_zy_m2", float("nan")),
+        "profile_area_median_m2": rec.get("profile_area_median_m2", float("nan")),
+        "profile_area_min_m2": rec.get("profile_area_min_m2", float("nan")),
+        "profile_area_max_m2": rec.get("profile_area_max_m2", float("nan")),
+        "canopy_envelope_volume_m3": rec.get("canopy_envelope_volume_m3", float("nan")),
+        "canopy_occupied_volume_m3": rec.get("canopy_occupied_volume_m3", float("nan")),
+        "geometry_confidence": rec.get("geometry_confidence", float("nan")),
+        "geometry_qc_status": rec.get("geometry_qc_status"),
     }
     if bool(getattr(cfg, "run_mta", False)):
         row.update({

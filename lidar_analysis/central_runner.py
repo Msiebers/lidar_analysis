@@ -480,6 +480,25 @@ def phenotype_columns(cfg: AnalysisConfig) -> list[str]:
             "spread_at_50_m",
         ])
 
+    if _pointcloud_op_enabled(cfg, "plant_geometry_trait"):
+        cols.extend([
+            "plant_height_m",
+            "plant_height_p90_m",
+            "plant_height_p95_m",
+            "plant_height_p98_m",
+            "plant_height_uncertainty_m",
+            "footprint_area_m2",
+            "profile_area_xy_m2",
+            "profile_area_zy_m2",
+            "profile_area_median_m2",
+            "profile_area_min_m2",
+            "profile_area_max_m2",
+            "canopy_envelope_volume_m3",
+            "canopy_occupied_volume_m3",
+            "geometry_confidence",
+            "geometry_qc_status",
+        ])
+
     if _pointcloud_op_enabled(cfg, "voxel_count", "voxel_grid", "voxel_volume"):
         cols.append("voxel_count")
 
@@ -587,6 +606,21 @@ def append_trait_rows(
                 "max_spread_m": rec.get("max_spread_m"),
                 "spread_at_50_m": rec.get("spread_at_50_m"),
                 "voxel_count": rec.get("voxel_count"),
+                "plant_height_m": rec.get("plant_height_m"),
+                "plant_height_p90_m": rec.get("plant_height_p90_m"),
+                "plant_height_p95_m": rec.get("plant_height_p95_m"),
+                "plant_height_p98_m": rec.get("plant_height_p98_m"),
+                "plant_height_uncertainty_m": rec.get("plant_height_uncertainty_m"),
+                "footprint_area_m2": rec.get("footprint_area_m2"),
+                "profile_area_xy_m2": rec.get("profile_area_xy_m2"),
+                "profile_area_zy_m2": rec.get("profile_area_zy_m2"),
+                "profile_area_median_m2": rec.get("profile_area_median_m2"),
+                "profile_area_min_m2": rec.get("profile_area_min_m2"),
+                "profile_area_max_m2": rec.get("profile_area_max_m2"),
+                "canopy_envelope_volume_m3": rec.get("canopy_envelope_volume_m3"),
+                "canopy_occupied_volume_m3": rec.get("canopy_occupied_volume_m3"),
+                "geometry_confidence": rec.get("geometry_confidence"),
+                "geometry_qc_status": rec.get("geometry_qc_status"),
                 "points": rec.get("points"),
                 "lidar_scans": rec.get("lidar_scans"),
                 "lidar_angles": rec.get("lidar_angles"),
