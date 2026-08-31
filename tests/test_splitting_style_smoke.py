@@ -15,10 +15,11 @@ runtime, never at import, so an empty stub module is sufficient.
 """
 import sys
 import types
+from pathlib import Path
 
 sys.modules.setdefault("open3d", types.ModuleType("open3d"))
 
-from lidar_analysis.central_runner import resolve_splitting_style, resolve_buffer_u
+from lidar_analysis.central_runner import build_config, resolve_splitting_style, resolve_buffer_u
 
 
 def test_splitting_style_resolution_smoke() -> None:
@@ -62,6 +63,21 @@ def test_splitting_style_resolution_smoke() -> None:
 
     # Same intent expressed canonically collapses to one key:
     assert resolve_splitting_style({"splitting_style": "plot"}) == ("marks", "plot")
+
+    direct = build_config(
+        {"splitting_style": "plant", "plant_marker_window_mode": "midpoint"},
+        force=False,
+        cart_id="test",
+        data_dir=Path("."),
+    )
+    nested = build_config(
+        {"splitting_style": "plant", "marks": {"plant_window_mode": "midpoint"}},
+        force=False,
+        cart_id="test",
+        data_dir=Path("."),
+    )
+    assert direct.plant_marker_window_mode == "midpoint"
+    assert nested.plant_marker_window_mode == "midpoint"
 
 
 if __name__ == "__main__":

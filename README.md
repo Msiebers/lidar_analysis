@@ -40,6 +40,8 @@ orchestrator.py            High-level pipeline orchestration
 pipeline_core.py           Core reconstruction, filtering, splitting, and output logic
 pipeline_stages.py         Stage-based processing wrapper
 results_manager.py         Results aggregation / output management
+ground_surface.py          Non-destructive local-ground normalization
+plant_geometry.py          Experimental crown-connected height, area, and volume traits
 run_experiment_date.py     Run one experiment/date bundle
 run_manifest.py            Manifest-based run helper
 scaffold_experiments.py    Experiment scaffolding utilities

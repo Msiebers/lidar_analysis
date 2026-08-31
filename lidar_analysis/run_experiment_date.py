@@ -19,6 +19,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cart-id")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--fusion", default="interp", choices=["interp", "imu_interp", "pps"])
+    parser.add_argument(
+        "--scan-id",
+        action="append",
+        default=[],
+        help="Process only this exact scan id; repeat for multiple scans",
+    )
     return parser.parse_args()
 
 
@@ -54,6 +60,7 @@ def call_runner(args: argparse.Namespace, input_dir: Path, config_path: Path) ->
             cart_id=args.cart_id,
             force=bool(args.force),
             fusion_method=args.fusion,
+            scan_ids=args.scan_id,
         )
         return 0
 
@@ -73,6 +80,8 @@ def call_runner(args: argparse.Namespace, input_dir: Path, config_path: Path) ->
         cmd.extend(["--cart-id", args.cart_id])
     if args.force:
         cmd.append("--force")
+    for scan_id in args.scan_id or []:
+        cmd.extend(["--scan-id", str(scan_id)])
     return subprocess.run(cmd, check=False).returncode
 
 
@@ -84,6 +93,18 @@ def main() -> None:
 
     if not input_dir.exists():
         raise FileNotFoundError(f"Missing input directory: {input_dir}")
+
+    central_runner = None
+    try:
+        from . import central_runner as _central_runner  # type: ignore
+    except Exception:
+        try:
+            import central_runner as _central_runner  # type: ignore
+        except Exception:
+            _central_runner = None
+    central_runner = _central_runner
+    if central_runner is not None and hasattr(central_runner, "validate_generated_paths"):
+        central_runner.validate_generated_paths(input_dir, working_dir, output_dir)
 
     working_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)

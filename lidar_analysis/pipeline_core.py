@@ -935,6 +935,7 @@ def build_plot_objects_from_mark_segments(
             p.split_source = "marks"
             p.target_type = str(seg.target_type)
             p.target_number = str(seg.target_number)
+            p.target_center_z_mm = getattr(seg, "center_z", None)
             plots.append(p)
 
     return plots, row_options
@@ -1161,6 +1162,13 @@ def analyze_plot(
                     "pcl_backend_name": ((getattr(cfg, "pcl_backend", {}) or {}).get("name")),
                     "additional_scan_positive_side_label": str(getattr(cfg, "additional_scan_positive_side_label", "right")),
                     "additional_scan_negative_side_label": str(getattr(cfg, "additional_scan_negative_side_label", "left")),
+                    "target_z_min_m": float(p.min_z) / 1000.0,
+                    "target_z_max_m": float(p.max_z) / 1000.0,
+                    "target_center_z_m": (
+                        None
+                        if getattr(p, "target_center_z_mm", None) is None
+                        else float(p.target_center_z_mm) / 1000.0
+                    ),
                 },
             )
             op_traits = dict(target.traits)
@@ -1304,6 +1312,21 @@ def analyze_plot(
         "stacked_hull_volume_m3": op_traits.get("stacked_hull_volume_m3", float("nan")),
         "max_spread_m": op_traits.get("max_spread_m", float("nan")),
         "spread_at_50_m": op_traits.get("spread_at_50_m", float("nan")),
+        "plant_height_m": op_traits.get("plant_height_m", float("nan")),
+        "plant_height_p90_m": op_traits.get("plant_height_p90_m", float("nan")),
+        "plant_height_p95_m": op_traits.get("plant_height_p95_m", float("nan")),
+        "plant_height_p98_m": op_traits.get("plant_height_p98_m", float("nan")),
+        "plant_height_uncertainty_m": op_traits.get("plant_height_uncertainty_m", float("nan")),
+        "footprint_area_m2": op_traits.get("footprint_area_m2", float("nan")),
+        "profile_area_xy_m2": op_traits.get("profile_area_xy_m2", float("nan")),
+        "profile_area_zy_m2": op_traits.get("profile_area_zy_m2", float("nan")),
+        "profile_area_median_m2": op_traits.get("profile_area_median_m2", float("nan")),
+        "profile_area_min_m2": op_traits.get("profile_area_min_m2", float("nan")),
+        "profile_area_max_m2": op_traits.get("profile_area_max_m2", float("nan")),
+        "canopy_envelope_volume_m3": op_traits.get("canopy_envelope_volume_m3", float("nan")),
+        "canopy_occupied_volume_m3": op_traits.get("canopy_occupied_volume_m3", float("nan")),
+        "geometry_confidence": op_traits.get("geometry_confidence", float("nan")),
+        "geometry_qc_status": op_traits.get("geometry_qc_status"),
     }
     result.update(lai_traits)
 
@@ -1560,6 +1583,7 @@ def process_scan(
             z_buffer_mm=z_buffer_mm,
             target_type=str(getattr(cfg, "mark_target_type", "auto")),
             free_marks_as=str(getattr(cfg, "free_marks_as", "none")),
+            plant_window_mode=str(getattr(cfg, "plant_marker_window_mode", "fixed")),
             zmax_clip=zmax,
         )
 

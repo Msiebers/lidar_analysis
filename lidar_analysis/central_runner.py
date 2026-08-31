@@ -29,6 +29,7 @@ class NormalizedRunRequest:
     force: bool = False
     fusion_method: str = "interp"
     cart_id_override: str | None = None
+    scan_ids: tuple[str, ...] = ()
 
 def _load_yaml(path: Path) -> dict:
     if not path.exists():
@@ -49,6 +50,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--cart-id", help="Optional cart id override")
     p.add_argument("--force", action="store_true", help="Reprocess scans even when outputs already exist")
     p.add_argument("--fusion", default="interp", choices=["interp", "imu_interp", "pps"], help="Fusion method")
+    p.add_argument(
+        "--scan-id",
+        action="append",
+        default=[],
+        help="Process only this exact scan id; repeat for multiple scans",
+    )
     return p.parse_args()
 
 def resolve_config_path(input_dir: Path, explicit_config: str | None) -> Path:
@@ -107,6 +114,7 @@ def normalize_request(args: argparse.Namespace) -> NormalizedRunRequest:
         force=bool(args.force),
         fusion_method=str(args.fusion),
         cart_id_override=args.cart_id,
+        scan_ids=tuple(str(scan_id) for scan_id in (args.scan_id or [])),
     )
 
 
@@ -141,6 +149,44 @@ def discover_scan_pairs(date_dir: Path) -> tuple[list[tuple[str, Path, Path]], l
             missing = "pico" if lidar_fp else "lidar"
             ignored.append(f"{scan_id} (missing {missing})")
     return pairs, ignored
+
+
+def select_scan_pairs(
+    pairs: list[tuple[str, Path, Path]],
+    scan_ids: Iterable[str] | None,
+) -> list[tuple[str, Path, Path]]:
+    """Select an explicit test cohort and fail if any requested scan is absent."""
+    requested = tuple(dict.fromkeys(str(scan_id).strip() for scan_id in (scan_ids or ())))
+    requested = tuple(scan_id for scan_id in requested if scan_id)
+    if not requested:
+        return pairs
+
+    by_id = {pair[0]: pair for pair in pairs}
+    missing = [scan_id for scan_id in requested if scan_id not in by_id]
+    if missing:
+        raise ValueError(
+            "Requested --scan-id value(s) were not found as complete LiDAR/Pico pairs: "
+            + ", ".join(missing)
+        )
+    return [by_id[scan_id] for scan_id in requested]
+
+
+def validate_generated_paths(input_dir: Path, working_dir: Path, output_dir: Path) -> None:
+    """Prevent generated files from being written into the collected-data tree."""
+    input_dir = input_dir.resolve()
+    working_dir = working_dir.resolve()
+    output_dir = output_dir.resolve()
+    unsafe = [
+        ("working", working_dir) if working_dir == input_dir or working_dir.is_relative_to(input_dir) else None,
+        ("output", output_dir) if output_dir == input_dir or output_dir.is_relative_to(input_dir) else None,
+    ]
+    unsafe = [entry for entry in unsafe if entry is not None]
+    if unsafe:
+        details = ", ".join(f"{kind}={path}" for kind, path in unsafe)
+        raise ValueError(
+            "Refusing to write generated files inside the input data directory "
+            f"{input_dir}: {details}"
+        )
 
 
 def read_calibration_from_cart_config(cart_config_path: Path) -> dict:
@@ -308,6 +354,13 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         if experiment_config.get("empty_mark_file") is not None
         else "skip"
     )
+    plant_marker_window_mode = (
+        marks_cfg.get("plant_window_mode")
+        if marks_cfg.get("plant_window_mode") is not None
+        else experiment_config.get("plant_marker_window_mode")
+        if experiment_config.get("plant_marker_window_mode") is not None
+        else "fixed"
+    )
 
     # Defaults come from the AnalysisConfig dataclass (single source of truth).
     # `pick` reads the YAML value if present, else the dataclass default, and
@@ -329,6 +382,7 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         split_source=str(split_source),
         mark_target_type=str(mark_target_type),
         mark_z_buffer_u=float(mark_z_buffer_u),
+        plant_marker_window_mode=str(plant_marker_window_mode),
         markers_dirname=pick("markers_dirname", "markers_dirname", str),
         missing_mark_file=str(missing_mark_file),
         write_marker_pointcloud=bool(write_marker_pointcloud),
@@ -450,6 +504,25 @@ def phenotype_columns(cfg: AnalysisConfig) -> list[str]:
             "spread_at_50_m",
         ])
 
+    if _pointcloud_op_enabled(cfg, "plant_geometry_trait"):
+        cols.extend([
+            "plant_height_m",
+            "plant_height_p90_m",
+            "plant_height_p95_m",
+            "plant_height_p98_m",
+            "plant_height_uncertainty_m",
+            "footprint_area_m2",
+            "profile_area_xy_m2",
+            "profile_area_zy_m2",
+            "profile_area_median_m2",
+            "profile_area_min_m2",
+            "profile_area_max_m2",
+            "canopy_envelope_volume_m3",
+            "canopy_occupied_volume_m3",
+            "geometry_confidence",
+            "geometry_qc_status",
+        ])
+
     if _pointcloud_op_enabled(cfg, "voxel_count", "voxel_grid", "voxel_volume"):
         cols.append("voxel_count")
 
@@ -524,6 +597,21 @@ def append_trait_rows(
                 "max_spread_m": rec.get("max_spread_m"),
                 "spread_at_50_m": rec.get("spread_at_50_m"),
                 "voxel_count": rec.get("voxel_count"),
+                "plant_height_m": rec.get("plant_height_m"),
+                "plant_height_p90_m": rec.get("plant_height_p90_m"),
+                "plant_height_p95_m": rec.get("plant_height_p95_m"),
+                "plant_height_p98_m": rec.get("plant_height_p98_m"),
+                "plant_height_uncertainty_m": rec.get("plant_height_uncertainty_m"),
+                "footprint_area_m2": rec.get("footprint_area_m2"),
+                "profile_area_xy_m2": rec.get("profile_area_xy_m2"),
+                "profile_area_zy_m2": rec.get("profile_area_zy_m2"),
+                "profile_area_median_m2": rec.get("profile_area_median_m2"),
+                "profile_area_min_m2": rec.get("profile_area_min_m2"),
+                "profile_area_max_m2": rec.get("profile_area_max_m2"),
+                "canopy_envelope_volume_m3": rec.get("canopy_envelope_volume_m3"),
+                "canopy_occupied_volume_m3": rec.get("canopy_occupied_volume_m3"),
+                "geometry_confidence": rec.get("geometry_confidence"),
+                "geometry_qc_status": rec.get("geometry_qc_status"),
                 "points": rec.get("points"),
                 "lidar_scans": rec.get("lidar_scans"),
                 "lidar_angles": rec.get("lidar_angles"),
@@ -552,6 +640,7 @@ def run_experiment_date(
     cart_id: str | None = None,
     force: bool = False,
     fusion_method: str | None = None,
+    scan_ids: Iterable[str] | None = None,
 ) -> Path:
     cart_cfg_yaml = input_dir / "cart_config.yaml"
     if not input_dir.exists():
@@ -559,10 +648,12 @@ def run_experiment_date(
     if not cart_cfg_yaml.exists():
         raise FileNotFoundError(f"Missing cart config YAML: {cart_cfg_yaml}")
 
+    validate_generated_paths(input_dir, working_dir, output_dir)
     working_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     pairs, skipped = discover_scan_pairs(input_dir)
+    pairs = select_scan_pairs(pairs, scan_ids)
     calibration = read_calibration_from_cart_config(cart_cfg_yaml)
     effective_cart_id = cart_id or str(calibration.get("cart_id", "unknown"))
 
@@ -626,6 +717,7 @@ def main() -> None:
         cart_id=request.cart_id_override,
         force=request.force,
         fusion_method=request.fusion_method,
+        scan_ids=request.scan_ids,
     )
 
 

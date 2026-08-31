@@ -15,6 +15,14 @@ try:
 except Exception:
     ConvexHull = None
     QhullError = Exception
+try:
+    from .plant_geometry import compute_plant_geometry_traits
+except ImportError:
+    from plant_geometry import compute_plant_geometry_traits
+try:
+    from .ground_surface import add_local_ground_height
+except ImportError:
+    from ground_surface import add_local_ground_height
 
 
 @dataclass
@@ -41,6 +49,7 @@ _SUPPORTED_OPS = {
     "height_range_filter",
     "topology_trait",
     "slice_structure_trait",
+    "plant_geometry_trait",
 }
 
 def op_enabled(cfg, name: str) -> bool:
@@ -479,6 +488,35 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
             )
             traits.update(slice_traits)
             diagnostics.setdefault("slice_structure_trait", []).append(slice_diag)
+
+        elif op == "plant_geometry_trait":
+            # Geometry needs height above local ground but must retain low crown
+            # points. Unlike local_ground_filter, this normalization step adds
+            # ground columns without applying a destructive height threshold.
+            if "height_agl" not in df.columns and bool(op_cfg.get("normalize_ground", True)):
+                ground_cfg = op_cfg.get("ground", {}) or {}
+                if not isinstance(ground_cfg, dict):
+                    raise ValueError("plant_geometry_trait ground must be a mapping")
+                seed_y_min_m = ground_cfg.get("seed_y_min_m")
+                seed_y_max_m = ground_cfg.get("seed_y_max_m")
+                df = add_local_ground_height(
+                    df,
+                    x_bin_size_m=float(ground_cfg.get("x_bin_size_m", 0.10)) * 1000.0,
+                    z_bin_size_m=float(ground_cfg.get("z_bin_size_m", 0.25)) * 1000.0,
+                    ground_quantile=float(ground_cfg.get("quantile", 0.10)),
+                    smooth_bins=int(ground_cfg.get("smooth_bins", 5)),
+                    min_points_per_xz_bin=int(ground_cfg.get("min_points_per_xz_bin", 10)),
+                    min_x_bins_per_z=int(ground_cfg.get("min_x_bins_per_z", 3)),
+                    seed_y_min=None if seed_y_min_m is None else float(seed_y_min_m) * 1000.0,
+                    seed_y_max=None if seed_y_max_m is None else float(seed_y_max_m) * 1000.0,
+                )
+            geometry_traits, geometry_diag = compute_plant_geometry_traits(
+                df,
+                op_cfg,
+                context=context,
+            )
+            traits.update(geometry_traits)
+            diagnostics.setdefault("plant_geometry_trait", []).append(geometry_diag)
 
         elif op == "topology_trait":
             if target_obj is None:

@@ -1,0 +1,84 @@
+experiment_name: MeadowFescue_2026
+processing_mode: local
+config_reviewed: false
+config_note: >-
+  Experimental starting configuration. Calibrate against manual Meadow Fescue
+  height, silhouette, and reference-volume measurements before research use.
+
+analysis:
+  dim_units: ft
+  splitting_style: plant
+  markers_dirname: markers
+  missing_mark_file: error
+  empty_mark_file: error
+
+  # Partition every plant at the midpoint to its neighbours. buffer_u is a
+  # maximum half-width in this mode, so unusually wide marker gaps cannot
+  # produce oversized plant windows. The same rule is direction-independent.
+  plant_marker_window_mode: midpoint
+  buffer_u: 1.2
+
+  # Geometry normalizes ground without discarding low crown points. Keep the
+  # older thresholding filter off while comparing the new and legacy traits.
+  use_local_ground_filter: false
+
+  generate_pointclouds: true
+  overwrite_pointclouds: true
+  run_height: true
+
+  pointcloud_ops:
+    - op: sor_filter
+      enabled: true
+      mean_k: 12
+      std_ratio: 2.0
+
+    - op: plant_geometry_trait
+      enabled: true
+
+      # All public sizes are metres. A nominal 1.5 ft square is 0.4572 m;
+      # maximum_crown_radius_m allows drooping blades outside half its width
+      # while preventing a distant neighboring crown from being selected.
+      maximum_crown_radius_m: 0.36
+      crown_core_radius_m: 0.12
+      use_target_center_z: true
+
+      # Starting resolutions only. Test alternatives against locked reference
+      # plants instead of treating these values as biologically calibrated.
+      footprint_grid_m: 0.025
+      profile_grid_m: 0.025
+      voxel_size_m: 0.025
+      slice_height_m: 0.025
+
+      # The annulus estimates the lower clover/background canopy surrounding
+      # the inferred fescue crown.
+      background_inner_radius_m: 0.18
+      background_outer_radius_m: 0.34
+      background_cell_height_quantile: 0.90
+      background_ceiling_quantile: 0.50
+      background_margin_m: 0.04
+      outer_point_margin_m: 0.01
+
+      cell_top_quantile: 0.95
+      height_quantile: 0.95
+      minimum_geometry_height_m: 0.02
+      minimum_target_points: 20
+      minimum_selected_points: 20
+      minimum_points_per_footprint_cell: 2
+      minimum_points_per_slice: 3
+      footprint_connectivity: 8
+
+      # Zero closing is conservative: it avoids automatically filling air
+      # between grass blades until the validation data justify gap filling.
+      profile_close_cells: 0
+      slice_close_cells: 0
+      projection_angles_deg: [0, 45, 90, 135]
+
+      ground:
+        x_bin_size_m: 0.10
+        z_bin_size_m: 0.25
+        quantile: 0.10
+        smooth_bins: 5
+        min_points_per_xz_bin: 10
+        min_x_bins_per_z: 3
+        seed_y_min_m: -0.05
+        seed_y_max_m: 0.30

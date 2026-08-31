@@ -17,6 +17,7 @@ class MarkSegment:
     label: str
     min_z: float
     max_z: float
+    center_z: float | None = None
 
 
 def _to_m_units(value: float, dim_units: str) -> float:
@@ -151,6 +152,7 @@ def build_mark_segments(
     z_buffer_mm: float,
     target_type: str = "auto",
     free_marks_as: str = "none",
+    plant_window_mode: str = "fixed",
     zmax_clip: float | None = None,
 ) -> list[MarkSegment]:
     df = _load_markers(marker_path)
@@ -163,6 +165,12 @@ def build_mark_segments(
         raise ValueError(f"Unknown mark_target_type={target_type!r}")
 
     free_mode = str(free_marks_as).strip().lower()
+    plant_window_mode = str(plant_window_mode).strip().lower()
+    if plant_window_mode not in {"fixed", "midpoint"}:
+        raise ValueError(
+            "plant_window_mode must be 'fixed' or 'midpoint'; "
+            f"got {plant_window_mode!r}"
+        )
     if free_mode == "plant" and target_type in ("auto", "plant"):
         free_df = df[(df["_target_type"] == "free") & (df["_mark_role"].isin({"mark", "center", "point", "plant"}))].copy()
         if not free_df.empty:
@@ -194,6 +202,7 @@ def build_mark_segments(
     center_roles = {"center", "mark", "point", "plant"}
 
     segments: list[MarkSegment] = []
+    plant_centers: list[tuple[float, float, str, str]] = []
 
     for (ttype, number), group in df.groupby(["_target_type", "_target_number"], sort=False):
         group = group.sort_values("_sort")
@@ -246,6 +255,11 @@ def build_mark_segments(
                     continue
 
                 center = float(row["_z_mm"])
+                if str(ttype) == "plant" and plant_window_mode == "midpoint":
+                    plant_centers.append(
+                        (float(row["_sort"]), center, str(number), f"plant_{number}")
+                    )
+                    continue
                 lo = max(0.0, center - float(z_buffer_mm))
                 hi = center + float(z_buffer_mm)
 
@@ -261,7 +275,57 @@ def build_mark_segments(
                             label=label,
                             min_z=lo,
                             max_z=hi,
+                            center_z=center,
                         )
                     )
+
+    if plant_centers:
+        # Sort by physical travel coordinate, not target number or acquisition
+        # direction. Reverse scans therefore produce the same spatial partition.
+        ordered = sorted(plant_centers, key=lambda item: (item[1], item[0]))
+        centers = np.asarray([item[1] for item in ordered], dtype=float)
+        duplicate = np.where(np.diff(centers) <= 0.0)[0]
+        if duplicate.size:
+            i = int(duplicate[0])
+            raise ValueError(
+                "Plant center markers must have distinct encoder positions for "
+                f"midpoint windows: {ordered[i][2]!r} and {ordered[i + 1][2]!r}"
+            )
+
+        for i, (_, center, number, label) in enumerate(ordered):
+            if centers.size == 1:
+                if float(z_buffer_mm) <= 0.0:
+                    raise ValueError(
+                        "A single plant center marker needs a positive buffer for "
+                        "plant_window_mode='midpoint'"
+                    )
+                lo = center - float(z_buffer_mm)
+                hi = center + float(z_buffer_mm)
+            else:
+                left_gap = centers[i] - centers[i - 1] if i > 0 else centers[1] - centers[0]
+                right_gap = centers[i + 1] - centers[i] if i + 1 < centers.size else centers[-1] - centers[-2]
+                lo = center - 0.5 * float(left_gap)
+                hi = center + 0.5 * float(right_gap)
+
+                # In midpoint mode buffer_u is an optional maximum half-width.
+                # A zero buffer means use the full midpoint partition.
+                if float(z_buffer_mm) > 0.0:
+                    lo = max(lo, center - float(z_buffer_mm))
+                    hi = min(hi, center + float(z_buffer_mm))
+
+            lo = max(0.0, float(lo))
+            if zmax_clip is not None:
+                hi = min(float(zmax_clip), float(hi))
+            if hi > lo:
+                segments.append(
+                    MarkSegment(
+                        target_type="plant",
+                        target_number=number,
+                        label=label,
+                        min_z=lo,
+                        max_z=hi,
+                        center_z=center,
+                    )
+                )
 
     return segments

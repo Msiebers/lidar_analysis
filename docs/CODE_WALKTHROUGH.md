@@ -9,6 +9,8 @@ Start with these files:
 | `lidar_analysis/pipeline_core.py` | Fusion, reconstruction, filtering, splitting, trait extraction, output writing |
 | `lidar_analysis/config.py` | `AnalysisConfig` dataclass, defaults, RSSI mode validation, deprecated-key mapping |
 | `lidar_analysis/pointcloud_ops.py` | Ordered point-cloud filters and trait operations |
+| `lidar_analysis/plant_geometry.py` | Experimental crown-connected plant height, projected area, and volume traits |
+| `lidar_analysis/ground_surface.py` | Non-destructive local-ground normalization used by plant geometry |
 | `lidar_analysis/mark_splitting.py` | Marker-file discovery and marker-to-window conversion |
 
 ## Main Execution Path
