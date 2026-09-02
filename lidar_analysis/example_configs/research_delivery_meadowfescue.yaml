@@ -1,0 +1,15 @@
+# Internal test-preview configuration. This does not run the LiDAR pipeline.
+experiment: MeadowFescue_2026
+raw_experiment_root: /media/slim/raw_mirror/MeadowFescue_2026
+analysis_experiment_root: /media/slim/analysis_results/MeadowFescue_2026
+delivery_root: /home/slim/Documents/lidar_delivery_tests
+
+# Only validated columns in the current canonical results.csv are permitted.
+metrics:
+  - points
+  - point_density_m2
+  - stand_topo_per_m
+
+top_fraction: 0.15
+include_ties: true
+outlier_iqr_multiplier: 1.5
