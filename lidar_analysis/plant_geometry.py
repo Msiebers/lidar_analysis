@@ -569,6 +569,15 @@ def compute_plant_geometry_traits(
     diagnostics["selected_points"] = int(selected_h.size)
     diagnostics["selected_footprint_cells"] = int(selected_cells.shape[0])
     diagnostics["outer_point_floor_m"] = outer_floor_m
+    if bool(context.get("include_review_geometry", False)):
+        # These arrays can be large, so expose them only to explicit review
+        # callers. They are the exact points and cells used below for traits.
+        diagnostics.update({
+            "review_selected_x_m": selected_x.copy(),
+            "review_selected_z_m": selected_z.copy(),
+            "review_selected_height_m": selected_h.copy(),
+            "review_selected_cells": selected_cells.copy(),
+        })
 
     minimum_selected = int(cfg.get("minimum_selected_points", 20))
     if selected_h.size < minimum_selected:

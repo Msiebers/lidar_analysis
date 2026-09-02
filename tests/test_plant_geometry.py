@@ -84,6 +84,30 @@ def test_geometry_separates_tuft_from_low_clover_and_neighbor():
     assert abs(diag["crown_center_z_m"]) < 0.05
 
 
+def test_review_geometry_diagnostics_are_opt_in_and_match_traits():
+    df = _synthetic_fescue_with_clover()
+    traits, review_diag = compute_plant_geometry_traits(
+        df,
+        _op_config(),
+        context={"include_review_geometry": True},
+    )
+    _, routine_diag = compute_plant_geometry_traits(df, _op_config())
+
+    selected_x = review_diag["review_selected_x_m"]
+    selected_z = review_diag["review_selected_z_m"]
+    selected_height = review_diag["review_selected_height_m"]
+    selected_cells = review_diag["review_selected_cells"]
+
+    assert selected_x.shape == selected_z.shape == selected_height.shape
+    assert selected_x.size == traits["geometry_selected_points"]
+    assert selected_cells.shape == (traits["geometry_footprint_cells"], 2)
+    assert np.all(np.isfinite(selected_x))
+    assert np.all(np.isfinite(selected_z))
+    assert np.all(np.isfinite(selected_height))
+    assert "review_selected_x_m" not in routine_diag
+    assert "review_selected_cells" not in routine_diag
+
+
 def test_geometry_op_is_non_destructive_and_records_diagnostics():
     df = _synthetic_fescue_with_clover()
     target = _target(df)

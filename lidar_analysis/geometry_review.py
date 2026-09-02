@@ -136,6 +136,14 @@ def _audit_target(
         "crown_center_x_m": diagnostics.get("crown_center_x_m"),
         "crown_center_z_m": diagnostics.get("crown_center_z_m"),
         "crown_center_source": diagnostics.get("crown_center_source"),
+        "roi_points": diagnostics.get("roi_points"),
+        "background_ceiling_m": diagnostics.get("background_ceiling_m"),
+        "background_cell_count": diagnostics.get("background_cell_count"),
+        "background_source": diagnostics.get("background_source"),
+        "background_margin_m": diagnostics.get("background_margin_m"),
+        "outer_point_floor_m": diagnostics.get("outer_point_floor_m"),
+        "radial_boundary_fraction": diagnostics.get("radial_boundary_fraction"),
+        "z_boundary_fraction": diagnostics.get("z_boundary_fraction"),
     }
     mismatches: list[str] = []
 
@@ -234,7 +242,7 @@ def _render_review(
 
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        from matplotlib.patches import Circle
+        from matplotlib.patches import Circle, Rectangle
     except ImportError as exc:
         raise RuntimeError(
             "Geometry review rendering requires matplotlib; install the repository's "
@@ -249,22 +257,88 @@ def _render_review(
     )
     for target_index, (row, points, traits, diagnostics) in enumerate(reviewed):
         x_m, z_m, height_m = _plot_points(points, max_points)
+        selected_x = np.asarray(diagnostics.get("review_selected_x_m", []), dtype=float)
+        selected_z = np.asarray(diagnostics.get("review_selected_z_m", []), dtype=float)
+        selected_h = np.asarray(diagnostics.get("review_selected_height_m", []), dtype=float)
+        selected_finite = (
+            np.isfinite(selected_x) & np.isfinite(selected_z) & np.isfinite(selected_h)
+        )
+        selected_x = selected_x[selected_finite]
+        selected_z = selected_z[selected_finite]
+        selected_h = selected_h[selected_finite]
+        if selected_x.size > max_points:
+            indices = np.linspace(0, selected_x.size - 1, max_points, dtype=np.int64)
+            selected_x = selected_x[indices]
+            selected_z = selected_z[indices]
+            selected_h = selected_h[indices]
+
         plan_ax, x_height_ax, z_height_ax = axes[target_index]
-        scatter_kwargs = {
-            "c": height_m,
+        background_kwargs = {
+            "c": "#747474",
+            "s": 1.2,
+            "alpha": 0.16,
+            "linewidths": 0.0,
+            "rasterized": True,
+        }
+        selected_kwargs = {
+            "c": selected_h,
             "cmap": "viridis",
-            "s": 2.0,
-            "alpha": 0.45,
+            "s": 3.5,
+            "alpha": 0.72,
             "linewidths": 0.0,
             "rasterized": True,
         }
 
-        plan_ax.scatter(x_m, z_m, **scatter_kwargs)
+        plan_ax.scatter(x_m, z_m, label="Excluded/other points", **background_kwargs)
+        if selected_x.size:
+            plan_ax.scatter(
+                selected_x,
+                selected_z,
+                label="Selected plant points",
+                **selected_kwargs,
+            )
+
         center_x = float(diagnostics["crown_center_x_m"])
         center_z = float(diagnostics["crown_center_z_m"])
         radius = float(diagnostics["maximum_crown_radius_m"])
-        plan_ax.add_patch(Circle((center_x, center_z), radius, fill=False, color="red", lw=1.5))
-        plan_ax.scatter([center_x], [center_z], marker="x", color="red", s=45, linewidths=1.5)
+        plan_ax.add_patch(
+            Circle(
+                (center_x, center_z),
+                radius,
+                fill=False,
+                color="red",
+                lw=1.4,
+                label="Maximum crown ROI",
+            )
+        )
+        plan_ax.scatter(
+            [center_x],
+            [center_z],
+            marker="x",
+            color="red",
+            s=45,
+            linewidths=1.5,
+        )
+
+        grid_m = float(diagnostics["footprint_grid_m"])
+        selected_cells = np.asarray(
+            diagnostics.get("review_selected_cells", []),
+            dtype=float,
+        ).reshape(-1, 2)
+        for cell_index, (cell_x, cell_z) in enumerate(selected_cells):
+            plan_ax.add_patch(
+                Rectangle(
+                    (cell_x * grid_m, cell_z * grid_m),
+                    grid_m,
+                    grid_m,
+                    fill=False,
+                    edgecolor="#ff8c00",
+                    linewidth=0.75,
+                    alpha=0.85,
+                    label="Selected footprint cells" if cell_index == 0 else None,
+                )
+            )
+
         for key in ("target_z_min_m", "target_z_max_m"):
             boundary = _optional_float(row, key)
             if boundary is not None:
@@ -276,31 +350,57 @@ def _render_review(
             f"{row['date']} row {_identifier(row['row'])} {row['plot']}\n"
             f"QC={traits['geometry_qc_status']}, height={traits['plant_height_m']:.3f} m, "
             f"footprint={traits['footprint_area_m2']:.4f} m², "
+            f"points={int(traits['geometry_selected_points'])}, "
             f"cells={int(traits['geometry_footprint_cells'])}"
         )
+        plan_ax.legend(loc="upper left", fontsize=6.5, framealpha=0.82)
 
-        x_height_ax.scatter(x_m, height_m, **scatter_kwargs)
-        z_height_ax.scatter(z_m, height_m, **scatter_kwargs)
+        x_height_ax.scatter(x_m, height_m, **background_kwargs)
+        z_height_ax.scatter(z_m, height_m, **background_kwargs)
+        if selected_x.size:
+            x_height_ax.scatter(selected_x, selected_h, **selected_kwargs)
+            z_height_ax.scatter(selected_z, selected_h, **selected_kwargs)
+
+        outer_floor_m = diagnostics.get("outer_point_floor_m")
         for axis, horizontal_label in (
             (x_height_ax, "X across row (m)"),
             (z_height_ax, "Z travel direction (m)"),
         ):
-            axis.axhline(float(traits["plant_height_m"]), color="red", lw=1.2)
+            axis.axhline(
+                float(traits["plant_height_m"]),
+                color="red",
+                lw=1.2,
+                label="Reported height",
+            )
+            if outer_floor_m is not None and np.isfinite(float(outer_floor_m)):
+                axis.axhline(
+                    float(outer_floor_m),
+                    color="#ff8c00",
+                    ls="--",
+                    lw=1.0,
+                    label="Background selection floor",
+                )
             axis.set_xlabel(horizontal_label)
             axis.set_ylabel("Height above ground (m)")
             axis.grid(True, alpha=0.20)
-        x_height_ax.set_title("X-height side projection")
+        x_height_ax.set_title(
+            "X-height selected-plant projection\n"
+            f"background={diagnostics.get('background_source', 'unknown')}"
+        )
+        x_height_ax.legend(loc="upper left", fontsize=6.5, framealpha=0.82)
         z_height_ax.set_title(
-            "Z-height side projection\n"
+            "Z-height selected-plant projection\n"
             f"envelope={traits['canopy_envelope_volume_m3']:.6f} m³, "
             f"occupied={traits['canopy_occupied_volume_m3']:.6f} m³"
         )
 
-    figure.suptitle("Exact-marker Meadow Fescue geometry review", fontsize=15)
+    figure.suptitle(
+        "Exact-marker Meadow Fescue geometry review: selected plant overlay",
+        fontsize=15,
+    )
     figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.995))
     figure.savefig(output_path, dpi=160, bbox_inches="tight")
     plt.close(figure)
-
 
 def build_geometry_review(
     *,
@@ -338,10 +438,12 @@ def build_geometry_review(
     for _, row in rows.iterrows():
         pointcloud_path = _pointcloud_path(pointcloud_dir, row)
         points = _read_pipeline_pointcloud(pointcloud_path)
+        geometry_context = _geometry_context(row)
+        geometry_context["include_review_geometry"] = True
         traits, diagnostics = compute_plant_geometry_traits(
             points,
             operation,
-            context=_geometry_context(row),
+            context=geometry_context,
         )
         audit = _audit_target(row, traits, diagnostics, tolerance=tolerance)
         audit["pointcloud_path"] = str(pointcloud_path)
