@@ -86,3 +86,25 @@ def test_geometry_review_refuses_stale_result_mismatch(tmp_path):
 
     assert (output_dir / "results_geometry_review_audit.csv").is_file()
     assert not (output_dir / "results_geometry_review.png").exists()
+
+def test_geometry_review_audits_missing_integer_support_without_crashing(tmp_path):
+    results_path, pointcloud_dir, config_path = _review_fixture(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["analysis"]["pointcloud_ops"][0]["minimum_target_points"] = 10_000_000
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    output_dir = tmp_path / "review"
+    with pytest.raises(ValueError, match="does not match the final results"):
+        build_geometry_review(
+            results_path=results_path,
+            pointcloud_dir=pointcloud_dir,
+            config_path=config_path,
+            output_dir=output_dir,
+            max_points=2_000,
+        )
+
+    audit = pd.read_csv(output_dir / "results_geometry_review_audit.csv")
+    assert pd.isna(audit.loc[0, "recomputed_geometry_footprint_cells"])
+    assert "geometry_footprint_cells" in audit.loc[0, "mismatch_fields"]
+    assert "geometry_height_cells" in audit.loc[0, "mismatch_fields"]
+    assert not (output_dir / "results_geometry_review.png").exists()

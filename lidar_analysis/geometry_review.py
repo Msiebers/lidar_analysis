@@ -96,6 +96,16 @@ def _normalized_text(value: Any) -> str:
     return str(value)
 
 
+def _normalized_integer(value: Any) -> int | float:
+    """Preserve missing support counts so the audit can report a mismatch."""
+    if value is None or pd.isna(value):
+        return float("nan")
+    number = float(value)
+    if not np.isfinite(number):
+        return float("nan")
+    return int(number) if number.is_integer() else number
+
+
 def _audit_target(
     row: pd.Series,
     traits: dict[str, Any],
@@ -125,11 +135,12 @@ def _audit_target(
             mismatches.append(key)
 
     for key in _INTEGER_AUDIT_FIELDS:
-        result_value = int(row[key])
-        recomputed_value = int(traits[key])
+        result_value = _normalized_integer(row.get(key))
+        recomputed_value = _normalized_integer(traits.get(key))
         audit[f"result_{key}"] = result_value
         audit[f"recomputed_{key}"] = recomputed_value
-        if result_value != recomputed_value:
+        both_missing = pd.isna(result_value) and pd.isna(recomputed_value)
+        if not both_missing and result_value != recomputed_value:
             mismatches.append(key)
 
     for key in _TEXT_AUDIT_FIELDS:
