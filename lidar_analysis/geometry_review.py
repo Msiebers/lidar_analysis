@@ -90,6 +90,21 @@ def _pointcloud_path(pointcloud_dir: Path, row: pd.Series) -> Path:
     return path
 
 
+def _read_pipeline_pointcloud(path: Path) -> pd.DataFrame:
+    """Restore Plot.write CSV coordinates to the pipeline's internal units.
+
+    Plot.write stores X/Y/Z in metres, while height_agl and other analysis
+    columns remain in their internal millimetre representation.
+    """
+    points = pd.read_csv(path)
+    missing = sorted({"X", "Y", "Z"}.difference(points.columns))
+    if missing:
+        raise ValueError(f"Point-cloud CSV is missing required column(s): {missing}")
+    for column in ("X", "Y", "Z"):
+        points[column] = pd.to_numeric(points[column], errors="coerce") * 1000.0
+    return points
+
+
 def _normalized_text(value: Any) -> str:
     if value is None or pd.isna(value):
         return ""
@@ -322,7 +337,7 @@ def build_geometry_review(
     audits: list[dict[str, Any]] = []
     for _, row in rows.iterrows():
         pointcloud_path = _pointcloud_path(pointcloud_dir, row)
-        points = pd.read_csv(pointcloud_path)
+        points = _read_pipeline_pointcloud(pointcloud_path)
         traits, diagnostics = compute_plant_geometry_traits(
             points,
             operation,

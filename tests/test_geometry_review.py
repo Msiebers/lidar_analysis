@@ -27,7 +27,16 @@ def _review_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
     scan_id = "meadow_fixture"
     pointcloud_dir = tmp_path / "pointclouds"
     pointcloud_dir.mkdir()
-    points.to_csv(pointcloud_dir / f"37_plant_1_{scan_id}.csv", index=False)
+    # Match Plot.write: X/Y/Z are exported in metres, while height_agl stays
+    # in the pipeline's internal millimetre representation.
+    written_points = points.copy()
+    written_points.loc[:, ["X", "Y", "Z"]] = (
+        written_points[["X", "Y", "Z"]] / 1000.0
+    )
+    written_points.to_csv(
+        pointcloud_dir / f"37_plant_1_{scan_id}.csv",
+        index=False,
+    )
 
     result = {
         "date": "2026_05_14",
