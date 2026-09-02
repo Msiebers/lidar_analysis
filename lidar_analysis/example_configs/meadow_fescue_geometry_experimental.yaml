@@ -64,11 +64,19 @@ analysis:
       minimum_target_points: 20
       minimum_selected_points: 20
       minimum_points_per_footprint_cell: 2
-      minimum_points_per_slice: 3
+      minimum_points_per_hull_slice: 3
+      # One or two supported cells fail; three to seven require review. These
+      # starting gates prevent dense returns in a tiny patch from passing QC.
+      minimum_footprint_cells_for_review: 3
+      minimum_footprint_cells_for_pass: 8
+      minimum_height_cells_for_review: 3
+      minimum_height_cells_for_pass: 8
       footprint_connectivity: 8
 
-      # Zero closing is conservative: it avoids automatically filling air
-      # between grass blades until the validation data justify gap filling.
+      # The slice-wise convex hull estimates the outer canopy envelope. The
+      # separate occupied-voxel volume remains the conservative sampling-volume
+      # lower bound. Zero closing applies only to sparse/grid-union fallbacks.
+      slice_envelope_method: convex_hull
       profile_close_cells: 0
       slice_close_cells: 0
       projection_angles_deg: [0, 45, 90, 135]

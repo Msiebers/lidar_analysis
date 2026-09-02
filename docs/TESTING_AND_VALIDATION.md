@@ -70,6 +70,13 @@ For a no-bytecode syntax check, compile files in memory with Python. This was pr
 
 Do not claim an end-to-end example-data run succeeds until `lidar_analysis/example_data/2026_04_28_1/cart_config.yaml` is provided and an experiment config is available either through `--config` or at one of the supported default paths.
 
+For experimental plant geometry, do not scale from the marker smoke test to a
+full experiment merely because the runner completes. First verify that
+under-supported targets are not marked `pass`, envelope and occupied volumes
+are independently defined, marker-centred windows are correct, and selected
+top/side views contain the intended plant rather than neighbouring vegetation.
+Keep every validation output outside the raw input tree.
+
 ## Controlled Experiment Protocol
 
 Use a unique output folder for every config variant:

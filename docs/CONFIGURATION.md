@@ -133,8 +133,19 @@ Important behavior:
   its minimum-height threshold removes low crown points before this operation.
 - `canopy_occupied_volume_m3` depends on voxel resolution. Treat it as an
   explicitly configured structural metric, not literal solid leaf volume.
+- `canopy_envelope_volume_m3` defaults to a convex hull around occupied X-Z
+  grid cells in each height slice (`slice_envelope_method: convex_hull`). It is
+  an outer-canopy estimate and may fill air between blades. Use the occupied
+  volume as a sampling lower bound and validate both against reference plants.
 - Inspect `geometry_qc_status` and `geometry_confidence` before using a row in
   downstream research.
+- Dense returns in too few cells cannot pass QC. The configurable
+  `minimum_footprint_cells_for_review/pass` and
+  `minimum_height_cells_for_review/pass` gates retain the numeric traits while
+  forcing under-supported targets to `review` or `fail`.
+- Result rows include support counts, boundary fraction, QC flags, volume
+  method, and the exact marker-centred target bounds so every estimate can be
+  audited without reconstructing marker position from the window midpoint.
 - Marker-defined plant targets pass the recorded marker Z to the geometry
   operation by default (`use_target_center_z: true`). X is still inferred from
   high crown returns, but an adjacent denser crown cannot pull Z away from the

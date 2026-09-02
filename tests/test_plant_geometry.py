@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from lidar_analysis.analysis_target import AnalysisTarget
-from lidar_analysis.central_runner import phenotype_columns
+from lidar_analysis.central_runner import append_trait_rows, ensure_results_csv, phenotype_columns
 from lidar_analysis.config import AnalysisConfig
 from lidar_analysis.plant_geometry import _projection_area, compute_plant_geometry_traits
 from lidar_analysis.pointcloud_ops import apply_pointcloud_ops
@@ -74,6 +74,10 @@ def test_geometry_separates_tuft_from_low_clover_and_neighbor():
     assert traits["profile_area_zy_m2"] > 0.0
     assert traits["canopy_envelope_volume_m3"] > 0.0
     assert traits["canopy_occupied_volume_m3"] > 0.0
+    assert traits["canopy_envelope_volume_m3"] > traits["canopy_occupied_volume_m3"]
+    assert traits["geometry_volume_method"] == "slice_convex_hull_v1"
+    assert traits["geometry_footprint_cells"] >= 8
+    assert diag["volume_hull_slices"] > 0
     assert diag["background_source"] == "background_annulus"
     assert diag["selected_points"] < diag["input_points"]
     assert abs(diag["crown_center_x_m"]) < 0.05
@@ -92,8 +96,59 @@ def test_geometry_op_is_non_destructive_and_records_diagnostics():
     assert "plant_height_m" in out.traits
     assert out.diagnostics["pointcloud_ops"]["operation_order"] == ["plant_geometry_trait"]
     diag = out.diagnostics["pointcloud_ops"]["plant_geometry_trait"][0]
-    assert diag["algorithm"] == "crown_connected_projection_v1"
+    assert diag["algorithm"] == "crown_connected_projection_v2"
     assert diag["experimental"] is True
+
+
+def test_dense_returns_in_one_cell_fail_geometry_support_qc():
+    n_points = 240
+    height_m = np.linspace(0.08, 0.55, n_points)
+    df = pd.DataFrame({
+        "X": np.linspace(0.002, 0.008, n_points) * 1000.0,
+        "Y": height_m * 1000.0,
+        "Z": np.linspace(0.002, 0.008, n_points) * 1000.0,
+        "RSSI": np.full(n_points, 55.0),
+        "height_agl": height_m * 1000.0,
+    })
+    op = {
+        **_op_config(),
+        "center_x_m": 0.005,
+        "center_z_m": 0.005,
+        "background_ceiling_m": 0.05,
+    }
+
+    traits, diag = compute_plant_geometry_traits(df, op)
+
+    assert np.isfinite(traits["plant_height_m"])
+    assert traits["geometry_selected_points"] == n_points
+    assert traits["geometry_footprint_cells"] == 1
+    assert traits["geometry_qc_status"] == "fail"
+    assert traits["geometry_confidence"] < 0.45
+    assert "insufficient_footprint_cells_for_review" in diag["qc_flags"]
+    assert "insufficient_height_cells_for_review" in diag["qc_flags"]
+
+
+def test_five_supported_cells_require_review_instead_of_passing():
+    rows = []
+    for x_m in (0.005, 0.030, 0.055, 0.080, 0.105):
+        for height_m in np.linspace(0.08, 0.50, 50):
+            rows.append((x_m, height_m, 0.005, 55.0, height_m))
+    df = pd.DataFrame(rows, columns=["X", "Y", "Z", "RSSI", "height_agl"])
+    df[["X", "Y", "Z", "height_agl"]] *= 1000.0
+    op = {
+        **_op_config(),
+        "center_x_m": 0.005,
+        "center_z_m": 0.005,
+        "background_ceiling_m": 0.05,
+    }
+
+    traits, diag = compute_plant_geometry_traits(df, op)
+
+    assert traits["geometry_footprint_cells"] == 5
+    assert traits["geometry_qc_status"] == "review"
+    assert traits["geometry_confidence"] == pytest.approx(0.74)
+    assert "few_supported_footprint_cells" in diag["qc_flags"]
+    assert "few_supported_height_cells" in diag["qc_flags"]
 
 
 def test_configured_center_rejects_denser_disconnected_neighbor():
@@ -183,6 +238,8 @@ def test_empty_geometry_target_returns_explicit_failed_qc():
     assert np.isnan(traits["plant_height_m"])
     assert traits["geometry_confidence"] == 0.0
     assert traits["geometry_qc_status"] == "fail"
+    assert traits["geometry_qc_flags"] == "empty_target"
+    assert traits["geometry_volume_method"] == "slice_convex_hull_v1"
     assert diag["qc_flags"] == ["empty_target"]
 
 
@@ -191,6 +248,12 @@ def test_invalid_geometry_resolution_fails_clearly():
         compute_plant_geometry_traits(
             _synthetic_fescue_with_clover(),
             {**_op_config(), "footprint_grid_m": 0.0},
+        )
+
+    with pytest.raises(ValueError, match="slice_envelope_method"):
+        compute_plant_geometry_traits(
+            _synthetic_fescue_with_clover(),
+            {**_op_config(), "slice_envelope_method": "not_a_method"},
         )
 
 
@@ -204,3 +267,42 @@ def test_geometry_result_columns_only_appear_when_op_enabled():
     assert "profile_area_xy_m2" in cols
     assert "canopy_envelope_volume_m3" in cols
     assert "geometry_qc_status" in cols
+    assert "geometry_footprint_cells" in cols
+    assert "geometry_qc_flags" in cols
+    assert "geometry_volume_method" in cols
+    assert "target_center_z_m" in cols
+
+
+def test_geometry_result_csv_preserves_support_and_exact_marker_center(tmp_path):
+    cfg = AnalysisConfig(data_dirs=[], calibration_dir=".", cart_id="CART")
+    cfg.pointcloud_ops = [{"op": "plant_geometry_trait"}]
+    results_csv = tmp_path / "results.csv"
+    ensure_results_csv(results_csv, cfg)
+
+    append_trait_rows(
+        results_csv,
+        "MeadowFescue_2026",
+        "2026_05_14",
+        "scan_1",
+        [{
+            "row": "37",
+            "plot": "plant_2",
+            "z_min_m": 1.10,
+            "z_max_m": 1.48,
+            "target_center_z_m": 1.31,
+            "geometry_selected_points": 118,
+            "geometry_footprint_cells": 1,
+            "geometry_height_cells": 1,
+            "geometry_boundary_fraction": 0.0,
+            "geometry_qc_flags": "insufficient_footprint_cells_for_review",
+            "geometry_volume_method": "slice_convex_hull_v1",
+        }],
+        cfg,
+    )
+
+    row = pd.read_csv(results_csv).iloc[0]
+    assert row["target_z_min_m"] == pytest.approx(1.10)
+    assert row["target_z_max_m"] == pytest.approx(1.48)
+    assert row["target_center_z_m"] == pytest.approx(1.31)
+    assert row["geometry_footprint_cells"] == 1
+    assert row["geometry_qc_flags"] == "insufficient_footprint_cells_for_review"

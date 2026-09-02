@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from scipy import ndimage
+from scipy.spatial import ConvexHull, QhullError
 
 
 _TRAIT_KEYS = (
@@ -24,13 +25,36 @@ _TRAIT_KEYS = (
     "canopy_occupied_volume_m3",
     "geometry_confidence",
     "geometry_qc_status",
+    "geometry_selected_points",
+    "geometry_footprint_cells",
+    "geometry_height_cells",
+    "geometry_boundary_fraction",
+    "geometry_qc_flags",
+    "geometry_volume_method",
 )
 
 
-def empty_plant_geometry_traits(status: str = "fail") -> dict[str, Any]:
+def empty_plant_geometry_traits(
+    status: str = "fail",
+    *,
+    diagnostics: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    diagnostics = diagnostics or {}
     traits: dict[str, Any] = {key: float("nan") for key in _TRAIT_KEYS}
     traits["geometry_confidence"] = 0.0
     traits["geometry_qc_status"] = str(status)
+    traits["geometry_selected_points"] = diagnostics.get("selected_points", 0)
+    traits["geometry_footprint_cells"] = diagnostics.get(
+        "selected_footprint_cells",
+        float("nan"),
+    )
+    traits["geometry_height_cells"] = diagnostics.get("height_cell_count", float("nan"))
+    traits["geometry_boundary_fraction"] = diagnostics.get(
+        "boundary_contact_fraction",
+        float("nan"),
+    )
+    traits["geometry_qc_flags"] = ";".join(diagnostics.get("qc_flags", []) or [])
+    traits["geometry_volume_method"] = diagnostics.get("volume_envelope_method", "")
     return traits
 
 
@@ -225,6 +249,54 @@ def _estimate_background_ceiling(
     return max(ceiling, 0.0), int(cell_tops.size), "background_annulus"
 
 
+def _slice_planar_envelope_area(
+    x_m: np.ndarray,
+    z_m: np.ndarray,
+    *,
+    grid_m: float,
+    method: str,
+    close_cells: int,
+) -> tuple[float, bool]:
+    """Return a slice's outer X-Z envelope and whether a hull was used.
+
+    ``grid_union`` measures only occupied projection cells. ``convex_hull``
+    wraps the full grid cells, rather than just their centres, so a one-cell
+    slice still has exactly one cell of area. The hull is intentionally an
+    outer-canopy estimate; occupied voxels remain the conservative observed
+    sampling-volume metric.
+    """
+    cells = np.unique(
+        np.column_stack([_unit_grid(x_m, grid_m), _unit_grid(z_m, grid_m)]),
+        axis=0,
+    )
+    if cells.size == 0:
+        return float("nan"), False
+
+    occupied_area = float(cells.shape[0]) * (grid_m ** 2)
+    if method == "grid_union" or cells.shape[0] < 2:
+        area = _projection_area(
+            x_m,
+            z_m,
+            grid_m=grid_m,
+            close_cells=close_cells,
+        )
+        return max(float(area), occupied_area), False
+
+    lower = cells.astype(float) * grid_m
+    upper = lower + grid_m
+    corners = np.concatenate([
+        np.column_stack([lower[:, 0], lower[:, 1]]),
+        np.column_stack([lower[:, 0], upper[:, 1]]),
+        np.column_stack([upper[:, 0], lower[:, 1]]),
+        np.column_stack([upper[:, 0], upper[:, 1]]),
+    ])
+    try:
+        hull_area = float(ConvexHull(corners).volume)
+    except QhullError:
+        return occupied_area, False
+    return max(hull_area, occupied_area), True
+
+
 def _slice_envelope_volume(
     x_m: np.ndarray,
     z_m: np.ndarray,
@@ -232,29 +304,52 @@ def _slice_envelope_volume(
     *,
     footprint_grid_m: float,
     slice_height_m: float,
-    min_points_per_slice: int,
+    min_points_for_hull: int,
     close_cells: int,
-) -> tuple[float, int]:
+    method: str,
+) -> tuple[float, int, int, int]:
     if height_m.size == 0:
-        return float("nan"), 0
+        return float("nan"), 0, 0, 0
+
+    normalized_method = str(method).strip().lower()
+    if normalized_method not in {"convex_hull", "grid_union"}:
+        raise ValueError(
+            "plant_geometry_trait slice_envelope_method must be "
+            "'convex_hull' or 'grid_union'"
+        )
 
     slice_ids = np.floor(np.maximum(height_m, 0.0) / slice_height_m).astype(np.int64)
     total = 0.0
     used = 0
+    hull_slices = 0
+    fallback_slices = 0
     for slice_id in np.unique(slice_ids):
         mask = slice_ids == slice_id
-        if int(np.sum(mask)) < min_points_per_slice:
-            continue
-        area = _projection_area(
+        slice_method = (
+            normalized_method
+            if int(np.sum(mask)) >= min_points_for_hull
+            else "grid_union"
+        )
+        area, used_hull = _slice_planar_envelope_area(
             x_m[mask],
             z_m[mask],
             grid_m=footprint_grid_m,
+            method=slice_method,
             close_cells=close_cells,
         )
         if np.isfinite(area) and area > 0.0:
             total += area * slice_height_m
             used += 1
-    return (float(total) if used else float("nan")), used
+            if used_hull:
+                hull_slices += 1
+            else:
+                fallback_slices += 1
+    return (
+        float(total) if used else float("nan"),
+        used,
+        hull_slices,
+        fallback_slices,
+    )
 
 
 def _occupied_volume(
@@ -314,21 +409,28 @@ def compute_plant_geometry_traits(
     """
     cfg = dict(op_cfg or {})
     context = dict(context or {})
+    slice_envelope_method = str(cfg.get("slice_envelope_method", "convex_hull")).strip().lower()
+    if slice_envelope_method not in {"convex_hull", "grid_union"}:
+        raise ValueError(
+            "plant_geometry_trait slice_envelope_method must be "
+            "'convex_hull' or 'grid_union'"
+        )
     required = {"X", "Y", "Z"}
     missing = sorted(required.difference(points_df.columns))
     if missing:
         raise ValueError(f"plant_geometry_trait missing required column(s): {missing}")
 
     diagnostics: dict[str, Any] = {
-        "algorithm": "crown_connected_projection_v1",
+        "algorithm": "crown_connected_projection_v2",
         "experimental": True,
         "input_points": int(len(points_df)),
         "selected_points": 0,
         "qc_flags": [],
+        "volume_envelope_method": f"slice_{slice_envelope_method}_v1",
     }
     if points_df.empty:
         diagnostics["qc_flags"] = ["empty_target"]
-        return empty_plant_geometry_traits(), diagnostics
+        return empty_plant_geometry_traits(diagnostics=diagnostics), diagnostics
 
     x_m = pd.to_numeric(points_df["X"], errors="coerce").to_numpy(dtype=float) / 1000.0
     y_m = pd.to_numeric(points_df["Y"], errors="coerce").to_numpy(dtype=float) / 1000.0
@@ -355,7 +457,7 @@ def compute_plant_geometry_traits(
     diagnostics["valid_points"] = int(height_m.size)
     if height_m.size < int(cfg.get("minimum_target_points", 20)):
         diagnostics["qc_flags"] = ["insufficient_target_points"]
-        return empty_plant_geometry_traits(), diagnostics
+        return empty_plant_geometry_traits(diagnostics=diagnostics), diagnostics
 
     footprint_grid_m = _positive_float(cfg, "footprint_grid_m", 0.025)
     profile_grid_m = _positive_float(cfg, "profile_grid_m", footprint_grid_m)
@@ -384,7 +486,7 @@ def compute_plant_geometry_traits(
     diagnostics["roi_points"] = int(h_roi.size)
     if h_roi.size < int(cfg.get("minimum_target_points", 20)):
         diagnostics["qc_flags"] = ["insufficient_points_in_crown_roi"]
-        return empty_plant_geometry_traits(), diagnostics
+        return empty_plant_geometry_traits(diagnostics=diagnostics), diagnostics
 
     background_ceiling_m, background_cells, background_source = _estimate_background_ceiling(
         x_m,
@@ -423,7 +525,7 @@ def compute_plant_geometry_traits(
     candidate_cells = footprint_cells[candidate_cell_mask]
     if candidate_cells.size == 0:
         diagnostics["qc_flags"] = ["no_cells_above_background"]
-        return empty_plant_geometry_traits(), diagnostics
+        return empty_plant_geometry_traits(diagnostics=diagnostics), diagnostics
 
     candidate_id_by_all = np.full(footprint_cells.shape[0], -1, dtype=np.int64)
     candidate_id_by_all[np.where(candidate_cell_mask)[0]] = np.arange(candidate_cells.shape[0])
@@ -471,7 +573,7 @@ def compute_plant_geometry_traits(
     minimum_selected = int(cfg.get("minimum_selected_points", 20))
     if selected_h.size < minimum_selected:
         diagnostics["qc_flags"] = ["insufficient_selected_plant_points"]
-        return empty_plant_geometry_traits(), diagnostics
+        return empty_plant_geometry_traits(diagnostics=diagnostics), diagnostics
 
     cell_top_values = tops[candidate_cell_mask]
     chosen_cell_mask = np.asarray([tuple(cell) in selected_cell_set for cell in candidate_cells])
@@ -496,14 +598,23 @@ def compute_plant_geometry_traits(
         close_cells=profile_close_cells,
         angles_deg=angles,
     )
-    envelope_volume, used_slices = _slice_envelope_volume(
+    envelope_volume, used_slices, hull_slices, fallback_slices = _slice_envelope_volume(
         selected_x,
         selected_z,
         selected_h,
         footprint_grid_m=footprint_grid_m,
         slice_height_m=slice_height_m,
-        min_points_per_slice=max(int(cfg.get("minimum_points_per_slice", 3)), 1),
+        min_points_for_hull=max(
+            int(
+                cfg.get(
+                    "minimum_points_per_hull_slice",
+                    cfg.get("minimum_points_per_slice", 3),
+                )
+            ),
+            1,
+        ),
         close_cells=max(int(cfg.get("slice_close_cells", 0)), 0),
+        method=slice_envelope_method,
     )
     occupied_volume, occupied_voxels = _occupied_volume(
         selected_x,
@@ -526,6 +637,33 @@ def compute_plant_geometry_traits(
 
     flags: list[str] = []
     confidence = 1.0
+    min_footprint_cells_review = max(
+        int(cfg.get("minimum_footprint_cells_for_review", 3)),
+        1,
+    )
+    min_footprint_cells_pass = max(
+        int(cfg.get("minimum_footprint_cells_for_pass", 8)),
+        1,
+    )
+    min_height_cells_review = max(
+        int(cfg.get("minimum_height_cells_for_review", 3)),
+        1,
+    )
+    min_height_cells_pass = max(
+        int(cfg.get("minimum_height_cells_for_pass", 8)),
+        1,
+    )
+    if min_footprint_cells_review > min_footprint_cells_pass:
+        raise ValueError(
+            "plant_geometry_trait minimum_footprint_cells_for_review must be "
+            "<= minimum_footprint_cells_for_pass"
+        )
+    if min_height_cells_review > min_height_cells_pass:
+        raise ValueError(
+            "plant_geometry_trait minimum_height_cells_for_review must be "
+            "<= minimum_height_cells_for_pass"
+        )
+
     weak_background = background_source not in {"background_annulus", "configured"} or (
         background_source == "background_annulus" and background_cells < 5
     )
@@ -535,12 +673,30 @@ def compute_plant_geometry_traits(
     if selected_h.size < 100:
         flags.append("sparse_plant_support")
         confidence -= 0.20
-    if chosen_tops.size < 8:
+    if selected_cells.shape[0] < min_footprint_cells_review:
+        flags.append("insufficient_footprint_cells_for_review")
+    elif selected_cells.shape[0] < min_footprint_cells_pass:
+        flags.append("few_supported_footprint_cells")
+    if chosen_tops.size < min_height_cells_review:
+        flags.append("insufficient_height_cells_for_review")
+    elif chosen_tops.size < min_height_cells_pass:
         flags.append("few_supported_height_cells")
-        confidence -= 0.15
     if boundary_fraction > 0.05:
         flags.append("plant_touches_target_boundary")
         confidence -= min(0.35, boundary_fraction)
+    if (
+        selected_cells.shape[0] < min_footprint_cells_review
+        or chosen_tops.size < min_height_cells_review
+    ):
+        # Dense returns from one or two cells are still not a supported plant.
+        # Keep their values visible, but force QC to fail.
+        confidence = min(confidence, 0.44)
+    elif (
+        selected_cells.shape[0] < min_footprint_cells_pass
+        or chosen_tops.size < min_height_cells_pass
+    ):
+        # Three to seven supported cells can be reviewed but cannot pass.
+        confidence = min(confidence, 0.74)
     confidence = float(np.clip(confidence, 0.0, 1.0))
     qc_status = "pass" if confidence >= 0.75 else "review" if confidence >= 0.45 else "fail"
 
@@ -548,7 +704,10 @@ def compute_plant_geometry_traits(
         "height_cell_count": int(chosen_tops.size),
         "height_quantile": primary_height_q,
         "profile_areas_by_angle": per_angle,
+        "volume_envelope_method": f"slice_{slice_envelope_method}_v1",
         "volume_slices_used": int(used_slices),
+        "volume_hull_slices": int(hull_slices),
+        "volume_fallback_slices": int(fallback_slices),
         "occupied_voxel_count": int(occupied_voxels),
         "radial_boundary_fraction": radial_boundary_fraction,
         "z_boundary_fraction": z_boundary_fraction,
@@ -556,6 +715,10 @@ def compute_plant_geometry_traits(
         "qc_flags": flags,
         "geometry_confidence": confidence,
         "geometry_qc_status": qc_status,
+        "minimum_footprint_cells_for_review": min_footprint_cells_review,
+        "minimum_footprint_cells_for_pass": min_footprint_cells_pass,
+        "minimum_height_cells_for_review": min_height_cells_review,
+        "minimum_height_cells_for_pass": min_height_cells_pass,
     })
     traits = {
         "plant_height_m": plant_height,
@@ -573,5 +736,11 @@ def compute_plant_geometry_traits(
         "canopy_occupied_volume_m3": occupied_volume,
         "geometry_confidence": confidence,
         "geometry_qc_status": qc_status,
+        "geometry_selected_points": int(selected_h.size),
+        "geometry_footprint_cells": int(selected_cells.shape[0]),
+        "geometry_height_cells": int(chosen_tops.size),
+        "geometry_boundary_fraction": boundary_fraction,
+        "geometry_qc_flags": ";".join(flags),
+        "geometry_volume_method": f"slice_{slice_envelope_method}_v1",
     }
     return traits, diagnostics

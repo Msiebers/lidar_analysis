@@ -1294,6 +1294,11 @@ def analyze_plot(
         "target_number": getattr(p, "target_number", p.letter),
         "z_min_m": float(p.min_z) / 1000.0,
         "z_max_m": float(p.max_z) / 1000.0,
+        "target_center_z_m": (
+            None
+            if getattr(p, "target_center_z_mm", None) is None
+            else float(p.target_center_z_mm) / 1000.0
+        ),
         "points": n_points,
         "height_m": height_m,
         "lai_even": lai_even,
@@ -1327,6 +1332,12 @@ def analyze_plot(
         "canopy_occupied_volume_m3": op_traits.get("canopy_occupied_volume_m3", float("nan")),
         "geometry_confidence": op_traits.get("geometry_confidence", float("nan")),
         "geometry_qc_status": op_traits.get("geometry_qc_status"),
+        "geometry_selected_points": op_traits.get("geometry_selected_points", float("nan")),
+        "geometry_footprint_cells": op_traits.get("geometry_footprint_cells", float("nan")),
+        "geometry_height_cells": op_traits.get("geometry_height_cells", float("nan")),
+        "geometry_boundary_fraction": op_traits.get("geometry_boundary_fraction", float("nan")),
+        "geometry_qc_flags": op_traits.get("geometry_qc_flags"),
+        "geometry_volume_method": op_traits.get("geometry_volume_method"),
     }
     result.update(lai_traits)
 
