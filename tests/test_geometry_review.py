@@ -49,6 +49,7 @@ def _review_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
 
 
 def test_geometry_review_uses_exact_result_context_and_writes_audit(tmp_path):
+    pytest.importorskip("matplotlib")
     results_path, pointcloud_dir, config_path = _review_fixture(tmp_path)
 
     image_path, audit_path = build_geometry_review(
