@@ -13,3 +13,7 @@ metrics:
 top_fraction: 0.15
 include_ties: true
 outlier_iqr_multiplier: 1.5
+
+# Researcher-friendly PNGs use Matplotlib's noninteractive Agg backend.
+generate_graphs: true
+graph_dpi: 160

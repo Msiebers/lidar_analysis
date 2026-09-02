@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+import lidar_analysis.research_delivery as research_delivery
 from lidar_analysis.research_delivery import (
     DeliveryConfig,
     build_delivery,
@@ -182,6 +185,7 @@ def experiment(tmp_path: Path) -> tuple[DeliveryConfig, Path, Path, Path]:
         metrics=("points", "point_density_m2", "stand_topo_per_m"),
         top_fraction=0.15,
         include_ties=True,
+        generate_graphs=False,
     )
     return config, raw_root, analysis_root, delivery_root
 
@@ -269,6 +273,122 @@ def test_write_builds_separate_rankings_without_changing_inputs(
     assert not list((target / "2026_05_28" / "pointclouds").glob("plot_*.csv"))
     assert file_hashes(raw_root) == raw_before
     assert file_hashes(analysis_root) == analysis_before
+
+
+def test_graph_enabled_preview_builds_expected_deterministic_inventory(
+    experiment: tuple[DeliveryConfig, Path, Path, Path],
+) -> None:
+    config, _raw_root, _analysis_root, _delivery_root = experiment
+    graph_config = replace(config, generate_graphs=True, graph_dpi=96)
+
+    result = build_delivery(graph_config, run_id="preview_v2_graphs", write=True)
+    target = result.target_dir
+    metrics = graph_config.metrics
+    usable_dates = ("2026_05_14", "2026_05_28")
+    expected = {
+        f"{date}/results/graphs/{metric}_{suffix}.png"
+        for date in usable_dates
+        for metric in metrics
+        for suffix in ("distribution", "top_15_percent")
+    }
+    expected.update(f"summary/graphs/{metric}_by_date.png" for metric in metrics)
+    expected.update(
+        f"summary/latest_date_top_15_percent/graphs/{metric}.png"
+        for metric in metrics
+    )
+
+    graph_paths = sorted(path for path in target.rglob("*.png"))
+    graph_files = [str(path.relative_to(target)) for path in graph_paths]
+    assert len(graph_files) == 18
+    assert set(graph_files) == expected
+    assert all(path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n") for path in graph_paths)
+    assert not (target / "2026_05_27" / "results" / "graphs").exists()
+    assert not (target / ".matplotlib-cache").exists()
+
+    for metric in metrics:
+        source = target / "2026_05_28" / "results" / "graphs" / (
+            f"{metric}_top_15_percent.png"
+        )
+        latest = (
+            target
+            / "summary"
+            / "latest_date_top_15_percent"
+            / "graphs"
+            / f"{metric}.png"
+        )
+        assert source.read_bytes() == latest.read_bytes()
+
+    points_ranking = read_rows(
+        target / "2026_05_28" / "results" / "top_15_percent" / "points.csv"
+    )
+    points_graph = (
+        target
+        / "2026_05_28"
+        / "results"
+        / "graphs"
+        / "points_top_15_percent.png"
+    ).read_bytes()
+    assert {row["_ranking_cutoff"] for row in points_ranking} == {"100.0"}
+    assert b"selected=2, eligible=4, cutoff=100" in points_graph
+
+    manifest = json.loads((target / "delivery_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["graphs_generated"] is True
+    assert manifest["graph_files"] == sorted(expected)
+    assert manifest["graph_files"] == sorted(manifest["graph_files"])
+
+    for metric in metrics:
+        summary_graph = target / "summary" / "graphs" / f"{metric}_by_date.png"
+        assert b"EXPLORATORY ONLY" in summary_graph.read_bytes()
+
+
+def test_graph_disabled_mode_preserves_non_graph_outputs(
+    experiment: tuple[DeliveryConfig, Path, Path, Path],
+) -> None:
+    config, _raw_root, _analysis_root, _delivery_root = experiment
+
+    result = build_delivery(config, run_id="preview_graphs_disabled", write=True)
+
+    assert not list(result.target_dir.rglob("*.png"))
+    assert (
+        result.target_dir
+        / "2026_05_28"
+        / "results"
+        / "top_15_percent"
+        / "points.csv"
+    ).is_file()
+    manifest = json.loads(
+        (result.target_dir / "delivery_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["graphs_generated"] is False
+    assert manifest["graph_files"] == []
+
+
+@pytest.mark.parametrize("graph_dpi", [71, 601, 160.0, True, "160"])
+def test_rejects_invalid_graph_dpi(
+    experiment: tuple[DeliveryConfig, Path, Path, Path], graph_dpi: object
+) -> None:
+    config, _raw_root, _analysis_root, _delivery_root = experiment
+
+    with pytest.raises(ValueError, match="integer from 72 through 600"):
+        replace(config, graph_dpi=graph_dpi).validate()
+
+
+def test_graph_failure_leaves_no_partial_delivery(
+    experiment: tuple[DeliveryConfig, Path, Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, _raw_root, _analysis_root, _delivery_root = experiment
+    graph_config = replace(config, generate_graphs=True)
+    target = graph_config.delivery_root / graph_config.experiment / "graph_failure"
+
+    def fail_graphs(*_args: object, **_kwargs: object) -> list[str]:
+        raise RuntimeError("synthetic graph failure")
+
+    monkeypatch.setattr(research_delivery, "generate_delivery_graphs", fail_graphs)
+    with pytest.raises(RuntimeError, match="synthetic graph failure"):
+        build_delivery(graph_config, run_id="graph_failure", write=True)
+
+    assert not target.exists()
+    assert list(target.parent.iterdir()) == []
 
 
 def test_existing_run_is_never_overwritten(

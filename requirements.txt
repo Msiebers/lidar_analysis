@@ -5,8 +5,7 @@ numpy
 pandas
 PyYAML
 scipy
+matplotlib
 
 # Test runner used by tests/.
 pytest
-
-# Optional: scripts/plot_pcl_summary.py also imports matplotlib.

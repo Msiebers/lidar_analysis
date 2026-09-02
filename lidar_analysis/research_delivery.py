@@ -15,6 +15,8 @@ from typing import Iterable
 
 import yaml
 
+from lidar_analysis.research_delivery_plots import generate_delivery_graphs
+
 
 CANONICAL_RANKING_METRICS = (
     "points",
@@ -37,6 +39,8 @@ class DeliveryConfig:
     top_fraction: float = 0.15
     include_ties: bool = True
     outlier_iqr_multiplier: float = 1.5
+    generate_graphs: bool = True
+    graph_dpi: int = 160
 
     @classmethod
     def from_mapping(cls, data: dict[str, object]) -> "DeliveryConfig":
@@ -54,6 +58,13 @@ class DeliveryConfig:
         if not isinstance(raw_metrics, (list, tuple)) or not raw_metrics:
             raise ValueError("metrics must be a non-empty list")
 
+        raw_generate_graphs = data.get("generate_graphs", True)
+        if not isinstance(raw_generate_graphs, bool):
+            raise ValueError("generate_graphs must be true or false")
+        raw_graph_dpi = data.get("graph_dpi", 160)
+        if isinstance(raw_graph_dpi, bool) or not isinstance(raw_graph_dpi, int):
+            raise ValueError("graph_dpi must be an integer from 72 through 600")
+
         config = cls(
             experiment=str(data["experiment"]).strip(),
             raw_experiment_root=Path(str(data["raw_experiment_root"])).expanduser(),
@@ -63,6 +74,8 @@ class DeliveryConfig:
             top_fraction=float(data.get("top_fraction", 0.15)),
             include_ties=bool(data.get("include_ties", True)),
             outlier_iqr_multiplier=float(data.get("outlier_iqr_multiplier", 1.5)),
+            generate_graphs=raw_generate_graphs,
+            graph_dpi=raw_graph_dpi,
         )
         config.validate()
         return config
@@ -74,6 +87,14 @@ class DeliveryConfig:
             raise ValueError("top_fraction must be greater than 0 and no greater than 1")
         if self.outlier_iqr_multiplier <= 0:
             raise ValueError("outlier_iqr_multiplier must be greater than 0")
+        if not isinstance(self.generate_graphs, bool):
+            raise ValueError("generate_graphs must be true or false")
+        if (
+            isinstance(self.graph_dpi, bool)
+            or not isinstance(self.graph_dpi, int)
+            or not 72 <= self.graph_dpi <= 600
+        ):
+            raise ValueError("graph_dpi must be an integer from 72 through 600")
         if len(set(self.metrics)) != len(self.metrics):
             raise ValueError("metrics must not contain duplicates")
 
@@ -107,6 +128,8 @@ class DeliveryConfig:
             "top_fraction": self.top_fraction,
             "include_ties": self.include_ties,
             "outlier_iqr_multiplier": self.outlier_iqr_multiplier,
+            "generate_graphs": self.generate_graphs,
+            "graph_dpi": self.graph_dpi,
             "test_preview": True,
         }
 
@@ -294,6 +317,17 @@ def as_finite_float(value: object) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) else None
+
+
+def finite_qc_values(rows: list[dict[str, str]], metric: str) -> list[float]:
+    values: list[float] = []
+    for row in rows:
+        if not _row_passes_qc(row):
+            continue
+        value = as_finite_float(row.get(metric))
+        if value is not None:
+            values.append(value)
+    return values
 
 
 def ranking_directory_name(fraction: float) -> str:
@@ -742,6 +776,13 @@ def _write_experiment_summary(
         "- When row-level QC columns are absent, finite numeric values are eligible; this does not imply scientific QC approval.",
         "- Preliminary/confounded geometry metrics are not permitted by this builder.",
         "",
+        "## Graphs",
+        "",
+        f"- Graph generation enabled: {config.generate_graphs}",
+        f"- Graph resolution: {config.graph_dpi} DPI",
+        "- Graphs use the same finite, row-level QC eligibility as the ranking CSVs.",
+        "- Cross-date graphs are marked EXPLORATORY ONLY when historical configuration fingerprints differ or are unavailable for usable dates.",
+        "",
         "## Configuration Consistency",
         "",
         f"- Historical analysis config status: {historical_config_status}",
@@ -757,6 +798,18 @@ def _write_experiment_summary(
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _cross_date_graphs_are_exploratory(inspections: list[DateInspection]) -> bool:
+    usable = [inspection for inspection in inspections if inspection.status == "usable"]
+    fingerprints = {
+        inspection.analysis_config_sha256
+        for inspection in usable
+        if inspection.analysis_config_sha256
+    }
+    return len(fingerprints) != 1 or any(
+        not inspection.analysis_config_sha256 for inspection in usable
+    )
 
 
 def build_delivery(
@@ -807,6 +860,7 @@ def build_delivery(
         )
 
         date_rankings: dict[str, dict[str, list[dict[str, object]]]] = {}
+        date_metric_values: dict[str, dict[str, list[float]]] = {}
         combined_rows: list[dict[str, object]] = []
         missing_metrics: list[dict[str, object]] = []
         for inspection in inspections:
@@ -814,6 +868,10 @@ def build_delivery(
                 staging_dir, inspection, config
             )
             if inspection.status == "usable":
+                date_metric_values[inspection.date] = {
+                    metric: finite_qc_values(inspection.rows, metric)
+                    for metric in config.metrics
+                }
                 combined_rows.extend(
                     {
                         **row,
@@ -865,6 +923,21 @@ def build_delivery(
             latest_usable_date,
             config_sha256,
         )
+        graph_files: list[str] = []
+        if config.generate_graphs:
+            graph_files = generate_delivery_graphs(
+                staging_dir,
+                experiment=config.experiment,
+                metrics=config.metrics,
+                top_fraction=config.top_fraction,
+                ranking_directory=ranking_directory_name(config.top_fraction),
+                include_ties=config.include_ties,
+                graph_dpi=config.graph_dpi,
+                date_metric_values=date_metric_values,
+                date_rankings=date_rankings,
+                latest_usable_date=latest_usable_date,
+                exploratory=_cross_date_graphs_are_exploratory(inspections),
+            )
         manifest = {
             "schema_version": 1,
             "test_preview": True,
@@ -877,6 +950,8 @@ def build_delivery(
             "immutable_inputs_modified": False,
             "source_scans_copied": False,
             "pointclouds_copied": False,
+            "graphs_generated": bool(graph_files),
+            "graph_files": graph_files,
         }
         (staging_dir / "delivery_manifest.json").write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"

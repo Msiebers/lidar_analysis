@@ -11,6 +11,7 @@ numpy
 pandas
 PyYAML
 scipy
+matplotlib
 pytest
 ```
 
@@ -22,7 +23,8 @@ python3 -m pip install -r requirements.txt
 
 The dependency file is intentionally unpinned because the repository does not provide owner-approved package versions or a locked environment. For scientific reproducibility, pin versions after the team validates a known-good environment.
 
-Optional script dependency: `scripts/plot_pcl_summary.py` imports `matplotlib`. Install it separately with `python3 -m pip install matplotlib` if that plotting helper is needed.
+Matplotlib is used by both `scripts/plot_pcl_summary.py` and the optional graph output in
+the standalone researcher-delivery preview builder.
 
 ## Existing Tests
 
