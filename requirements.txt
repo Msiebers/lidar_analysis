@@ -9,4 +9,5 @@ scipy
 # Test runner used by tests/.
 pytest
 
-# Optional: scripts/plot_pcl_summary.py also imports matplotlib.
+# Optional plotting commands, including lidar_analysis.geometry_review and
+# scripts/plot_pcl_summary.py, import matplotlib.

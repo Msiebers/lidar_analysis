@@ -158,6 +158,14 @@ For bounded field validation, repeat `--scan-id SCAN_NAME` on
 `python -m lidar_analysis.run_experiment_date`. The runner rejects missing scan
 IDs and refuses working/output directories located inside the input data tree.
 
+After a bounded run, generate visual QC from the exact marker centre recorded
+in each final result row with `python -m lidar_analysis.geometry_review`. Pass
+the run's `results.csv`, its generated `pointclouds` directory, the experiment
+config, and a separate review output directory. The command recomputes every
+selected target and refuses to write a montage when its metrics differ from the
+final CSV, preventing a stale or reconstructed target centre from being used
+for calibration. Repeat `--target ROW/PLOT` to review only named targets.
+
 No active config keys named `run_mta` or `run_fad` were found. FAD/LAI math exists in `lidar_analysis/lai/fad.py`; the active trait toggle is `run_lai`.
 
 ## Short Experiment Configs
