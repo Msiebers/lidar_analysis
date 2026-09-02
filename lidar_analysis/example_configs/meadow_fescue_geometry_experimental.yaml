@@ -41,6 +41,9 @@ analysis:
       maximum_crown_radius_m: 0.36
       crown_core_radius_m: 0.12
       use_target_center_z: true
+      # Two-row scans split at X=0. Ignore the dense cart/row-split edge while
+      # locating a crown seed, but retain those points after a crown is found.
+      crown_seed_boundary_exclusion_m: 0.10
 
       # Starting resolutions only. Test alternatives against locked reference
       # plants instead of treating these values as biologically calibrated.
@@ -71,6 +74,10 @@ analysis:
       minimum_footprint_cells_for_pass: 8
       minimum_height_cells_for_review: 3
       minimum_height_cells_for_pass: 8
+      # A fescue crown must have two-dimensional support. A one-cell-wide line
+      # can contain millions of repeated returns but is not a bush footprint.
+      minimum_footprint_span_cells_for_review: 2
+      minimum_footprint_span_cells_for_pass: 3
       footprint_connectivity: 8
 
       # The slice-wise convex hull estimates the outer canopy envelope. The

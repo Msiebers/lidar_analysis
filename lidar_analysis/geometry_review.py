@@ -32,6 +32,13 @@ _TEXT_AUDIT_FIELDS = (
     "geometry_qc_flags",
     "geometry_volume_method",
 )
+_OPTIONAL_FLOAT_AUDIT_FIELDS = (
+    "geometry_x_boundary_fraction",
+)
+_OPTIONAL_INTEGER_AUDIT_FIELDS = (
+    "geometry_footprint_span_x_cells",
+    "geometry_footprint_span_z_cells",
+)
 
 
 def _load_geometry_config(config_path: Path) -> dict[str, Any]:
@@ -70,7 +77,13 @@ def _optional_float(row: pd.Series, key: str) -> float | None:
 
 def _geometry_context(row: pd.Series) -> dict[str, float]:
     context: dict[str, float] = {}
-    for key in ("target_z_min_m", "target_z_max_m", "target_center_z_m"):
+    for key in (
+        "target_x_min_m",
+        "target_x_max_m",
+        "target_z_min_m",
+        "target_z_max_m",
+        "target_center_z_m",
+    ):
         value = _optional_float(row, key)
         if value is not None:
             context[key] = value
@@ -144,6 +157,9 @@ def _audit_target(
         "outer_point_floor_m": diagnostics.get("outer_point_floor_m"),
         "radial_boundary_fraction": diagnostics.get("radial_boundary_fraction"),
         "z_boundary_fraction": diagnostics.get("z_boundary_fraction"),
+        "x_boundary_fraction": diagnostics.get("x_boundary_fraction"),
+        "footprint_span_x_cells": diagnostics.get("footprint_span_x_cells"),
+        "footprint_span_z_cells": diagnostics.get("footprint_span_z_cells"),
     }
     mismatches: list[str] = []
 
@@ -157,7 +173,36 @@ def _audit_target(
         if not np.isclose(result_value, recomputed_value, rtol=0.0, atol=tolerance, equal_nan=True):
             mismatches.append(key)
 
+    for key in _OPTIONAL_FLOAT_AUDIT_FIELDS:
+        if key not in row.index or key not in traits:
+            continue
+        result_value = float(row[key])
+        recomputed_value = float(traits[key])
+        difference = abs(result_value - recomputed_value)
+        audit[f"result_{key}"] = result_value
+        audit[f"recomputed_{key}"] = recomputed_value
+        audit[f"absolute_difference_{key}"] = difference
+        if not np.isclose(
+            result_value,
+            recomputed_value,
+            rtol=0.0,
+            atol=tolerance,
+            equal_nan=True,
+        ):
+            mismatches.append(key)
+
     for key in _INTEGER_AUDIT_FIELDS:
+        result_value = _normalized_integer(row.get(key))
+        recomputed_value = _normalized_integer(traits.get(key))
+        audit[f"result_{key}"] = result_value
+        audit[f"recomputed_{key}"] = recomputed_value
+        both_missing = pd.isna(result_value) and pd.isna(recomputed_value)
+        if not both_missing and result_value != recomputed_value:
+            mismatches.append(key)
+
+    for key in _OPTIONAL_INTEGER_AUDIT_FIELDS:
+        if key not in row.index or key not in traits:
+            continue
         result_value = _normalized_integer(row.get(key))
         recomputed_value = _normalized_integer(traits.get(key))
         audit[f"result_{key}"] = result_value
@@ -343,6 +388,10 @@ def _render_review(
             boundary = _optional_float(row, key)
             if boundary is not None:
                 plan_ax.axhline(boundary, color="black", ls=":", lw=0.8, alpha=0.65)
+        for key in ("target_x_min_m", "target_x_max_m"):
+            boundary = _optional_float(row, key)
+            if boundary is not None:
+                plan_ax.axvline(boundary, color="black", ls=":", lw=0.8, alpha=0.65)
         plan_ax.set_xlabel("X across row (m)")
         plan_ax.set_ylabel("Z travel direction (m)")
         plan_ax.set_aspect("equal", adjustable="box")
@@ -351,7 +400,9 @@ def _render_review(
             f"QC={traits['geometry_qc_status']}, height={traits['plant_height_m']:.3f} m, "
             f"footprint={traits['footprint_area_m2']:.4f} m², "
             f"points={int(traits['geometry_selected_points'])}, "
-            f"cells={int(traits['geometry_footprint_cells'])}"
+            f"cells={int(traits['geometry_footprint_cells'])}, "
+            f"span={int(traits.get('geometry_footprint_span_x_cells', 0))}×"
+            f"{int(traits.get('geometry_footprint_span_z_cells', 0))}"
         )
         plan_ax.legend(loc="upper left", fontsize=6.5, framealpha=0.82)
 
@@ -439,6 +490,21 @@ def build_geometry_review(
         pointcloud_path = _pointcloud_path(pointcloud_dir, row)
         points = _read_pipeline_pointcloud(pointcloud_path)
         geometry_context = _geometry_context(row)
+        if (
+            "target_x_min_m" not in geometry_context
+            and "target_x_max_m" not in geometry_context
+        ):
+            x_m = (
+                pd.to_numeric(points["X"], errors="coerce").to_numpy(dtype=float)
+                / 1000.0
+            )
+            finite_x = x_m[np.isfinite(x_m)]
+            if finite_x.size:
+                boundary_tolerance_m = 1e-9
+                if float(np.min(finite_x)) >= -boundary_tolerance_m:
+                    geometry_context["target_x_min_m"] = 0.0
+                elif float(np.max(finite_x)) <= boundary_tolerance_m:
+                    geometry_context["target_x_max_m"] = 0.0
         geometry_context["include_review_geometry"] = True
         traits, diagnostics = compute_plant_geometry_traits(
             points,

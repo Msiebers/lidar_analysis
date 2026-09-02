@@ -524,9 +524,14 @@ def phenotype_columns(cfg: AnalysisConfig) -> list[str]:
             "geometry_selected_points",
             "geometry_footprint_cells",
             "geometry_height_cells",
+            "geometry_footprint_span_x_cells",
+            "geometry_footprint_span_z_cells",
             "geometry_boundary_fraction",
+            "geometry_x_boundary_fraction",
             "geometry_qc_flags",
             "geometry_volume_method",
+            "target_x_min_m",
+            "target_x_max_m",
             "target_z_min_m",
             "target_z_max_m",
             "target_center_z_m",
@@ -624,9 +629,20 @@ def append_trait_rows(
                 "geometry_selected_points": rec.get("geometry_selected_points"),
                 "geometry_footprint_cells": rec.get("geometry_footprint_cells"),
                 "geometry_height_cells": rec.get("geometry_height_cells"),
+                "geometry_footprint_span_x_cells": rec.get(
+                    "geometry_footprint_span_x_cells"
+                ),
+                "geometry_footprint_span_z_cells": rec.get(
+                    "geometry_footprint_span_z_cells"
+                ),
                 "geometry_boundary_fraction": rec.get("geometry_boundary_fraction"),
+                "geometry_x_boundary_fraction": rec.get(
+                    "geometry_x_boundary_fraction"
+                ),
                 "geometry_qc_flags": rec.get("geometry_qc_flags"),
                 "geometry_volume_method": rec.get("geometry_volume_method"),
+                "target_x_min_m": rec.get("target_x_min_m"),
+                "target_x_max_m": rec.get("target_x_max_m"),
                 "target_z_min_m": rec.get("z_min_m"),
                 "target_z_max_m": rec.get("z_max_m"),
                 "target_center_z_m": rec.get("target_center_z_m"),

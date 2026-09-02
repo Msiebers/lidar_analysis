@@ -28,7 +28,10 @@ _TRAIT_KEYS = (
     "geometry_selected_points",
     "geometry_footprint_cells",
     "geometry_height_cells",
+    "geometry_footprint_span_x_cells",
+    "geometry_footprint_span_z_cells",
     "geometry_boundary_fraction",
+    "geometry_x_boundary_fraction",
     "geometry_qc_flags",
     "geometry_volume_method",
 )
@@ -49,8 +52,20 @@ def empty_plant_geometry_traits(
         float("nan"),
     )
     traits["geometry_height_cells"] = diagnostics.get("height_cell_count", float("nan"))
+    traits["geometry_footprint_span_x_cells"] = diagnostics.get(
+        "footprint_span_x_cells",
+        float("nan"),
+    )
+    traits["geometry_footprint_span_z_cells"] = diagnostics.get(
+        "footprint_span_z_cells",
+        float("nan"),
+    )
     traits["geometry_boundary_fraction"] = diagnostics.get(
         "boundary_contact_fraction",
+        float("nan"),
+    )
+    traits["geometry_x_boundary_fraction"] = diagnostics.get(
+        "x_boundary_fraction",
         float("nan"),
     )
     traits["geometry_qc_flags"] = ";".join(diagnostics.get("qc_flags", []) or [])
@@ -163,10 +178,30 @@ def _infer_crown_center(
     high_quantile = float(cfg.get("crown_seed_height_quantile", 0.85))
     if not 0.0 <= high_quantile <= 1.0:
         raise ValueError("plant_geometry_trait crown_seed_height_quantile must be between 0 and 1")
-    threshold = float(np.quantile(height_m, high_quantile))
-    high = height_m >= threshold
+
+    boundary_exclusion_m = float(cfg.get("crown_seed_boundary_exclusion_m", 0.0))
+    if not np.isfinite(boundary_exclusion_m) or boundary_exclusion_m < 0.0:
+        raise ValueError(
+            "plant_geometry_trait crown_seed_boundary_exclusion_m must be >= 0"
+        )
+    seed_eligible = np.ones(height_m.size, dtype=bool)
+    boundary_aware_seed = False
+    target_x_min_m = context.get("target_x_min_m")
+    target_x_max_m = context.get("target_x_max_m")
+    if boundary_exclusion_m > 0.0 and target_x_min_m is not None:
+        seed_eligible &= x_m >= float(target_x_min_m) + boundary_exclusion_m
+        boundary_aware_seed = True
+    if boundary_exclusion_m > 0.0 and target_x_max_m is not None:
+        seed_eligible &= x_m <= float(target_x_max_m) - boundary_exclusion_m
+        boundary_aware_seed = True
+    if int(np.sum(seed_eligible)) < 3:
+        seed_eligible = np.ones(height_m.size, dtype=bool)
+        boundary_aware_seed = False
+
+    threshold = float(np.quantile(height_m[seed_eligible], high_quantile))
+    high = seed_eligible & (height_m >= threshold)
     if int(np.sum(high)) < 3:
-        high = np.ones_like(height_m, dtype=bool)
+        high = seed_eligible.copy()
 
     _, inverse, counts = np.unique(
         np.column_stack([_unit_grid(x_m[high], grid_m), _unit_grid(z_m[high], grid_m)]),
@@ -197,9 +232,20 @@ def _infer_crown_center(
 
     if cfg.get("center_x_m") is not None:
         return center_x, center_z, f"configured_x+{z_source}"
+    x_source = (
+        "boundary_aware_high_point_density_x"
+        if boundary_aware_seed
+        else "high_point_density_x"
+    )
     if z_source == "high_point_density_z":
-        return center_x, center_z, "high_point_density"
-    return center_x, center_z, f"high_point_density_x+{z_source}"
+        return (
+            center_x,
+            center_z,
+            "boundary_aware_high_point_density"
+            if boundary_aware_seed
+            else "high_point_density",
+        )
+    return center_x, center_z, f"{x_source}+{z_source}"
 
 
 def _estimate_background_ceiling(
@@ -421,7 +467,7 @@ def compute_plant_geometry_traits(
         raise ValueError(f"plant_geometry_trait missing required column(s): {missing}")
 
     diagnostics: dict[str, Any] = {
-        "algorithm": "crown_connected_projection_v2",
+        "algorithm": "crown_connected_projection_v3",
         "experimental": True,
         "input_points": int(len(points_df)),
         "selected_points": 0,
@@ -476,6 +522,9 @@ def compute_plant_geometry_traits(
         "voxel_size_m": voxel_size_m,
         "slice_height_m": slice_height_m,
         "maximum_crown_radius_m": max_radius_m,
+        "crown_seed_boundary_exclusion_m": float(
+            cfg.get("crown_seed_boundary_exclusion_m", 0.0)
+        ),
     })
 
     radius = np.hypot(x_m - center_x_m, z_m - center_z_m)
@@ -566,8 +615,20 @@ def compute_plant_geometry_traits(
     selected_x = x_roi[selected_roi_mask]
     selected_z = z_roi[selected_roi_mask]
     selected_h = h_roi[selected_roi_mask]
+    if selected_cells.size:
+        footprint_span_x_cells = int(
+            selected_cells[:, 0].max() - selected_cells[:, 0].min() + 1
+        )
+        footprint_span_z_cells = int(
+            selected_cells[:, 1].max() - selected_cells[:, 1].min() + 1
+        )
+    else:
+        footprint_span_x_cells = 0
+        footprint_span_z_cells = 0
     diagnostics["selected_points"] = int(selected_h.size)
     diagnostics["selected_footprint_cells"] = int(selected_cells.shape[0])
+    diagnostics["footprint_span_x_cells"] = footprint_span_x_cells
+    diagnostics["footprint_span_z_cells"] = footprint_span_z_cells
     diagnostics["outer_point_floor_m"] = outer_floor_m
     if bool(context.get("include_review_geometry", False)):
         # These arrays can be large, so expose them only to explicit review
@@ -642,7 +703,22 @@ def compute_plant_geometry_traits(
             selected_z >= float(z_max_m) - footprint_grid_m
         )
         z_boundary_fraction = float(np.mean(near_z))
-    boundary_fraction = max(radial_boundary_fraction, z_boundary_fraction)
+
+    x_boundary_fraction = 0.0
+    x_min_m = context.get("target_x_min_m")
+    x_max_m = context.get("target_x_max_m")
+    near_x = np.zeros(selected_x.size, dtype=bool)
+    if x_min_m is not None:
+        near_x |= selected_x <= float(x_min_m) + footprint_grid_m
+    if x_max_m is not None:
+        near_x |= selected_x >= float(x_max_m) - footprint_grid_m
+    if x_min_m is not None or x_max_m is not None:
+        x_boundary_fraction = float(np.mean(near_x))
+    boundary_fraction = max(
+        radial_boundary_fraction,
+        z_boundary_fraction,
+        x_boundary_fraction,
+    )
 
     flags: list[str] = []
     confidence = 1.0
@@ -662,6 +738,14 @@ def compute_plant_geometry_traits(
         int(cfg.get("minimum_height_cells_for_pass", 8)),
         1,
     )
+    min_footprint_span_review = max(
+        int(cfg.get("minimum_footprint_span_cells_for_review", 2)),
+        1,
+    )
+    min_footprint_span_pass = max(
+        int(cfg.get("minimum_footprint_span_cells_for_pass", 3)),
+        1,
+    )
     if min_footprint_cells_review > min_footprint_cells_pass:
         raise ValueError(
             "plant_geometry_trait minimum_footprint_cells_for_review must be "
@@ -672,6 +756,20 @@ def compute_plant_geometry_traits(
             "plant_geometry_trait minimum_height_cells_for_review must be "
             "<= minimum_height_cells_for_pass"
         )
+    if min_footprint_span_review > min_footprint_span_pass:
+        raise ValueError(
+            "plant_geometry_trait minimum_footprint_span_cells_for_review must be "
+            "<= minimum_footprint_span_cells_for_pass"
+        )
+
+    insufficient_footprint_span = (
+        footprint_span_x_cells < min_footprint_span_review
+        or footprint_span_z_cells < min_footprint_span_review
+    )
+    narrow_footprint_span = (
+        footprint_span_x_cells < min_footprint_span_pass
+        or footprint_span_z_cells < min_footprint_span_pass
+    )
 
     weak_background = background_source not in {"background_annulus", "configured"} or (
         background_source == "background_annulus" and background_cells < 5
@@ -690,12 +788,21 @@ def compute_plant_geometry_traits(
         flags.append("insufficient_height_cells_for_review")
     elif chosen_tops.size < min_height_cells_pass:
         flags.append("few_supported_height_cells")
-    if boundary_fraction > 0.05:
+    if insufficient_footprint_span:
+        flags.append("insufficient_footprint_span_for_review")
+    elif narrow_footprint_span:
+        flags.append("narrow_footprint_span")
+    if x_boundary_fraction > 0.05:
+        flags.append("plant_touches_row_boundary")
+    if radial_boundary_fraction > 0.05 or z_boundary_fraction > 0.05:
         flags.append("plant_touches_target_boundary")
+    if boundary_fraction > 0.05:
         confidence -= min(0.35, boundary_fraction)
+        confidence = min(confidence, 0.74)
     if (
         selected_cells.shape[0] < min_footprint_cells_review
         or chosen_tops.size < min_height_cells_review
+        or insufficient_footprint_span
     ):
         # Dense returns from one or two cells are still not a supported plant.
         # Keep their values visible, but force QC to fail.
@@ -703,6 +810,7 @@ def compute_plant_geometry_traits(
     elif (
         selected_cells.shape[0] < min_footprint_cells_pass
         or chosen_tops.size < min_height_cells_pass
+        or narrow_footprint_span
     ):
         # Three to seven supported cells can be reviewed but cannot pass.
         confidence = min(confidence, 0.74)
@@ -720,6 +828,7 @@ def compute_plant_geometry_traits(
         "occupied_voxel_count": int(occupied_voxels),
         "radial_boundary_fraction": radial_boundary_fraction,
         "z_boundary_fraction": z_boundary_fraction,
+        "x_boundary_fraction": x_boundary_fraction,
         "boundary_contact_fraction": boundary_fraction,
         "qc_flags": flags,
         "geometry_confidence": confidence,
@@ -728,6 +837,8 @@ def compute_plant_geometry_traits(
         "minimum_footprint_cells_for_pass": min_footprint_cells_pass,
         "minimum_height_cells_for_review": min_height_cells_review,
         "minimum_height_cells_for_pass": min_height_cells_pass,
+        "minimum_footprint_span_cells_for_review": min_footprint_span_review,
+        "minimum_footprint_span_cells_for_pass": min_footprint_span_pass,
     })
     traits = {
         "plant_height_m": plant_height,
@@ -748,7 +859,10 @@ def compute_plant_geometry_traits(
         "geometry_selected_points": int(selected_h.size),
         "geometry_footprint_cells": int(selected_cells.shape[0]),
         "geometry_height_cells": int(chosen_tops.size),
+        "geometry_footprint_span_x_cells": footprint_span_x_cells,
+        "geometry_footprint_span_z_cells": footprint_span_z_cells,
         "geometry_boundary_fraction": boundary_fraction,
+        "geometry_x_boundary_fraction": x_boundary_fraction,
         "geometry_qc_flags": ";".join(flags),
         "geometry_volume_method": f"slice_{slice_envelope_method}_v1",
     }

@@ -120,7 +120,7 @@ def test_geometry_op_is_non_destructive_and_records_diagnostics():
     assert "plant_height_m" in out.traits
     assert out.diagnostics["pointcloud_ops"]["operation_order"] == ["plant_geometry_trait"]
     diag = out.diagnostics["pointcloud_ops"]["plant_geometry_trait"][0]
-    assert diag["algorithm"] == "crown_connected_projection_v2"
+    assert diag["algorithm"] == "crown_connected_projection_v3"
     assert diag["experimental"] is True
 
 
@@ -154,9 +154,16 @@ def test_dense_returns_in_one_cell_fail_geometry_support_qc():
 
 def test_five_supported_cells_require_review_instead_of_passing():
     rows = []
-    for x_m in (0.005, 0.030, 0.055, 0.080, 0.105):
+    cells = (
+        (0.005, 0.005),
+        (0.030, 0.005),
+        (0.055, 0.005),
+        (0.005, 0.030),
+        (0.030, 0.030),
+    )
+    for x_m, z_m in cells:
         for height_m in np.linspace(0.08, 0.50, 50):
-            rows.append((x_m, height_m, 0.005, 55.0, height_m))
+            rows.append((x_m, height_m, z_m, 55.0, height_m))
     df = pd.DataFrame(rows, columns=["X", "Y", "Z", "RSSI", "height_agl"])
     df[["X", "Y", "Z", "height_agl"]] *= 1000.0
     op = {
@@ -173,6 +180,64 @@ def test_five_supported_cells_require_review_instead_of_passing():
     assert traits["geometry_confidence"] == pytest.approx(0.74)
     assert "few_supported_footprint_cells" in diag["qc_flags"]
     assert "few_supported_height_cells" in diag["qc_flags"]
+    assert "narrow_footprint_span" in diag["qc_flags"]
+
+
+def test_one_cell_wide_footprint_fails_even_with_many_supported_cells():
+    rows = []
+    for z_m in np.arange(0.005, 0.255, 0.025):
+        for height_m in np.linspace(0.08, 0.50, 50):
+            rows.append((0.005, height_m, z_m, 55.0, height_m))
+    df = pd.DataFrame(rows, columns=["X", "Y", "Z", "RSSI", "height_agl"])
+    df[["X", "Y", "Z", "height_agl"]] *= 1000.0
+    op = {
+        **_op_config(),
+        "center_x_m": 0.005,
+        "center_z_m": 0.005,
+        "background_ceiling_m": 0.05,
+    }
+
+    traits, diag = compute_plant_geometry_traits(df, op)
+
+    assert traits["geometry_footprint_cells"] == 10
+    assert traits["geometry_footprint_span_x_cells"] == 1
+    assert traits["geometry_footprint_span_z_cells"] == 10
+    assert traits["geometry_qc_status"] == "fail"
+    assert traits["geometry_confidence"] < 0.45
+    assert "insufficient_footprint_span_for_review" in diag["qc_flags"]
+
+
+def test_boundary_aware_seed_ignores_dense_row_split_artifact():
+    plant = _synthetic_fescue_with_clover()
+    plant["X"] += 320.0
+    n_artifact = 2_000
+    artifact_height_m = np.linspace(0.20, 0.65, n_artifact)
+    artifact = pd.DataFrame({
+        "X": np.full(n_artifact, 5.0),
+        "Y": artifact_height_m * 1000.0,
+        "Z": np.linspace(-0.01, 0.01, n_artifact) * 1000.0,
+        "RSSI": np.full(n_artifact, 60.0),
+        "height_agl": artifact_height_m * 1000.0,
+    })
+    df = pd.concat([plant, artifact], ignore_index=True)
+    op = {
+        **_op_config(),
+        "crown_seed_boundary_exclusion_m": 0.10,
+    }
+
+    _, diag = compute_plant_geometry_traits(
+        df,
+        op,
+        context={
+            "target_x_min_m": 0.0,
+            "target_center_z_m": 0.0,
+        },
+    )
+
+    assert 0.20 <= diag["crown_center_x_m"] <= 0.45
+    assert diag["crown_center_source"].startswith(
+        "boundary_aware_high_point_density_x"
+    )
 
 
 def test_configured_center_rejects_denser_disconnected_neighbor():
@@ -292,9 +357,14 @@ def test_geometry_result_columns_only_appear_when_op_enabled():
     assert "canopy_envelope_volume_m3" in cols
     assert "geometry_qc_status" in cols
     assert "geometry_footprint_cells" in cols
+    assert "geometry_footprint_span_x_cells" in cols
+    assert "geometry_footprint_span_z_cells" in cols
+    assert "geometry_x_boundary_fraction" in cols
     assert "geometry_qc_flags" in cols
     assert "geometry_volume_method" in cols
     assert "target_center_z_m" in cols
+    assert "target_x_min_m" in cols
+    assert "target_x_max_m" in cols
 
 
 def test_geometry_result_csv_preserves_support_and_exact_marker_center(tmp_path):
@@ -314,10 +384,15 @@ def test_geometry_result_csv_preserves_support_and_exact_marker_center(tmp_path)
             "z_min_m": 1.10,
             "z_max_m": 1.48,
             "target_center_z_m": 1.31,
+            "target_x_min_m": 0.0,
+            "target_x_max_m": None,
             "geometry_selected_points": 118,
             "geometry_footprint_cells": 1,
             "geometry_height_cells": 1,
+            "geometry_footprint_span_x_cells": 1,
+            "geometry_footprint_span_z_cells": 1,
             "geometry_boundary_fraction": 0.0,
+            "geometry_x_boundary_fraction": 1.0,
             "geometry_qc_flags": "insufficient_footprint_cells_for_review",
             "geometry_volume_method": "slice_convex_hull_v1",
         }],
@@ -328,5 +403,10 @@ def test_geometry_result_csv_preserves_support_and_exact_marker_center(tmp_path)
     assert row["target_z_min_m"] == pytest.approx(1.10)
     assert row["target_z_max_m"] == pytest.approx(1.48)
     assert row["target_center_z_m"] == pytest.approx(1.31)
+    assert row["target_x_min_m"] == pytest.approx(0.0)
+    assert pd.isna(row["target_x_max_m"])
+    assert row["geometry_footprint_span_x_cells"] == 1
+    assert row["geometry_footprint_span_z_cells"] == 1
+    assert row["geometry_x_boundary_fraction"] == pytest.approx(1.0)
     assert row["geometry_footprint_cells"] == 1
     assert row["geometry_qc_flags"] == "insufficient_footprint_cells_for_review"

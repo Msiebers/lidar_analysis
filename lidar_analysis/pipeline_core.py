@@ -1091,10 +1091,19 @@ def analyze_plot(
 
     mask = z_mask & x_mask
 
+    target_x_min_m = None
+    target_x_max_m = None
     if getattr(p, "side_sign", None) == "positive":
         mask = mask & (data[:, 0] > 0)
+        target_x_min_m = 0.0
     elif getattr(p, "side_sign", None) == "negative":
         mask = mask & (data[:, 0] < 0)
+        target_x_max_m = 0.0
+    elif is_two_row_scan:
+        if str(p.row) == str(row_options[0]):
+            target_x_min_m = 0.0
+        elif str(p.row) == str(row_options[1]):
+            target_x_max_m = 0.0
 
     p.cloud = np.empty((0, 4), dtype=np.float32)
     n_points = 0
@@ -1164,6 +1173,8 @@ def analyze_plot(
                     "additional_scan_negative_side_label": str(getattr(cfg, "additional_scan_negative_side_label", "left")),
                     "target_z_min_m": float(p.min_z) / 1000.0,
                     "target_z_max_m": float(p.max_z) / 1000.0,
+                    "target_x_min_m": target_x_min_m,
+                    "target_x_max_m": target_x_max_m,
                     "target_center_z_m": (
                         None
                         if getattr(p, "target_center_z_mm", None) is None
@@ -1294,6 +1305,8 @@ def analyze_plot(
         "target_number": getattr(p, "target_number", p.letter),
         "z_min_m": float(p.min_z) / 1000.0,
         "z_max_m": float(p.max_z) / 1000.0,
+        "target_x_min_m": target_x_min_m,
+        "target_x_max_m": target_x_max_m,
         "target_center_z_m": (
             None
             if getattr(p, "target_center_z_mm", None) is None
@@ -1335,7 +1348,19 @@ def analyze_plot(
         "geometry_selected_points": op_traits.get("geometry_selected_points", float("nan")),
         "geometry_footprint_cells": op_traits.get("geometry_footprint_cells", float("nan")),
         "geometry_height_cells": op_traits.get("geometry_height_cells", float("nan")),
+        "geometry_footprint_span_x_cells": op_traits.get(
+            "geometry_footprint_span_x_cells",
+            float("nan"),
+        ),
+        "geometry_footprint_span_z_cells": op_traits.get(
+            "geometry_footprint_span_z_cells",
+            float("nan"),
+        ),
         "geometry_boundary_fraction": op_traits.get("geometry_boundary_fraction", float("nan")),
+        "geometry_x_boundary_fraction": op_traits.get(
+            "geometry_x_boundary_fraction",
+            float("nan"),
+        ),
         "geometry_qc_flags": op_traits.get("geometry_qc_flags"),
         "geometry_volume_method": op_traits.get("geometry_volume_method"),
     }
