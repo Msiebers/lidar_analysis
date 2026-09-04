@@ -11,24 +11,6 @@ import numpy as np
 from .union_find import UnionFind
 
 
-def get(im, p):
-    return im[p[0]][p[1]]
-
-
-def iter_neighbors(p, w, h):
-    # Kept for API/back-compat in case anything imports it directly.
-    y, x = p
-    neigh = [(y + j, x + i) for i in [-1, 0, 1] for j in [-1, 0, 1]]
-    for j, i in neigh:
-        if j < 0 or j >= h:
-            continue
-        if i < 0 or i >= w:
-            continue
-        if j == y and i == x:
-            continue
-        yield j, i
-
-
 _OFFSETS = ((-1, -1), (-1, 0), (-1, 1),
             (0, -1),           (0, 1),
             (1, -1),  (1, 0),  (1, 1))
