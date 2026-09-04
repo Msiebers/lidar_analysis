@@ -4,7 +4,12 @@ import pytest
 
 from lidar_analysis.analysis_target import AnalysisTarget
 from lidar_analysis.pointcloud_ops import apply_pointcloud_ops
-from lidar_analysis.pipeline_core import normalize_rssi_by_phi_zscore, Plot
+from lidar_analysis.pipeline_core import (
+    normalize_rssi_by_phi_percentile,
+    normalize_rssi_by_phi_zscore,
+    transform_rssi_norm,
+    Plot,
+)
 from lidar_analysis.topology.stand_count import topology_stand_count
 
 
@@ -127,6 +132,54 @@ def test_zscore_square_root_transform_and_source_has_no_clip_call():
     assert 'np.clip' not in src
 
 
+def test_rssi_normalization_method_and_transform_are_independent():
+    phi = np.zeros(4, dtype=np.float32)
+    rssi = np.array([10.0, 20.0, 20.0, 40.0], dtype=np.float32)
+    percentile = normalize_rssi_by_phi_percentile(phi, rssi, transform="none")
+    np.testing.assert_allclose(percentile, [0.0, 0.5, 0.5, 1.0])
+
+    zscore = normalize_rssi_by_phi_zscore(phi, rssi, transform="none")
+    legacy = normalize_rssi_by_phi_zscore(phi, rssi)
+    np.testing.assert_allclose(legacy, transform_rssi_norm(zscore, "sqrt"))
+    np.testing.assert_allclose(transform_rssi_norm(zscore, "log"), transform_rssi_norm(zscore, "log1p"))
+    np.testing.assert_allclose(transform_rssi_norm(zscore, "exp"), transform_rssi_norm(zscore, "exponential"))
+
+
+def test_canopy_volume_2p5d_uses_height_agl_and_is_non_mutating():
+    df = pd.DataFrame({
+        "X": [0.0, 1.0, 20.0],
+        "Y": [900.0, 900.0, 900.0],
+        "Z": [0.0, 1.0, 0.0],
+        "RSSI": [1.0, 2.0, 3.0],
+        "height_agl": [100.0, 300.0, 400.0],
+    })
+    target = _target(df)
+    before = target.current_points.copy(deep=True)
+    out = apply_pointcloud_ops(target, [{
+        "op": "canopy_volume_2p5d", "cell_size_m": 0.01, "height_percentile": 50.0,
+    }])
+    pd.testing.assert_frame_equal(out.current_points, before)
+    assert out.traits["canopy_volume_2p5d_m3"] == pytest.approx(0.00006)
+    assert out.traits["canopy_volume_2p5d_m3_m2"] == pytest.approx(0.2)
+    assert out.traits["canopy_volume_2p5d_occupied_cells"] == 2
+    assert out.traits["canopy_volume_2p5d_total_cells"] == 3
+    assert out.traits["canopy_volume_2p5d_observed_area_m2"] == pytest.approx(0.0002)
+    assert out.traits["canopy_volume_2p5d_coverage_fraction"] == pytest.approx(2 / 3)
+    diag = out.diagnostics["pointcloud_ops"]["canopy_volume_2p5d"][0]
+    assert diag["height_source"] == "height_agl"
+
+
+def test_canopy_volume_2p5d_falls_back_to_y_and_respects_yaml_order():
+    df = pd.DataFrame({"X": [0.0, 0.0], "Y": [100.0, 500.0], "Z": [0.0, 0.0], "RSSI": [1.0, 2.0]})
+    out = apply_pointcloud_ops(_target(df), [
+        {"op": "height_range_filter", "max_m": 0.2},
+        {"op": "canopy_volume_2p5d", "cell_size_m": 0.01, "height_percentile": 95.0},
+    ])
+    assert out.traits["canopy_volume_2p5d_m3"] == pytest.approx(0.00001)
+    assert out.diagnostics["pointcloud_ops"]["operation_order"] == ["height_range_filter", "canopy_volume_2p5d"]
+    assert out.diagnostics["pointcloud_ops"]["canopy_volume_2p5d"][0]["height_source"] == "Y"
+
+
 def test_topology_stand_count_direct_simple_meter_cloud():
     d = pd.DataFrame({"x":[-0.04,-0.02,0.02,0.04],"y":[0.1,0.1,0.1,0.1],"z":[0.0,0.1,0.0,0.1]})
     count, points = topology_stand_count(d, min_persistence=0.35)
@@ -179,7 +232,32 @@ def test_topology_trait_whole_plot_side_split_traits():
     assert "topo_count_whole" in out.traits
     assert "topo_count_left" in out.traits
     assert "topo_count_right" in out.traits
+    assert "topo_raw_count" in out.traits
     assert out.diagnostics["pointcloud_ops"]["topology_trait"][0]["side_split_applied"] is True
+
+
+def test_topology_trait_side_specific_target_overrides_internal_side_split():
+    df = pd.DataFrame({"X":[10.0,20.0],"Y":[100.0,100.0],"Z":[0.0,100.0],"RSSI":[1.0,2.0]})
+    t = AnalysisTarget.from_points(
+        target_id='forced_left',
+        target_type='plot',
+        scan_id='2_1',
+        points_df=df,
+        source_indices=np.array([0,1]),
+        row='left',
+        side='left',
+    )
+
+    out = apply_pointcloud_ops(t, [{"op":"topology_trait","split_sides_for_single_plot":True}])
+    diag = out.diagnostics["pointcloud_ops"]["topology_trait"][0]
+
+    assert diag["side_split_requested"] is True
+    assert diag["already_side_specific"] is True
+    assert diag["side_split_applied"] is False
+    assert np.isfinite(float(out.traits["topo_count"]))
+    assert np.isfinite(float(out.traits["topo_raw_count"]))
+    assert np.isnan(float(out.traits["topo_left_count"]))
+    assert np.isnan(float(out.traits["topo_right_count"]))
 
 
 def test_topology_trait_side_mean_and_ignore_from_scan_id():

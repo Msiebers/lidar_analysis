@@ -5,6 +5,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
+from scipy.interpolate import RegularGridInterpolator
+from scipy.ndimage import distance_transform_edt
 try:
     from .topology.stand_count import topology_stand_count
 except ImportError:
@@ -15,207 +17,95 @@ except Exception:
     ConvexHull = None
     QhullError = Exception
 
-
-
-def _robust_line_fit_x_ground(
-    x: np.ndarray,
-    y: np.ndarray,
-    *,
-    min_x_bins_per_z: int,
-) -> tuple[float, float]:
-    """Fit ground_Y = slope * X + intercept with one MAD outlier rejection pass."""
-    if x.size < min_x_bins_per_z:
-        return 0.0, float(np.median(y))
-
-    slope, intercept = np.polyfit(x, y, deg=1)
-    residuals = y - (slope * x + intercept)
-    med = float(np.median(residuals))
-    mad = float(np.median(np.abs(residuals - med)))
-    if np.isfinite(mad) and mad > 0.0:
-        keep = np.abs(residuals - med) <= (3.0 * 1.4826 * mad)
-        if int(np.sum(keep)) >= min_x_bins_per_z:
-            slope, intercept = np.polyfit(x[keep], y[keep], deg=1)
-
-    return float(slope), float(intercept)
-
-
 def add_local_ground_height(
-    points,
-    x_col="X",
-    y_col="Y",
-    z_col="Z",
-    z_bin_size_m=0.25,
-    x_bin_size_m=0.10,
-    ground_quantile=0.10,
-    smooth_bins=5,
-    min_points_per_xz_bin=10,
-    min_x_bins_per_z=3,
-    seed_y_min=None,
-    seed_y_max=None,
+    points, x_col="X", y_col="Y", z_col="Z", z_bin_size_m=50.0,
+    x_bin_size_m=50.0, ground_quantile=0.05, min_points_per_xz_bin=5,
+    seed_y_min=None, seed_y_max=None,
 ):
-    """Estimate a ZX-aware local ground surface and add ground_Y/height_agl.
-
-    Despite the ``*_m`` suffixes kept for public API readability, this function
-    operates in the coordinate units already present in ``points``. Pipeline
-    callers convert metre config values to millimetres before calling.
-    """
-    df = _as_df(points)
-    required = (x_col, y_col, z_col)
-    if any(c not in df.columns for c in required):
-        missing = [c for c in required if c not in df.columns]
-        raise ValueError(f"add_local_ground_height missing required column(s): {missing}")
-
-    if len(df) == 0:
-        out = df.copy()
-        out["ground_Y"] = pd.Series(dtype=float, index=out.index)
-        out["height_agl"] = pd.Series(dtype=float, index=out.index)
-        return out
-
-    x_bin_size = float(x_bin_size_m)
-    z_bin_size = float(z_bin_size_m)
-    if not np.isfinite(x_bin_size) or x_bin_size <= 0:
-        raise ValueError("x_bin_size_m must be > 0")
-    if not np.isfinite(z_bin_size) or z_bin_size <= 0:
-        raise ValueError("z_bin_size_m must be > 0")
+    """Estimate a snapped X-Z ground grid; input coordinates are millimetres."""
+    out = _as_df(points)
+    x_cell, z_cell = float(x_bin_size_m), float(z_bin_size_m)
+    if x_cell <= 0 or z_cell <= 0:
+        raise ValueError("local ground X/Z cell sizes must be positive")
     q = float(ground_quantile)
-    if not 0.0 <= q <= 1.0:
+    if not 0 <= q <= 1:
         raise ValueError("ground_quantile must be between 0 and 1")
-    smooth = max(int(smooth_bins), 1)
-    min_points = max(int(min_points_per_xz_bin), 1)
-    min_x_bins = max(int(min_x_bins_per_z), 1)
+    for col in (x_col, y_col, z_col):
+        if col not in out:
+            raise ValueError(f"add_local_ground_height missing required column {col!r}")
 
-    out = df.copy()
-    x_all = pd.to_numeric(out[x_col], errors="coerce").to_numpy(dtype=float)
-    y_all = pd.to_numeric(out[y_col], errors="coerce").to_numpy(dtype=float)
-    z_all = pd.to_numeric(out[z_col], errors="coerce").to_numpy(dtype=float)
-    finite_all = np.isfinite(x_all) & np.isfinite(y_all) & np.isfinite(z_all)
-
-    seed_mask = finite_all.copy()
+    x = pd.to_numeric(out[x_col], errors="coerce").to_numpy(float)
+    y = pd.to_numeric(out[y_col], errors="coerce").to_numpy(float)
+    z = pd.to_numeric(out[z_col], errors="coerce").to_numpy(float)
+    seed = np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
     if seed_y_min is not None:
-        seed_mask &= y_all >= float(seed_y_min)
+        seed &= y >= float(seed_y_min)
     if seed_y_max is not None:
-        seed_mask &= y_all <= float(seed_y_max)
-
-    ground = np.full(len(out), np.nan, dtype=float)
-    if not seed_mask.any():
-        out["ground_Y"] = ground
-        out["height_agl"] = y_all - ground
+        seed &= y <= float(seed_y_max)
+    if not seed.any():
+        out["ground_Y"] = np.nan; out["height_agl"] = np.nan
+        out["ground_support"] = "unreliable"
         return out
 
-    seed_x = x_all[seed_mask]
-    seed_y = y_all[seed_mask]
-    seed_z = z_all[seed_mask]
-    x0 = float(np.nanmin(seed_x))
-    z0 = float(np.nanmin(seed_z))
-    x_bin = np.floor((seed_x - x0) / x_bin_size).astype(int)
-    z_bin = np.floor((seed_z - z0) / z_bin_size).astype(int)
+    ix = np.floor(x[seed] / x_cell).astype(int)
+    iz = np.floor(z[seed] / z_cell).astype(int)
+    ixs, izs = np.arange(ix.min(), ix.max() + 1), np.arange(iz.min(), iz.max() + 1)
+    grid = np.full((len(izs), len(ixs)), np.nan)
+    cells = (pd.DataFrame({"ix": ix, "iz": iz, "y": y[seed]})
+             .groupby(["iz", "ix"])["y"]
+             .agg(n="size", value=lambda s: s.quantile(q)).reset_index())
+    for row in cells[cells.n >= int(min_points_per_xz_bin)].itertuples():
+        grid[row.iz - izs[0], row.ix - ixs[0]] = row.value
 
-    cells = (
-        pd.DataFrame({"x_bin": x_bin, "z_bin": z_bin, "x": seed_x, "z": seed_z, "y": seed_y})
-        .groupby(["z_bin", "x_bin"], sort=True)
-        .agg(
-            x_center=("x", "mean"),
-            z_center=("z", "mean"),
-            n=("y", "size"),
-            ground_candidate=("y", lambda s: float(s.quantile(q))),
-        )
-        .reset_index()
-    )
-    valid_cells = cells.loc[cells["n"] >= min_points].copy()
-    if valid_cells.empty:
-        # If the configured cell population is too strict for a sparse target,
-        # fall back to a flat estimate from all seed points rather than returning
-        # all-NaN ground heights.
-        flat = float(pd.Series(seed_y).quantile(q))
-        ground[finite_all] = flat
-        out["ground_Y"] = ground
-        out["height_agl"] = y_all - ground
-        return out
+    observed = np.isfinite(grid)
+    max_step = np.tan(np.deg2rad(20.0)) * np.hypot(x_cell, z_cell)
+    reliable = observed.copy()
+    for rz, rx in np.argwhere(observed):
+        neighbors = grid[max(0, rz - 1):rz + 2, max(0, rx - 1):rx + 2]
+        neighbors = neighbors[np.isfinite(neighbors) & (neighbors != grid[rz, rx])]
+        if neighbors.size:
+            residual = grid[rz, rx] - np.median(neighbors)
+            mad = np.median(np.abs(neighbors - np.median(neighbors)))
+            reliable[rz, rx] = abs(residual) <= max(max_step, 3 * 1.4826 * mad)
+    grid[~reliable] = np.nan
 
-    profile_rows: list[dict[str, float]] = []
-    for z_bin_value, group in valid_cells.groupby("z_bin", sort=True):
-        gx = group["x_center"].to_numpy(dtype=float)
-        gy = group["ground_candidate"].to_numpy(dtype=float)
-        gz = float(group["z_center"].median())
-        if group.shape[0] >= min_x_bins:
-            slope, intercept = _robust_line_fit_x_ground(
-                gx,
-                gy,
-                min_x_bins_per_z=min_x_bins,
-            )
-        else:
-            slope = 0.0
-            intercept = float(np.median(gy))
-        profile_rows.append(
-            {
-                "z_bin": float(z_bin_value),
-                "z_center": gz,
-                "slope_x": slope,
-                "intercept": intercept,
-            }
-        )
+    support = np.full(grid.shape, "unreliable", object)
+    support[reliable] = "observed"
+    if reliable.any():
+        distance, nearest = distance_transform_edt(
+            ~reliable, sampling=(z_cell, x_cell), return_indices=True)
+        fill = (~reliable) & (distance <= np.hypot(x_cell, z_cell))
+        grid[fill] = grid[nearest[0][fill], nearest[1][fill]]
+        support[fill] = "interpolated"
 
-    profile = pd.DataFrame(profile_rows).sort_values("z_center")
-    profile["slope_x"] = (
-        profile["slope_x"]
-        .rolling(window=smooth, center=True, min_periods=1)
-        .median()
-        .interpolate(method="linear", limit_direction="both")
-    )
-    profile["intercept"] = (
-        profile["intercept"]
-        .rolling(window=smooth, center=True, min_periods=1)
-        .median()
-        .interpolate(method="linear", limit_direction="both")
-    )
-
-    z_profile = profile["z_center"].to_numpy(dtype=float)
-    slope_profile = profile["slope_x"].to_numpy(dtype=float)
-    intercept_profile = profile["intercept"].to_numpy(dtype=float)
-
-    slope_at_z = np.interp(z_all[finite_all], z_profile, slope_profile)
-    intercept_at_z = np.interp(z_all[finite_all], z_profile, intercept_profile)
-    ground[finite_all] = slope_at_z * x_all[finite_all] + intercept_at_z
-
+    xc, zc = (ixs + 0.5) * x_cell, (izs + 0.5) * z_cell
+    ground = np.full(len(out), np.nan)
+    point_support = np.full(len(out), "unreliable", object)
+    if len(xc) > 1 and len(zc) > 1 and np.isfinite(grid).any():
+        query = np.column_stack([np.clip(z, zc[0], zc[-1]), np.clip(x, xc[0], xc[-1])])
+        ground = RegularGridInterpolator((zc, xc), grid, bounds_error=False, fill_value=np.nan)(query)
+        indices = RegularGridInterpolator(
+            (zc, xc), np.arange(grid.size).reshape(grid.shape), method="nearest",
+            bounds_error=False, fill_value=-1,
+        )(query).astype(int)
+        valid = indices >= 0
+        point_support[valid] = support.ravel()[indices[valid]]
     out["ground_Y"] = ground
-    out["height_agl"] = y_all - ground
+    out["height_agl"] = y - ground
+    out["ground_support"] = point_support
     return out
 
 
-def height_agl_filter(points, min_height_agl_m=0.10, height_col="height_agl"):
-    """Return points whose height above local ground meets the threshold."""
+def height_agl_filter(points, min_height_agl_m=100.0, height_col="height_agl"):
     df = _as_df(points)
-    if height_col not in df.columns:
-        raise ValueError(f"height_agl_filter requires column {height_col!r}; call add_local_ground_height first")
-    threshold = float(min_height_agl_m)
-    return df.loc[pd.to_numeric(df[height_col], errors="coerce") >= threshold].copy()
+    if height_col not in df:
+        raise ValueError("height_agl_filter requires add_local_ground_height first")
+    return df[pd.to_numeric(df[height_col], errors="coerce") >= float(min_height_agl_m)].copy()
 
 
-def local_ground_filter(
-    points,
-    min_height_agl_m=0.10,
-    x_bin_size_m=0.10,
-    z_bin_size_m=0.25,
-    ground_quantile=0.10,
-    smooth_bins=5,
-    min_points_per_xz_bin=10,
-    min_x_bins_per_z=3,
-    seed_y_min=None,
-    seed_y_max=None,
-):
-    """Add local ground columns, then filter by height_agl while retaining them."""
-    with_ground = add_local_ground_height(
-        points,
-        x_bin_size_m=x_bin_size_m,
-        z_bin_size_m=z_bin_size_m,
-        ground_quantile=ground_quantile,
-        smooth_bins=smooth_bins,
-        min_points_per_xz_bin=min_points_per_xz_bin,
-        min_x_bins_per_z=min_x_bins_per_z,
-        seed_y_min=seed_y_min,
-        seed_y_max=seed_y_max,
-    )
-    return height_agl_filter(with_ground, min_height_agl_m=min_height_agl_m)
+def local_ground_filter(points, min_height_agl_m=100.0, **kwargs):
+    return height_agl_filter(add_local_ground_height(points, **kwargs), min_height_agl_m)
+
 
 def _resolve_backend(op_cfg: dict[str, Any], default_backend: str = "scipy") -> str:
     backend = op_cfg.get("backend") or default_backend
@@ -237,6 +127,7 @@ _SUPPORTED_OPS = {
     "height_range_filter",
     "topology_trait",
     "slice_structure_trait",
+    "canopy_volume_2p5d",
 }
 
 def op_enabled(cfg, name: str) -> bool:
@@ -308,6 +199,63 @@ def _height_range_filter(df: pd.DataFrame, op_cfg: dict[str, Any]) -> tuple[pd.D
     return out, diag
 
 
+def _compute_canopy_volume_2p5d(df: pd.DataFrame, op_cfg: dict[str, Any]) -> tuple[dict, dict]:
+    cell_size_m = float(op_cfg.get("cell_size_m", 0.01))
+    percentile = float(op_cfg.get("height_percentile", 95.0))
+    if cell_size_m <= 0.0:
+        raise ValueError("canopy_volume_2p5d cell_size_m must be > 0")
+    if not 0.0 <= percentile <= 100.0:
+        raise ValueError("canopy_volume_2p5d height_percentile must be between 0 and 100")
+
+    height_col = "height_agl" if "height_agl" in df.columns else "Y"
+    x = pd.to_numeric(df["X"], errors="coerce").to_numpy(dtype=float) / 1000.0
+    z = pd.to_numeric(df["Z"], errors="coerce").to_numpy(dtype=float) / 1000.0
+    height = pd.to_numeric(df[height_col], errors="coerce").to_numpy(dtype=float) / 1000.0
+    valid = np.isfinite(x) & np.isfinite(z) & np.isfinite(height)
+
+    traits = {
+        "canopy_volume_2p5d_m3": float("nan"),
+        "canopy_volume_2p5d_m3_m2": float("nan"),
+        "canopy_volume_2p5d_occupied_cells": 0,
+        "canopy_volume_2p5d_total_cells": 0,
+        "canopy_volume_2p5d_observed_area_m2": 0.0,
+        "canopy_volume_2p5d_coverage_fraction": float("nan"),
+    }
+    diagnostics = {
+        "cell_size_m": cell_size_m,
+        "height_percentile": percentile,
+        "height_source": height_col,
+        "n_points_input": int(len(df)),
+        "n_points_valid": int(valid.sum()),
+    }
+    if not np.any(valid):
+        diagnostics.update(traits)
+        return traits, diagnostics
+
+    ix = np.floor(x[valid] / cell_size_m).astype(np.int64)
+    iz = np.floor(z[valid] / cell_size_m).astype(np.int64)
+    cells = pd.DataFrame({"ix": ix, "iz": iz, "height": height[valid]})
+    cell_heights = cells.groupby(["ix", "iz"], sort=False)["height"].quantile(percentile / 100.0)
+    cell_heights = cell_heights.clip(lower=0.0)
+
+    occupied = int(cell_heights.size)
+    total = int((ix.max() - ix.min() + 1) * (iz.max() - iz.min() + 1))
+    cell_area = cell_size_m ** 2
+    observed_area = occupied * cell_area
+    footprint_area = total * cell_area
+    volume = float(cell_heights.sum() * cell_area)
+    traits.update({
+        "canopy_volume_2p5d_m3": volume,
+        "canopy_volume_2p5d_m3_m2": volume / footprint_area if footprint_area > 0.0 else float("nan"),
+        "canopy_volume_2p5d_occupied_cells": occupied,
+        "canopy_volume_2p5d_total_cells": total,
+        "canopy_volume_2p5d_observed_area_m2": observed_area,
+        "canopy_volume_2p5d_coverage_fraction": occupied / total if total else float("nan"),
+    })
+    diagnostics.update(traits)
+    return traits, diagnostics
+
+
 def _topology_trait(df: pd.DataFrame, op_cfg: dict[str, Any], target_obj) -> dict[str, Any]:
     def _extract_count_and_points(res: Any) -> tuple[float, list[Any]]:
         if isinstance(res, dict):
@@ -319,7 +267,9 @@ def _topology_trait(df: pd.DataFrame, op_cfg: dict[str, Any], target_obj) -> dic
         return float("nan"), []
 
     min_persistence = float(op_cfg.get("min_persistence", 0.35))
-    split_sides = bool(op_cfg.get("split_sides_for_single_plot", False))
+    requested_split_sides = bool(op_cfg.get("split_sides_for_single_plot", False))
+    already_side_specific = bool(getattr(target_obj, "side", None))
+    split_sides = requested_split_sides and not already_side_specific
     pos_label = str(op_cfg.get("additional_scan_positive_side_label", "right")).strip().lower() or "right"
     neg_label = str(op_cfg.get("additional_scan_negative_side_label", "left")).strip().lower() or "left"
 
@@ -373,6 +323,7 @@ def _topology_trait(df: pd.DataFrame, op_cfg: dict[str, Any], target_obj) -> dic
     traits = {
         "topo_count": float("nan"),
         "topo_count_whole": topo_count_whole,
+        "topo_raw_count": topo_raw_whole,
         "topo_count_left": float("nan"),
         "topo_count_right": float("nan"),
         "topo_left_count": float("nan"),
@@ -423,6 +374,9 @@ def _topology_trait(df: pd.DataFrame, op_cfg: dict[str, Any], target_obj) -> dic
     if np.isfinite(side_vals).any():
         traits["topo_count"] = float(np.nanmean(side_vals))
         traits["topo_avg_per_m"] = traits["topo_count"]
+    elif not split_sides:
+        traits["topo_count"] = topo_count_whole
+        traits["topo_avg_per_m"] = topo_count_whole
     else:
         traits["topo_count"] = float("nan")
         traits["topo_avg_per_m"] = float("nan")
@@ -432,6 +386,8 @@ def _topology_trait(df: pd.DataFrame, op_cfg: dict[str, Any], target_obj) -> dic
         "diagnostic": {
             "input_points": int(len(df)),
             "z_source": z_source,
+            "side_split_requested": requested_split_sides,
+            "already_side_specific": already_side_specific,
             "side_split_applied": side_split_applied,
             "topology_side_split_applied": side_split_applied,
             "topology_positive_side_label": pos_label,
@@ -629,6 +585,7 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
         "scalar_fields_used": [],
     }
     traits = {}
+    voxel_cfg = None
 
     for op_cfg in ops:
         op_name = op_cfg.get("op", op_cfg.get("name", ""))
@@ -648,9 +605,9 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
         elif op == "sor_filter":
             df = _sor_filter(df, op_cfg)
         elif op in {"voxel_volume", "voxel_grid", "voxel_count"}:
-            voxel_count = _voxel_count(df, op_cfg)
-            traits["voxel_count"] = voxel_count
-            diagnostics["voxel_count"] = voxel_count
+            # Voxel count describes the final current cloud, regardless of
+            # where the trait appears among mutating operations in the config.
+            voxel_cfg = op_cfg
             if bool(op_cfg.get("replace_with_centroids", False)):
                 # behavior-preserving default: do not replace cloud unless explicitly requested.
                 pass
@@ -677,6 +634,11 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
             traits.update(slice_traits)
             diagnostics.setdefault("slice_structure_trait", []).append(slice_diag)
 
+        elif op == "canopy_volume_2p5d":
+            canopy_traits, canopy_diag = _compute_canopy_volume_2p5d(df, op_cfg)
+            traits.update(canopy_traits)
+            diagnostics.setdefault("canopy_volume_2p5d", []).append(canopy_diag)
+
         elif op == "topology_trait":
             if target_obj is None:
                 raise ValueError("topology_trait requires an AnalysisTarget")
@@ -691,6 +653,24 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
             diagnostics.setdefault("topology_trait", []).append(topo_out["diagnostic"])
 
         diagnostics["points_after_each_op"].append({"op": op, "points": int(len(df))})
+
+    if voxel_cfg is not None:
+        voxel_count = _voxel_count(df, voxel_cfg)
+        if voxel_cfg.get("voxel_size_m") is not None:
+            voxel_size_m = float(voxel_cfg["voxel_size_m"])
+        elif voxel_cfg.get("voxel_size") is not None:
+            voxel_size_m = float(voxel_cfg["voxel_size"]) / 1000.0
+        else:
+            voxel_size_m = float(voxel_cfg.get("leaf_size", 0.05))
+        voxel_traits = {
+            "voxel_count": voxel_count,
+            "voxel_input_points": int(len(df)),
+            "voxel_input_min_x": float(df["X"].min()) if len(df) else float("nan"),
+            "voxel_input_max_x": float(df["X"].max()) if len(df) else float("nan"),
+            "voxel_size_m": voxel_size_m,
+        }
+        traits.update(voxel_traits)
+        diagnostics.update(voxel_traits)
 
     diagnostics["points_after_ops"] = int(len(df))
     diagnostics["available_scalar_columns_after"] = [c for c in df.columns if c not in {"X","Y","Z"}]

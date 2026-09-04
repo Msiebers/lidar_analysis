@@ -1,5 +1,8 @@
 experiment_name: test
 processing_mode: local
+processing:
+  # null = sequential/off; set a positive integer for whole-scan worker processes.
+  parallel_scans: null
 config_reviewed: true
 config_note: "LAI and MTA test using capped LiDAR LAI."
 
@@ -37,6 +40,8 @@ analysis:
   # Fusion / IMU
   fusion_method: pps
   apply_imu: true
+  # BNO085 Euler degrees from Pico. Signs are mounting-specific; validate from
+  # the physical ground plane, not left/right point-count equality.
   imu_zero_mode: dense_median
   imu_zero_fraction: 0.2
   use_heading: false
@@ -44,26 +49,18 @@ analysis:
   roll_sign: 1.0
   pitch_sign: -1.0
 
-  # Local ground filtering (optional)
-  # Estimates ground_Y within each plot/row cloud after splitting and filters by
-  # height_agl before trait calculations and point-cloud ops. This is useful for
-  # sloped plots or variable cart pitch/height.
+  # Snapped square X-Z grid ground filter.
   use_local_ground_filter: true
-  local_ground_x_bin_m: 0.10
-  local_ground_z_bin_m: 0.25
+  local_ground_x_bin_m: 0.025
+  local_ground_z_bin_m: 0.025
   local_ground_quantile: 0.10
-  local_ground_smooth_bins: 5
-  local_ground_min_points_per_xz_bin: 10
-  local_ground_min_x_bins_per_z: 3
-  # Seed-only absolute-Y bounds for fitting the ZX ground surface. These do not
-  # directly discard canopy points before height_agl is computed.
-  local_ground_seed_y_min_m: -0.05
-  local_ground_seed_y_max_m: 0.30
-  min_height_agl_m: 0.10
+  local_ground_min_points_per_xz_bin: 5
+  min_height_agl_m: 0.05
 
   # RSSI normalization
   normalize_rssi: true
   rssi_norm_mode: zscore
+  rssi_norm_transform: sqrt
   use_rssi_filter: false
   rssi_min: null
   rssi_max: null
@@ -73,16 +70,15 @@ analysis:
   run_lai: false
   debug_lai_bounds: false
   run_mta: false
+  mta_angle_bin_deg: 5.0
+  mta_diagnostic: false
   run_fad: false
-
-  # MTA settings
-  mta_lo_deg: 25.0
-  mta_hi_deg: 65.0
-  mta_n_bins: 8
-  mta_min_rays_per_bin: 30
+  run_pai: false
 
   # FAD settings are present but inactive because run_fad is false
   fad_height_percentile: 99.0
+  # Near face of each side-specific FAD box, measured from the LiDAR centerline.
+  fad_x_near_m: 0.0
   fad_y_min_m: 0.1
   fad_height_buffer_m: 0.0
   fad_grubbs_alpha: 0.01
@@ -90,8 +86,25 @@ analysis:
   fad_run_layers: false
   fad_layer_thickness_m: 0.10
   fad_include_layer_columns: false
+
+  # Bounded gap/transmission PAI settings (independent of FAD)
+  pai_g_function: spherical
+  pai_g_value: 0.5
+  pai_height_percentile: 99.0
+  pai_grubbs_alpha: 0.01
+  pai_y_min_m: 0.10
+  pai_x_near_m: 0.0
+  pai_height_buffer_m: 0.0
+  pai_diagnostic: false
+  pai_layer_thickness_m: 0.10
+  pai_include_layer_columns: false
   
   # Additional scans / side split
+  # Force otherwise single-target field scan names into left/right derived outputs.
+  # Only for reprocessing old single-target scans for side-aware FAD/LAI/MTA.
+  # Normal two-sided scans should use & in the scan name, e.g. 1&2_7.
+  # Does not apply to legacy scan_* additional scans; those use additional_scan_side_split.
+  force_two_sided_targets: false
   additional_scan_side_split: false
   additional_scan_side_axis: x
   additional_scan_positive_side_label: right
@@ -100,11 +113,9 @@ analysis:
   # YAML-ordered target-level ops
   
   pointcloud_ops:
-    
-    # Local ground filtering above handles the lower height threshold; this
-    # optional fixed-Y filter is left enabled only as an upper canopy/clutter cap.
+    # A global-Y lower threshold can recreate side-dependent retention.
     - name: height_range_filter
-      enabled: true
+      enabled: false
       axis: Y
       min_m: null
       max_m: 0.8
@@ -140,6 +151,11 @@ analysis:
     - name: voxel_count
       enabled: false
       voxel_size_m: 0.05
+
+    - name: canopy_volume_2p5d
+      enabled: false
+      cell_size_m: 0.01
+      height_percentile: 95.0
 
   pcl_backend:
     enabled: false

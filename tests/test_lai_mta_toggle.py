@@ -7,7 +7,7 @@ from lidar_analysis.lai import compute_lai_trait_from_beam_rows
 from lidar_analysis.pipeline_core import trait_summary_row
 
 
-MTA_COLUMNS = {"lai_mta_deg", "lai_mta_sem_deg", "lai_mta_slope", "lai_mta_n_bins"}
+MTA_COLUMNS = {"mta_deg", "mta_qc_pass"}
 
 
 def _cfg(**kwargs):
@@ -15,7 +15,7 @@ def _cfg(**kwargs):
 
 
 def test_summary_row_omits_mta_columns_by_default():
-    rec = {"lai_even": 1.0, "lai_uneven": 2.0, "lai_mta_deg": 55.3, "lai_mta_n_bins": 8}
+    rec = {"lai_even": 1.0, "lai_uneven": 2.0, "mta_deg": 55.3, "mta_status": "ok"}
 
     row = trait_summary_row(rec, _cfg())
 
@@ -26,10 +26,10 @@ def test_summary_row_includes_mta_columns_when_enabled():
     rec = {
         "lai_even": 1.0,
         "lai_uneven": 2.0,
-        "lai_mta_deg": 55.3,
-        "lai_mta_sem_deg": 1.2,
-        "lai_mta_slope": 0.4,
-        "lai_mta_n_bins": 8,
+        "mta_deg": 55.3,
+        "mta_method": "bounded_lang_v1",
+        "mta_qc_pass": True,
+        "mta_status": "ok",
     }
 
     row = trait_summary_row(rec, _cfg(run_mta=True))

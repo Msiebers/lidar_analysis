@@ -15,6 +15,7 @@ def default_experiment_config(experiment: str) -> dict:
     return {
         'experiment_name': experiment,
         'processing_mode': 'off',
+        'processing': {'parallel_scans': None},
         'config_reviewed': False,
         'config_note': 'Template only. Edit this config before enabling processing.',
         'raw_data_path': f'/mnt/cartcity/raw_data/{experiment}',

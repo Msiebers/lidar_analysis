@@ -102,13 +102,17 @@ class LayeredFadResult:
     contact_density_m_inv: np.ndarray
     gap_fraction: np.ndarray
 
+    n_rays_intersecting_box: np.ndarray
     n_rays_observed_in_box: np.ndarray
     n_hits_inside_box: np.ndarray
     n_full_gaps_through_box: np.ndarray
+    n_hits_before_box: np.ndarray
     total_free_path_length_m: np.ndarray
     total_projected_path_length_m: np.ndarray
 
     lai_from_fad: float
+    supported_profile_fraction: float
+    n_supported_layers: int
 
 
 def _as_array_2d(name: str, value: np.ndarray, ncols: int = 3) -> np.ndarray:
@@ -721,9 +725,9 @@ def compute_layered_fad(
 
         sum(FAD_layer * layer_thickness)
 
-    Layers with no usable rays yield NaN FAD and are treated as 0 in that
-    integral (nansum). Inspect the per-layer observed-ray counts before
-    trusting the integral when upper layers are sparsely sampled.
+    ``lai_from_fad`` retains the legacy nansum behavior for side-by-side
+    comparisons. ``supported_profile_fraction`` makes the resulting downward
+    bias visible when layers have no usable exposure.
     """
     validate_box(base_box)
 
@@ -767,9 +771,11 @@ def compute_layered_fad(
     contact = np.array([r.contact_density_m_inv for r in results], dtype=float)
     gap = np.array([r.gap_fraction for r in results], dtype=float)
 
+    n_intersecting = np.array([r.n_rays_intersecting_box for r in results], dtype=int)
     n_observed = np.array([r.n_rays_observed_in_box for r in results], dtype=int)
     n_hits = np.array([r.n_hits_inside_box for r in results], dtype=int)
     n_full_gaps = np.array([r.n_full_gaps_through_box for r in results], dtype=int)
+    n_hits_before = np.array([r.n_hits_before_box for r in results], dtype=int)
 
     free_path = np.array([r.total_free_path_length_m for r in results], dtype=float)
     projected_path = np.array([r.total_projected_path_length_m for r in results], dtype=float)
@@ -777,6 +783,10 @@ def compute_layered_fad(
     layer_thickness = np.diff(layer_edges_y_m)
 
     lai_from_fad = float(np.nansum(fad * layer_thickness))
+    supported = (n_observed > 0) & (projected_path > 0.0) & np.isfinite(fad)
+    supported_profile_fraction = float(
+        np.sum(layer_thickness[supported]) / np.sum(layer_thickness)
+    )
 
     return LayeredFadResult(
         layer_edges_y_m=layer_edges_y_m,
@@ -785,12 +795,16 @@ def compute_layered_fad(
         fad_m2_m3=fad,
         contact_density_m_inv=contact,
         gap_fraction=gap,
+        n_rays_intersecting_box=n_intersecting,
         n_rays_observed_in_box=n_observed,
         n_hits_inside_box=n_hits,
         n_full_gaps_through_box=n_full_gaps,
+        n_hits_before_box=n_hits_before,
         total_free_path_length_m=free_path,
         total_projected_path_length_m=projected_path,
         lai_from_fad=lai_from_fad,
+        supported_profile_fraction=supported_profile_fraction,
+        n_supported_layers=int(np.sum(supported)),
     )
 
 
@@ -868,6 +882,8 @@ def layered_fad_result_to_traits(
     traits: dict[str, Any] = {
         f"{p}_lai_from_layers": result.lai_from_fad,
         f"{p}_n_layers": int(result.fad_m2_m3.size),
+        f"{p}_n_supported_layers": result.n_supported_layers,
+        f"{p}_profile_support_fraction": result.supported_profile_fraction,
     }
 
     if not include_layer_columns:
@@ -879,6 +895,17 @@ def layered_fad_result_to_traits(
         label = f"{cm0:03d}_{cm1:03d}"
 
         traits[f"{p}_layer_{label}_m2_m3"] = float(result.fad_m2_m3[i])
+        traits[f"{p}_layer_{label}_bottom_m"] = float(y0)
+        traits[f"{p}_layer_{label}_top_m"] = float(y1)
+        traits[f"{p}_layer_{label}_thickness_m"] = float(result.layer_thickness_m[i])
+        traits[f"{p}_layer_{label}_n_intersecting"] = int(result.n_rays_intersecting_box[i])
+        traits[f"{p}_layer_{label}_n_observed"] = int(result.n_rays_observed_in_box[i])
+        traits[f"{p}_layer_{label}_n_hits"] = int(result.n_hits_inside_box[i])
+        traits[f"{p}_layer_{label}_n_full_gaps"] = int(result.n_full_gaps_through_box[i])
+        traits[f"{p}_layer_{label}_n_hits_before"] = int(result.n_hits_before_box[i])
+        traits[f"{p}_layer_{label}_free_path_m"] = float(result.total_free_path_length_m[i])
+        traits[f"{p}_layer_{label}_projected_path_m"] = float(result.total_projected_path_length_m[i])
+        traits[f"{p}_layer_{label}_contact_density_m_inv"] = float(result.contact_density_m_inv[i])
 
     return traits
 

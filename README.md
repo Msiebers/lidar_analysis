@@ -22,6 +22,10 @@ The reconstructed point cloud uses the following coordinate convention:
 
 Encoder counts are converted into travel distance using cart calibration.
 
+See [Scan Naming](docs/SCAN_NAMING.md) for field scan naming, two-sided `&` names, and side conventions.
+See [Plot-Bounded MTA](docs/PLOT_BOUNDED_MTA.md) for the bounded path-length MTA method and QC semantics.
+See [Result CSV schema](docs/RESULT_SCHEMA.md) for canonical target identities and compact PAI/MTA output.
+
 ## Important Files
 
 Unless otherwise noted, these source files live under `lidar_analysis/`.
