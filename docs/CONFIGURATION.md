@@ -81,6 +81,9 @@ against a physical ground plane; BNO055 sign conventions are not interchangeable
 on `min_height_agl_m`. `local_ground_x_bin_m` and `local_ground_z_bin_m` control
 the lateral and travel-direction cell sizes independently; `local_ground_quantile`
 and `local_ground_min_points_per_xz_bin` control the candidate in each cell.
+`local_ground_seed_y_min_m` and `local_ground_seed_y_max_m` restrict which raw-Y
+points may seed ground. Ground is never propagated between cells; every cell
+without its own trustworthy estimate uses `local_ground_fallback_y_m` when set.
 Avoid a separate global-Y lower threshold, which can recreate
 side-dependent retention.
 
@@ -136,11 +139,14 @@ Older configs may still use compatibility aliases such as `splitting_style`, top
 | `run_lai` | `false` | `pipeline_core.analyze_plot`, `lidar_analysis/lai/` | Adds `lai_even`, `lai_uneven` |
 | `run_mta` | `false` | `pipeline_core.analyze_plot`, `lidar_analysis/mta.py` | Adds the plot-bounded `bounded_lang_v1` MTA |
 | `mta_angle_bin_deg` | `5.0` | `lidar_analysis/mta.py` | Angular-bin width; standard fitting bins remain anchored to the complete 25–65 degree interval |
-| `mta_diagnostic` | `false` | `central_runner.run_experiment_date` | When true, writes the single aggregate `mta_diagnostics.csv`; never changes the main result schema |
+| `ray_box.diagnostic` | `false` | `central_runner.run_experiment_date` | Writes one `ray_box_diagnostics.csv` containing shared-box summaries, PAI layers, and MTA angular bins |
+| `ray_box` geometry | shared when provided | `central_runner.build_config`, `pipeline_core._build_shared_ray_box` | Defines the single FAD/MTA/PAI volume; legacy trait-specific geometry is used only when a shared value is omitted |
+| `ray_box.ground_mode` | `global_y` | `pipeline_core._build_shared_ray_box` | `local_grid` moves only the box bottom using the plot's median local-ground elevation; the canopy top remains the raw-Y PAI top |
+| `analyze_one_side` | `false` | `pipeline_core.process_scan` | When true, analyzes and writes only the side selected by `analyze_side` |
+| `analyze_side` | `null` | `pipeline_core.process_scan` | Required as `left` or `right` when `analyze_one_side` is true |
 | `run_pai` | `false` | `pipeline_core.analyze_plot`, `lidar_analysis/pai.py` | Integrates bounded layer PAI increments into the publication value `pai_m2_m2` |
 | `pai_layer_thickness_m` | `0.10` | `lidar_analysis/pai.py` | Nominal vertical layer thickness in metres |
-| `pai_include_layer_columns` | `false` | `central_runner.run_experiment_date` | Adds optional wide `pai_layer_*` columns to `results.csv` |
-| `pai_diagnostic` | `false` | `central_runner.run_experiment_date` | Writes `pai_diagnostics.csv` with layer PAD, ray/path, likelihood, and whole-box audit values |
+| `pai_include_layer_columns` | `false` | `central_runner.run_experiment_date` | Adds one integrated PAI number per vertical layer to `results.csv` |
 | `run_topology` | `false` compatibility shim | legacy branch in `pipeline_core.analyze_plot` | Prefer `pointcloud_ops: [{op: topology_trait}]` |
 
 `pointcloud_ops` entries run in YAML order. Entries with `enabled: false` are skipped before dispatch. Put `voxel_count` after filters that should affect the count. The full config template lists user-facing operations with disabled defaults; voxel aliases remain supported in code for old configs.
@@ -152,7 +158,10 @@ output/QC fields, and scientific limitations.
 
 PAI is a bounded layer transmission estimator. In each layer, a source ray is
 classified from its raw first return as not reaching the layer, hitting within
-it, or traversing it as a gap. The layer PAD is multiplied by the actual layer
+it, traversing it as a verified gap, or unknown when the recorded observation
+cannot prove either outcome. Before-layer and unknown rays are excluded. An
+explicit no-return is a gap only when `mta_max_observation_range_m` reaches the
+layer exit. The layer PAD is multiplied by the actual layer
 thickness, and `pai_m2_m2` is the sum of those layer PAI increments. Whole-box
 PAI and PAD remain audit values only. Existing `pai_run_*profile` keys remain
 readable for compatibility but are not primary controls in generated configs.
@@ -218,6 +227,7 @@ analysis:
     - op: topology_trait
       min_persistence: 0.35
       z_bin_m: 0.05
+      include_per_m2: false  # add raw count / X-Z plot area
 ```
 
 ### Conservative Filtering

@@ -38,6 +38,13 @@ Preserve existing behavior unless the task explicitly changes it.
 
 Do not remove existing config keys.
 
+Whenever configuration options or formatting change, update both
+`experiment_config.yaml` and
+`lidar_analysis/example_configs/full_experiment_config_template.yaml`. Keep
+their available keys, option comments, section ordering, and examples
+synchronized; experiment-specific active values and point-cloud operation
+order may differ.
+
 Do not change file naming behavior unless explicitly requested.
 
 Do not discard RSSI or normalized RSSI scalar fields.
@@ -52,3 +59,4 @@ At minimum, run:
 
 ```bash
 python3 -m py_compile lidar_analysis/*.py
+```

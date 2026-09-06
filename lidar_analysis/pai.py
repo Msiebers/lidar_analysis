@@ -6,46 +6,42 @@ import numpy as np
 from scipy.optimize import minimize, minimize_scalar
 
 try:
-    from .fad import Box3D, _normalize_directions, box_is_valid, make_layer_edges, ray_box_intersection
+    from .fad import Box3D, _prepare_directions, box_is_valid, make_layer_edges, ray_box_intersection
+    from .mta import classify_first_events
 except ImportError:
-    from fad import Box3D, _normalize_directions, box_is_valid, make_layer_edges, ray_box_intersection
+    from fad import Box3D, _prepare_directions, box_is_valid, make_layer_edges, ray_box_intersection
+    from mta import classify_first_events
 
 
-def _classify_rays(origins_m, directions_m, ranges_m, raw_hit_mask, box, tolerance_m=1e-4):
+def _classify_rays(
+    origins_m, directions_m, ranges_m, raw_hit_mask, box,
+    explicit_no_return_mask=None, max_observation_range_m=60.0,
+    tolerance_m=1e-4, normalize_directions=True,
+):
     origins = np.asarray(origins_m, dtype=float)
-    directions, valid_direction = _normalize_directions(directions_m)
     ranges = np.asarray(ranges_m, dtype=float)
     raw_hits = np.asarray(raw_hit_mask, dtype=bool)
-    if origins.ndim != 2 or origins.shape[1] != 3 or directions.shape != origins.shape:
-        raise ValueError("origins_m and directions_m must have matching n x 3 shapes")
-    if ranges.shape != (len(origins),) or raw_hits.shape != (len(origins),):
-        raise ValueError("ranges_m and raw_hit_mask must match the ray count")
-
-    result = _classify_normalized_rays(origins, directions, ranges, raw_hits, box, tolerance_m)
-    intersects, observed, hit, gap, prehit, chord = result
-    intersects &= valid_direction
-    observed &= valid_direction
-    hit &= valid_direction
-    gap &= valid_direction
-    prehit &= valid_direction
-    return directions, intersects, observed, hit, gap, prehit, chord
-
-
-def _classify_normalized_rays(origins, directions_unit, ranges, raw_hits, box, tolerance_m=1e-4):
-    t_enter, t_exit, intersects = ray_box_intersection(
-        origins_m=origins, directions_unit=directions_unit, box=box
+    no_returns = (
+        (~raw_hits & np.isinf(ranges))
+        if explicit_no_return_mask is None
+        else np.asarray(explicit_no_return_mask, dtype=bool)
     )
-    entry = np.maximum(t_enter, 0.0)
-    has_return = raw_hits & np.isfinite(ranges) & (ranges > 0.0)
-    prehit = intersects & has_return & (ranges < entry - tolerance_m)
-    observed = intersects & ~prehit
-    hit = observed & has_return & (ranges <= t_exit + tolerance_m)
-    gap = observed & ~hit
-    chord = np.clip(t_exit - entry, 0.0, None)
-    observed &= chord > 1e-9
-    hit &= observed
-    gap &= observed
-    return intersects, observed, hit, gap, prehit, chord
+    events = classify_first_events(
+        origins_m=origins,
+        directions_m=directions_m,
+        ranges_m=ranges,
+        raw_hit_mask=raw_hits,
+        explicit_no_return_mask=no_returns,
+        box=box,
+        max_observation_range_m=max_observation_range_m,
+        tolerance_m=tolerance_m,
+        normalize_directions=normalize_directions,
+    )
+    chord = np.clip(events["exit_m"] - events["entry_m"], 0.0, None)
+    return (
+        events["directions"], events["intersects"], events["observed"],
+        events["hit"], events["gap"], events["before"], events["unknown"], chord,
+    )
 
 
 def _fit_transmission(chords: np.ndarray, gaps: np.ndarray, g_value: float):
@@ -66,9 +62,9 @@ def _fit_transmission(chords: np.ndarray, gaps: np.ndarray, g_value: float):
     return float(result.x), float(-result.fun), bool(result.success), False
 
 
-def layer_path_matrix(origins_m, directions_m, box: Box3D, layer_edges_y_m):
+def layer_path_matrix(origins_m, directions_m, box: Box3D, layer_edges_y_m, *, normalize_directions=True):
     origins = np.asarray(origins_m, dtype=float)
-    directions, valid = _normalize_directions(directions_m)
+    directions, valid = _prepare_directions(directions_m, normalize=normalize_directions)
     edges = np.asarray(layer_edges_y_m, dtype=float)
     columns = []
     for bottom, top in zip(edges[:-1], edges[1:]):
@@ -82,11 +78,13 @@ def layer_path_matrix(origins_m, directions_m, box: Box3D, layer_edges_y_m):
 
 def compute_pai_traits(
     *, origins_m, directions_m, ranges_m, raw_hit_mask, box: Box3D,
+    explicit_no_return_mask=None, max_observation_range_m: float | None = 60.0,
     g_function: str = "spherical", g_value: float = 0.5,
     layer_thickness_m: float | None = 0.1, include_layer_columns: bool = True,
     run_conditional_profile: bool = False,
     run_joint_profile: bool = False,
     diagnostic: bool = False,
+    normalize_directions: bool = True,
 ) -> dict[str, Any]:
     if str(g_function).strip().lower() != "spherical":
         raise ValueError("PAI currently supports only pai_g_function='spherical'")
@@ -102,7 +100,9 @@ def compute_pai_traits(
         "pai_gap_fraction": np.nan, "pai_hit_fraction": np.nan,
         "pai_n_rays_total": n_total, "pai_n_rays_intersecting_box": 0,
         "pai_n_rays_observed": 0, "pai_n_hits": 0, "pai_n_full_gaps": 0,
-        "pai_n_hits_before_box": 0, "pai_reach_fraction": np.nan,
+        "pai_n_hits_before_box": 0, "pai_n_unknown": 0,
+        "pai_max_observation_range_m": max_observation_range_m,
+        "pai_reach_fraction": np.nan,
         "pai_mean_chord_m": np.nan, "pai_median_chord_m": np.nan,
         "pai_total_geometric_chord_m": 0.0, "pai_log_likelihood": np.nan,
         "pai_converged": False, "pai_saturated": False,
@@ -128,8 +128,11 @@ def compute_pai_traits(
     if not box_is_valid(box):
         return base
 
-    directions, intersects, observed, hits, gaps, prehit, chord = _classify_rays(
-        origins_m, directions_m, ranges_m, raw_hit_mask, box
+    directions, intersects, observed, hits, gaps, prehit, unknown, chord = _classify_rays(
+        origins_m, directions_m, ranges_m, raw_hit_mask, box,
+        explicit_no_return_mask=explicit_no_return_mask,
+        max_observation_range_m=max_observation_range_m,
+        normalize_directions=normalize_directions,
     )
     obs_chord = chord[observed]
     obs_gaps = gaps[observed]
@@ -148,6 +151,7 @@ def compute_pai_traits(
         "pai_n_rays_intersecting_box": n_intersecting, "pai_n_rays_observed": n_observed,
         "pai_n_hits": n_hits, "pai_n_full_gaps": n_gaps,
         "pai_n_hits_before_box": int(prehit.sum()),
+        "pai_n_unknown": int(unknown.sum()),
         "pai_reach_fraction": n_observed / n_intersecting if n_intersecting else np.nan,
         "pai_mean_chord_m": float(np.mean(obs_chord)) if n_observed else np.nan,
         "pai_median_chord_m": float(np.median(obs_chord)) if n_observed else np.nan,
@@ -165,7 +169,10 @@ def compute_pai_traits(
     if n_observed == 0 and not (run_conditional_profile or run_joint_profile):
         return base
     if run_joint_profile:
-        matrix = layer_path_matrix(np.asarray(origins_m)[observed], directions[observed], box, edges)
+        matrix = layer_path_matrix(
+            np.asarray(origins_m)[observed], directions[observed], box, edges,
+            normalize_directions=False,
+        )
         rank = int(np.linalg.matrix_rank(matrix))
         n_layers = matrix.shape[1]
         singular_values = np.linalg.svd(matrix, compute_uv=False)
@@ -208,13 +215,25 @@ def compute_pai_traits(
         candidate_directions = directions[candidate]
         candidate_ranges = np.asarray(ranges_m, dtype=float)[candidate]
         candidate_raw_hits = np.asarray(raw_hit_mask, dtype=bool)[candidate]
+        candidate_no_returns = (
+            (~np.asarray(raw_hit_mask, dtype=bool) & np.isinf(np.asarray(ranges_m, dtype=float)))[candidate]
+            if explicit_no_return_mask is None
+            else np.asarray(explicit_no_return_mask, dtype=bool)[candidate]
+        )
         conditional_pai = []
         layer_rows = []
         for bottom, top in zip(edges[:-1], edges[1:]):
             label = f"{round(bottom * 100):03d}_{round(top * 100):03d}"
             layer = Box3D(box.x_min, box.x_max, float(bottom), float(top), box.z_min, box.z_max)
-            layer_intersects, layer_observed, layer_hits, layer_gaps, layer_censored, layer_chord = _classify_normalized_rays(
-                candidate_origins, candidate_directions, candidate_ranges, candidate_raw_hits, layer
+            (
+                _, layer_intersects, layer_observed, layer_hits, layer_gaps,
+                layer_censored, layer_unknown, layer_chord,
+            ) = _classify_rays(
+                candidate_origins, candidate_directions, candidate_ranges,
+                candidate_raw_hits, layer,
+                explicit_no_return_mask=candidate_no_returns,
+                max_observation_range_m=max_observation_range_m,
+                normalize_directions=False,
             )
             observed_chord = layer_chord[layer_observed]
             observed_gaps = layer_gaps[layer_observed]
@@ -235,6 +254,7 @@ def compute_pai_traits(
                     "n_rays_observed": n_observed_layer,
                     "n_hits": int(layer_hits.sum()), "n_gap_rays": n_gaps_layer,
                     "n_rays_rejected_before_layer": int(layer_censored.sum()),
+                    "n_rays_unknown": int(layer_unknown.sum()),
                     "gap_fraction": n_gaps_layer / n_observed_layer if n_observed_layer else np.nan,
                     "converged": converged, "all_hits": saturated,
                 })
@@ -246,6 +266,7 @@ def compute_pai_traits(
                 base[f"pai_layer_{label}_conditional_n_hits"] = int(layer_hits.sum())
                 base[f"pai_layer_{label}_conditional_n_gaps"] = n_gaps_layer
                 base[f"pai_layer_{label}_conditional_n_censored"] = int(layer_censored.sum())
+                base[f"pai_layer_{label}_conditional_n_unknown"] = int(layer_unknown.sum())
                 base[f"pai_layer_{label}_conditional_gap_fraction"] = n_gaps_layer / n_observed_layer if n_observed_layer else np.nan
                 base[f"pai_layer_{label}_conditional_converged"] = converged
                 base[f"pai_layer_{label}_conditional_saturated"] = saturated

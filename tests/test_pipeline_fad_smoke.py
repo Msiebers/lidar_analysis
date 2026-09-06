@@ -11,6 +11,7 @@ from lidar_analysis.pipeline_core import (
     _apply_additional_scan_side_split,
     _fad_x_bounds_for_plot,
     _filter_fused_indices_for_plot_side,
+    _filter_plots_for_analysis_side,
     analyze_plot,
     build_plot_objects_from_mark_segments,
     reconstruct_world_points,
@@ -82,6 +83,9 @@ def test_additional_scan_config_keeps_pointcloud_lai_and_fad_on_same_x_half(tmp_
 
     assert (right.side_label, right.side_sign) == ("right", "positive")
     assert (left.side_label, left.side_sign) == ("left", "negative")
+    cfg.analyze_one_side = True
+    cfg.analyze_side = "right"
+    assert _filter_plots_for_analysis_side([right, left], ["scan", "scan"], cfg) == [right]
     assert _fad_x_bounds_for_plot(right, ["scan", "scan"], 1.5, 0.2) == pytest.approx((0.2, 1.5))
     assert _fad_x_bounds_for_plot(left, ["scan", "scan"], 1.5, 0.2) == pytest.approx((-1.5, -0.2))
 

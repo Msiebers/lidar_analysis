@@ -40,9 +40,9 @@ def test_mta_config_defaults_validation_and_legacy_mapping(tmp_path):
 
     defaults = default_analysis_yaml_dict()
     assert defaults["mta_angle_bin_deg"] == 5.0
-    assert defaults["mta_diagnostic"] is False
+    assert defaults["ray_box_diagnostic"] is False
     assert [key for key in defaults if key == "run_mta" or key.startswith("mta_")] == [
-        "run_mta", "mta_angle_bin_deg", "mta_diagnostic",
+        "run_mta", "mta_angle_bin_deg",
     ]
     assert "mta_fit_angle_min_deg" not in defaults
     assert "mta_fit_angle_max_deg" not in defaults
@@ -200,9 +200,28 @@ def test_build_config_maps_local_ground_grid_settings(tmp_path):
     from lidar_analysis.central_runner import build_config
 
     cfg = build_config({"use_local_ground_filter": True, "local_ground_x_bin_m": .05,
-                        "local_ground_z_bin_m": .05}, force=False, cart_id="CART", data_dir=tmp_path)
+                        "local_ground_z_bin_m": .05,
+                        "local_ground_seed_y_min_m": -.1,
+                        "local_ground_seed_y_max_m": .1,
+                        "local_ground_fallback_y_m": 0.0},
+                       force=False, cart_id="CART", data_dir=tmp_path)
     assert cfg.use_local_ground_filter is True
+    assert cfg.apply_ground_filter is True
     assert cfg.local_ground_x_bin_m == cfg.local_ground_z_bin_m == .05
+    assert cfg.local_ground_seed_y_min_m == pytest.approx(-.1)
+    assert cfg.local_ground_seed_y_max_m == pytest.approx(.1)
+    assert cfg.local_ground_fallback_y_m == pytest.approx(0.0)
+
+    cfg = build_config({
+        "use_local_ground_filter": True,
+        "apply_ground_filter": False,
+        "ray_box": {"ground_mode": "local_grid", "bottom_agl_m": 0.10, "x_near_m": 0.2},
+    }, force=False, cart_id="CART", data_dir=tmp_path)
+    assert cfg.use_local_ground_filter is False
+    assert cfg.apply_ground_filter is False
+    assert cfg.ray_box_ground_mode == "local_grid"
+    assert cfg.ray_box_bottom_agl_m == pytest.approx(0.10)
+    assert cfg.ray_box_x_near_m == pytest.approx(0.2)
 
 
 def test_build_config_maps_force_two_sided_targets(tmp_path):
@@ -216,6 +235,27 @@ def test_build_config_maps_force_two_sided_targets(tmp_path):
     )
 
     assert cfg.force_two_sided_targets is True
+
+
+def test_build_config_requires_side_when_analyzing_one_side(tmp_path):
+    from lidar_analysis.central_runner import build_config
+
+    with pytest.raises(ValueError, match="requires analyze_side"):
+        build_config({"analyze_one_side": True}, False, "CART", tmp_path)
+
+    with pytest.raises(ValueError, match="requires analyze_side"):
+        build_config(
+            {"analyze_one_side": True, "analyze_side": "middle"},
+            False, "CART", tmp_path,
+        )
+
+    for side in ("LEFT", "RIGHT"):
+        cfg = build_config(
+            {"analyze_one_side": True, "analyze_side": side},
+            False, "CART", tmp_path,
+        )
+        assert cfg.analyze_one_side is True
+        assert cfg.analyze_side == side.lower()
 
 
 def test_canopy_volume_2p5d_result_columns_when_enabled(tmp_path):
@@ -249,6 +289,8 @@ def test_full_experiment_config_template_loads(tmp_path):
     cfg = build_config(analysis, force=False, cart_id="CART", data_dir=tmp_path)
 
     assert cfg.force_two_sided_targets is False
+    assert cfg.analyze_one_side is False
+    assert cfg.analyze_side is None
     assert cfg.additional_scan_side_split is False
     assert cfg.additional_scan_side_axis == "x"
     assert cfg.markers_dirname == "markers"

@@ -6,9 +6,9 @@ import numpy as np
 import pandas as pd
 
 try:
-    from .fad import Box3D, _normalize_directions, box_is_valid, ray_box_intersection
+    from .fad import Box3D, _normalize_directions, _prepare_directions, box_is_valid, ray_box_intersection
 except ImportError:
-    from fad import Box3D, _normalize_directions, box_is_valid, ray_box_intersection
+    from fad import Box3D, _normalize_directions, _prepare_directions, box_is_valid, ray_box_intersection
 
 
 _MTA_POLY_COEFFS = (56.81964, 46.84833, -64.62133, -158.69141, 522.06260, 1008.14931)
@@ -113,6 +113,7 @@ def classify_first_events(
     max_observation_range_m: float | None,
     ray_ids: np.ndarray | None = None,
     tolerance_m: float = 1e-4,
+    normalize_directions: bool = True,
 ) -> dict[str, np.ndarray]:
     """Classify immutable raw beam observations against one bounded plot box."""
     origins = np.asarray(origins_m, dtype=float)
@@ -131,7 +132,7 @@ def classify_first_events(
     origins, directions, ranges, raw_hits, no_returns = _first_return_per_ray(
         origins, directions, ranges, raw_hits, no_returns, ray_ids
     )
-    directions, valid_direction = _normalize_directions(directions)
+    directions, valid_direction = _prepare_directions(directions, normalize=normalize_directions)
     t_enter, t_exit, intersects = ray_box_intersection(
         origins_m=origins, directions_unit=directions, box=box
     )
@@ -385,6 +386,7 @@ def compute_mta_traits(
     max_observation_range_m: float | None = 60.0,
     ray_ids: np.ndarray | None = None,
     diagnostic: bool = False,
+    normalize_directions: bool = True,
 ) -> tuple[dict[str, Any], pd.DataFrame | None]:
     """Estimate bounded effective plant-element MTA and return long bin diagnostics."""
     edges = angle_bin_edges_deg(angle_bin_deg)
@@ -415,6 +417,7 @@ def compute_mta_traits(
         origins_m=origins_m, directions_m=directions_m, ranges_m=ranges_m,
         raw_hit_mask=raw_hit_mask, explicit_no_return_mask=explicit_no_return_mask,
         box=box, max_observation_range_m=max_observation_range_m, ray_ids=ray_ids,
+        normalize_directions=normalize_directions,
     )
     fit_edges = fit_angle_bin_edges_deg(angle_bin_deg)
     groups = {

@@ -1,6 +1,7 @@
 import math
 import os
 import sys
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -24,7 +25,7 @@ try:
         marker_buffer_mm,
         marker_count_to_z_mm,
     )
-    from .pointcloud_ops import apply_pointcloud_ops, local_ground_filter
+    from .pointcloud_ops import add_local_ground_height, apply_pointcloud_ops, estimate_local_ground_grid, height_agl_filter
     from .analysis_target import AnalysisTarget
     from .beam_diagnostics import compute_beam_diagnostics, write_beam_diagnostics_csv
     from .fad import (
@@ -47,7 +48,7 @@ except Exception:
         marker_buffer_mm,
         marker_count_to_z_mm,
     )
-    from pointcloud_ops import apply_pointcloud_ops, local_ground_filter
+    from pointcloud_ops import add_local_ground_height, apply_pointcloud_ops, estimate_local_ground_grid, height_agl_filter
     from analysis_target import AnalysisTarget
     from beam_diagnostics import compute_beam_diagnostics, write_beam_diagnostics_csv
     from fad import (
@@ -1132,6 +1133,15 @@ def _plot_side_sign(plot: Plot, row_options: list[str]) -> str | None:
     return None
 
 
+def _plot_side_label(plot: Plot, row_options: list[str]) -> str:
+    side_label = getattr(plot, "side_label", None)
+    if side_label is None:
+        side_sign = _plot_side_sign(plot, row_options)
+        side_label = "left" if side_sign == "positive" else "right" if side_sign == "negative" else "both"
+    side_label = str(side_label).strip().lower()
+    return side_label if side_label in {"left", "right", "both", "none"} else "none"
+
+
 def _filter_fused_indices_for_plot_side(
     fused_np: np.ndarray,
     plot_idx: np.ndarray,
@@ -1163,6 +1173,152 @@ def _filter_fused_indices_for_plot_side(
     else:
         mask = directions_m[:, 0] < 0.0
     return plot_idx[mask]
+
+
+@dataclass
+class _SharedRayBox:
+    box: Box3D
+    height_result: object
+    origins_m: np.ndarray
+    directions_m: np.ndarray
+    ranges_m: np.ndarray
+    raw_hit_mask: np.ndarray
+    explicit_no_return_mask: np.ndarray
+    ray_ids: np.ndarray
+    normalize_directions: bool
+    diagnostics: dict
+
+
+def _ray_box_ground_mode(cfg: AnalysisConfig) -> str:
+    mode = str(getattr(cfg, "ray_box_ground_mode", "global_y")).strip().lower()
+    if mode not in {"global_y", "local_grid"}:
+        raise ValueError("ray_box.ground_mode must be 'global_y' or 'local_grid'")
+    return mode
+
+
+def _ray_box_bottom_m(cfg: AnalysisConfig) -> float:
+    value = getattr(cfg, "ray_box_bottom_agl_m", None)
+    if value is not None:
+        return float(value)
+    fallback = "fad_y_min_m" if cfg.run_fad or cfg.run_mta else "pai_y_min_m"
+    return float(getattr(cfg, fallback))
+
+
+def _ray_box_x_near_m(cfg: AnalysisConfig) -> float:
+    value = getattr(cfg, "ray_box_x_near_m", None)
+    if value is not None:
+        return float(value)
+    fallback = "fad_x_near_m" if cfg.run_fad or cfg.run_mta else "pai_x_near_m"
+    return float(getattr(cfg, fallback))
+
+
+def _ray_box_value(cfg: AnalysisConfig, name: str, fad_attr: str, pai_attr: str):
+    value = getattr(cfg, name, None)
+    if value is not None:
+        return value
+    return getattr(cfg, fad_attr if cfg.run_fad or cfg.run_mta else pai_attr)
+
+
+def _local_ground_kwargs(cfg: AnalysisConfig) -> dict:
+    return {
+        "x_bin_size_m": cfg.local_ground_x_bin_m * 1000.0,
+        "z_bin_size_m": cfg.local_ground_z_bin_m * 1000.0,
+        "ground_quantile": cfg.local_ground_quantile,
+        "min_points_per_xz_bin": cfg.local_ground_min_points_per_xz_bin,
+        "seed_y_min": None if cfg.local_ground_seed_y_min_m is None else cfg.local_ground_seed_y_min_m * 1000.0,
+        "seed_y_max": None if cfg.local_ground_seed_y_max_m is None else cfg.local_ground_seed_y_max_m * 1000.0,
+        "fallback_y": None if cfg.local_ground_fallback_y_m is None else cfg.local_ground_fallback_y_m * 1000.0,
+    }
+
+
+def _build_shared_ray_box(
+    p: Plot,
+    fused_np: np.ndarray,
+    cfg: AnalysisConfig,
+    row_options: list[str],
+    step_mm: float,
+    lidar_height_mm: float,
+    roll_offset: float,
+    pitch_offset: float,
+) -> _SharedRayBox:
+    row_width_m = _to_m_units(cfg.row_width_u, cfg.dim_units)
+    x_min_m, x_max_m = _fad_x_bounds_for_plot(p, row_options, row_width_m, _ray_box_x_near_m(cfg))
+    z_min_m = float(p.min_z) / 1000.0
+    z_max_m = float(p.max_z) / 1000.0
+    bottom_offset_m = _ray_box_bottom_m(cfg)
+    ground_mode = _ray_box_ground_mode(cfg)
+    points_df = (
+        p.analysis_target.current_points
+        if p.analysis_target is not None else pd.DataFrame(columns=["X", "Y", "Z"])
+    )
+    if {"X", "Y", "Z"} <= set(points_df.columns):
+        points_m = points_df[["X", "Y", "Z"]].to_numpy(dtype=np.float64, copy=False) / 1000.0
+    else:
+        points_m = np.empty((0, 3), dtype=np.float64)
+
+    ground_grid = getattr(p.analysis_target, "local_ground_grid", None) if p.analysis_target is not None else None
+    grid_ground = (
+        np.asarray(ground_grid.ground_y, dtype=float) / 1000.0
+        if ground_grid is not None else np.asarray([], dtype=float)
+    )
+    finite_grid_ground = grid_ground[np.isfinite(grid_ground)]
+    ground_reference_m = (
+        float(np.median(finite_grid_ground))
+        if ground_mode == "local_grid" and finite_grid_ground.size else 0.0
+    )
+    bottom_m = bottom_offset_m + ground_reference_m
+
+    height_result = estimate_fad_height_from_points(
+        points_m,
+        percentile=float(_ray_box_value(cfg, "ray_box_height_percentile", "fad_height_percentile", "pai_height_percentile")),
+        y_min_m=bottom_offset_m,
+        buffer_m=float(_ray_box_value(cfg, "ray_box_height_buffer_m", "fad_height_buffer_m", "pai_height_buffer_m")),
+        grubbs_alpha=float(_ray_box_value(cfg, "ray_box_grubbs_alpha", "fad_grubbs_alpha", "pai_grubbs_alpha")),
+    )
+    box = make_fad_box_from_footprint_and_height(
+        x_min_m=x_min_m, x_max_m=x_max_m, z_min_m=z_min_m, z_max_m=z_max_m,
+        height=height_result, y_min_m=bottom_m,
+    )
+
+    ray_idx = _plot_interval_indices_from_fused(fused_np, p, step_mm)
+    rows = fused_np[ray_idx]
+    origins_m, directions_m = reconstruct_world_rays(
+        rows, cfg, step_mm=step_mm, lidar_height_mm=lidar_height_mm,
+        roll_offset=roll_offset, pitch_offset=pitch_offset,
+    )
+    dist_mm = rows[:, 3].astype(np.float64, copy=False) if rows.size else np.empty((0,), dtype=np.float64)
+    raw_hit_mask = dist_mm > 0.0
+    ranges_m = dist_mm.astype(np.float64, copy=True) / 1000.0
+    ranges_m[~raw_hit_mask] = np.inf
+    explicit_no_return = np.isfinite(dist_mm) & (dist_mm == 0.0)
+
+    ground_y = (
+        pd.to_numeric(points_df["ground_Y"], errors="coerce").to_numpy(dtype=float) / 1000.0
+        if "ground_Y" in points_df else np.asarray([], dtype=float)
+    )
+    finite_ground = ground_y[np.isfinite(ground_y)]
+    ground_support = getattr(getattr(p.analysis_target, "local_ground_grid", None), "support", np.empty(0))
+    diagnostics = {
+        "ray_box_ground_mode": ground_mode,
+        "ray_box_bottom_agl_m": bottom_offset_m if ground_mode == "local_grid" else np.nan,
+        "ray_box_ground_reference_y_m": ground_reference_m if ground_mode == "local_grid" else np.nan,
+        "ray_box_ground_grid_x_bin_m": cfg.local_ground_x_bin_m if ground_mode == "local_grid" else np.nan,
+        "ray_box_ground_grid_z_bin_m": cfg.local_ground_z_bin_m if ground_mode == "local_grid" else np.nan,
+        "ray_box_ground_y_min_m": float(np.min(finite_ground)) if finite_ground.size else np.nan,
+        "ray_box_ground_y_mean_m": float(np.mean(finite_ground)) if finite_ground.size else np.nan,
+        "ray_box_ground_y_max_m": float(np.max(finite_ground)) if finite_ground.size else np.nan,
+        "ray_box_ground_observed_cells": int(np.sum(ground_support == "observed")),
+        "ray_box_ground_interpolated_cells": int(np.sum(ground_support == "interpolated")),
+        "ray_box_ground_fallback_cells": int(np.sum(ground_support == "fallback")),
+        "ray_box_y_bottom_m": box.y_min,
+        "ray_box_height_m": box.y_max - box.y_min,
+        "ray_box_local_ground_rays_rejected": 0,
+        "pointcloud_ground_filter_applied": bool(
+            getattr(cfg, "apply_ground_filter", False)
+            or getattr(cfg, "use_local_ground_filter", False)
+        ),
+    }
+    return _SharedRayBox(box, height_result, origins_m, directions_m, ranges_m, raw_hit_mask, explicit_no_return, ray_idx, True, diagnostics)
 
 
 def _apply_forced_two_sided_targets(plots: list[Plot], scan_base: str, cfg: AnalysisConfig) -> list[Plot]:
@@ -1198,6 +1354,20 @@ def _apply_additional_scan_side_split(plots: list[Plot], scan_base: str, cfg: An
             with_side_suffix(plot, negative, "negative"),
         )
     ]
+
+
+def _filter_plots_for_analysis_side(
+    plots: list[Plot], row_options: list[str], cfg: AnalysisConfig,
+) -> list[Plot]:
+    if not bool(getattr(cfg, "analyze_one_side", False)):
+        return plots
+    selected = str(getattr(cfg, "analyze_side", "")).strip().lower()
+    if selected not in {"left", "right"}:
+        raise ValueError("analyze_one_side=true requires analyze_side: left or right")
+    filtered = [plot for plot in plots if _plot_side_label(plot, row_options) == selected]
+    if not filtered:
+        raise ValueError(f"No {selected} targets were found for analyze_one_side")
+    return filtered
 
 
 def analyze_plot(
@@ -1241,10 +1411,13 @@ def analyze_plot(
     density = float("nan")
     stand_topo_count = float("nan")
     stand_topo_per_m = float("nan")
+    stand_topo_per_m2 = float("nan")
     stand_topo_left_count = float("nan")
     stand_topo_right_count = float("nan")
     stand_topo_left_per_m = float("nan")
     stand_topo_right_per_m = float("nan")
+    stand_topo_left_per_m2 = float("nan")
+    stand_topo_right_per_m2 = float("nan")
     plot_idx = np.empty((0,), dtype=np.int32)
     lai_plot_idx = np.empty((0,), dtype=np.int32)
     fad_traits = {}
@@ -1282,26 +1455,38 @@ def analyze_plot(
             beam_id_plot = beam_diag.beam_id_by_row[plot_idx]
         points_df["beam_id"] = beam_id_plot.astype(np.int32, copy=False)
 
-        def _apply_local_ground_if_enabled(target):
-            if not cfg.use_local_ground_filter:
+        def _add_local_ground_if_needed(target):
+            apply_ground_filter = bool(
+                getattr(cfg, "apply_ground_filter", False)
+                or getattr(cfg, "use_local_ground_filter", False)
+            )
+            ray_traits_need_ground = (
+                (bool(getattr(cfg, "run_fad", False)) or bool(getattr(cfg, "run_mta", False)) or bool(getattr(cfg, "run_pai", False)))
+                and _ray_box_ground_mode(cfg) == "local_grid"
+            )
+            if not apply_ground_filter and not ray_traits_need_ground:
                 return target
             before = len(target.current_points)
-            target.current_points = local_ground_filter(
-                target.current_points,
-                x_bin_size_m=cfg.local_ground_x_bin_m * 1000.0,
-                z_bin_size_m=cfg.local_ground_z_bin_m * 1000.0,
-                ground_quantile=cfg.local_ground_quantile,
-                min_points_per_xz_bin=cfg.local_ground_min_points_per_xz_bin,
-                seed_y_min=None if cfg.local_ground_seed_y_min_m is None else cfg.local_ground_seed_y_min_m * 1000.0,
-                seed_y_max=None if cfg.local_ground_seed_y_max_m is None else cfg.local_ground_seed_y_max_m * 1000.0,
-                min_height_agl_m=cfg.min_height_agl_m * 1000.0,
+            ground_grid = estimate_local_ground_grid(target.current_points, **_local_ground_kwargs(cfg))
+            target.local_ground_grid = ground_grid
+            with_ground = add_local_ground_height(target.current_points, ground_grid=ground_grid)
+            target.current_points = (
+                height_agl_filter(with_ground, min_height_agl_m=cfg.min_height_agl_m * 1000.0)
+                if apply_ground_filter else with_ground
             )
-            target.diagnostics["local_ground_filter"] = {
+            target.diagnostics["local_ground"] = {
                 "local_ground_algorithm": "grid_mesh",
+                "apply_ground_filter": apply_ground_filter,
+                "ray_traits_need_ground": ray_traits_need_ground,
                 "points_before_local_ground": before,
                 "points_after_local_ground": len(target.current_points),
                 "points_removed_local_ground": before - len(target.current_points),
+                "ground_cells_observed": int(np.sum(ground_grid.support == "observed")),
+                "ground_cells_interpolated": int(np.sum(ground_grid.support == "interpolated")),
+                "ground_cells_fallback": int(np.sum(ground_grid.support == "fallback")),
             }
+            if apply_ground_filter:
+                target.diagnostics["local_ground_filter"] = target.diagnostics["local_ground"]
             return target
 
         ops_cfg = getattr(cfg, "pointcloud_ops", None) or []
@@ -1316,7 +1501,7 @@ def analyze_plot(
                 plot=p.letter,
                 side=getattr(p, "side_label", None),
             )
-            target = _apply_local_ground_if_enabled(target)
+            target = _add_local_ground_if_needed(target)
             target = apply_pointcloud_ops(
                 target,
                 ops_cfg,
@@ -1369,8 +1554,8 @@ def analyze_plot(
                 plot=p.letter,
                 side=getattr(p, "side_label", None),
             )
-            p.analysis_target = _apply_local_ground_if_enabled(p.analysis_target)
-            if cfg.use_local_ground_filter:
+            p.analysis_target = _add_local_ground_if_needed(p.analysis_target)
+            if bool(getattr(cfg, "apply_ground_filter", False) or getattr(cfg, "use_local_ground_filter", False)):
                 p.cloud = p.analysis_target.current_points[["X", "Y", "Z", "RSSI"]].to_numpy(dtype=np.float32, copy=False)
         n_points = int(p.analysis_target.current_points.shape[0])
         if cfg.run_height:
@@ -1441,90 +1626,51 @@ def analyze_plot(
         n_scans = int(lai_traits.get("lai_n_scans", 0) or 0)
         n_angles = int(lai_traits.get("lai_n_angles", 0) or 0)
 
-    if cfg.run_fad or cfg.run_mta:
-        row_width_m = _to_m_units(cfg.row_width_u, cfg.dim_units)
-        x_min_m, x_max_m = _fad_x_bounds_for_plot(
-            p, row_options, row_width_m, cfg.fad_x_near_m
+    shared_ray_box = None
+    if cfg.run_fad or cfg.run_mta or cfg.run_pai:
+        shared_ray_box = _build_shared_ray_box(
+            p, fused_np, cfg, row_options, step_mm, lidar_height_mm, roll_offset, pitch_offset
         )
-        z_min_m = float(p.min_z) / 1000.0
-        z_max_m = float(p.max_z) / 1000.0
-
-        if p.analysis_target is not None:
-            fad_points_m = (
-                p.analysis_target.current_points[["X", "Y", "Z"]]
-                .to_numpy(dtype=np.float64, copy=False)
-                / 1000.0
-            )
-        else:
-            fad_points_m = np.empty((0, 3), dtype=np.float64)
-
-        height_result = estimate_fad_height_from_points(
-            fad_points_m,
-            percentile=cfg.fad_height_percentile,
-            y_min_m=cfg.fad_y_min_m,
-            buffer_m=cfg.fad_height_buffer_m,
-            grubbs_alpha=cfg.fad_grubbs_alpha,
-        )
-        fad_box: Box3D = make_fad_box_from_footprint_and_height(
-            x_min_m=x_min_m,
-            x_max_m=x_max_m,
-            z_min_m=z_min_m,
-            z_max_m=z_max_m,
-            height=height_result,
-            y_min_m=cfg.fad_y_min_m,
-        )
-
-        fad_plot_idx = _plot_interval_indices_from_fused(fused_np, p, step_mm)
-        fad_rows = fused_np[fad_plot_idx]
-        origins_m, directions_m = reconstruct_world_rays(
-            fad_rows,
-            cfg,
-            step_mm=step_mm,
-            lidar_height_mm=lidar_height_mm,
-            roll_offset=roll_offset,
-            pitch_offset=pitch_offset,
-        )
-        dist_mm = fad_rows[:, 3].astype(np.float64, copy=False) if fad_rows.size else np.empty((0,), dtype=np.float64)
-        raw_hit_mask = dist_mm > 0.0
-        ranges_m = dist_mm / 1000.0
-        ranges_m = ranges_m.astype(np.float64, copy=True)
-        ranges_m[~raw_hit_mask] = np.inf
-
         target_id = p.analysis_target.target_id if p.analysis_target is not None else p.name
 
         if cfg.run_fad:
-            fad_traits.update(height_result_to_traits(height_result))
+            fad_layer_thickness = (
+                getattr(cfg, "ray_box_layer_thickness_m", None)
+                if getattr(cfg, "ray_box_layer_thickness_m", None) is not None
+                else cfg.fad_layer_thickness_m
+            )
+            fad_traits.update(height_result_to_traits(shared_ray_box.height_result))
             fad_traits.update(compute_fad_traits(
-                origins_m=origins_m,
-                directions_m=directions_m,
-                ranges_m=ranges_m,
-                raw_hit_mask=raw_hit_mask,
-                box=fad_box,
+                origins_m=shared_ray_box.origins_m,
+                directions_m=shared_ray_box.directions_m,
+                ranges_m=shared_ray_box.ranges_m,
+                raw_hit_mask=shared_ray_box.raw_hit_mask,
+                box=shared_ray_box.box,
                 g_function=cfg.fad_g_function,
-                layer_thickness_m=cfg.fad_layer_thickness_m if cfg.fad_run_layers else None,
+                layer_thickness_m=fad_layer_thickness if cfg.fad_run_layers else None,
                 include_layer_columns=cfg.fad_include_layer_columns if cfg.fad_run_layers else False,
+                normalize_directions=shared_ray_box.normalize_directions,
             ))
             if "fad_lai_from_layers" in fad_traits:
                 fad_traits["fad_integrated_m2_m2"] = fad_traits["fad_lai_from_layers"]
 
             fad_value = float(fad_traits.get("fad_app_m2_m3", float("nan")))
-            returns = int(np.sum(raw_hit_mask))
-            no_returns = int(raw_hit_mask.size - returns)
+            returns = int(np.sum(shared_ray_box.raw_hit_mask))
+            no_returns = int(shared_ray_box.raw_hit_mask.size - returns)
             print(
-                f"[FAD] target={target_id} rays={int(fad_plot_idx.size)} "
+                f"[FAD] target={target_id} rays={int(shared_ray_box.ray_ids.size)} "
                 f"returns={returns} no_returns={no_returns} "
-                f"height={height_result.height_m:.3f} fad={fad_value:.3f}"
+                f"height={shared_ray_box.height_result.height_m:.3f} fad={fad_value:.3f}"
             )
 
         if cfg.run_mta:
-            explicit_no_return = np.isfinite(dist_mm) & (dist_mm == 0.0)
             mta_traits, mta_bins = compute_mta_traits(
-                origins_m=origins_m,
-                directions_m=directions_m,
-                ranges_m=ranges_m,
-                raw_hit_mask=raw_hit_mask,
-                explicit_no_return_mask=explicit_no_return,
-                box=fad_box,
+                origins_m=shared_ray_box.origins_m,
+                directions_m=shared_ray_box.directions_m,
+                ranges_m=shared_ray_box.ranges_m,
+                raw_hit_mask=shared_ray_box.raw_hit_mask,
+                explicit_no_return_mask=shared_ray_box.explicit_no_return_mask,
+                box=shared_ray_box.box,
                 angle_bin_deg=cfg.mta_angle_bin_deg,
                 fit_angle_min_deg=cfg.mta_fit_angle_min_deg,
                 fit_angle_max_deg=cfg.mta_fit_angle_max_deg,
@@ -1533,69 +1679,54 @@ def analyze_plot(
                 min_valid_fit_bins=cfg.mta_min_valid_fit_bins,
                 min_solid_angle_coverage=cfg.mta_min_solid_angle_coverage,
                 max_observation_range_m=cfg.mta_max_observation_range_m,
-                ray_ids=fad_plot_idx,
-                diagnostic=cfg.mta_diagnostic,
+                ray_ids=shared_ray_box.ray_ids,
+                diagnostic=cfg.ray_box_diagnostic,
+                normalize_directions=shared_ray_box.normalize_directions,
             )
             if mta_bins is not None:
                 p.mta_bin_diagnostics = mta_bins
 
-    if cfg.run_pai:
-        row_width_m = _to_m_units(cfg.row_width_u, cfg.dim_units)
-        x_min_m, x_max_m = _fad_x_bounds_for_plot(
-            p, row_options, row_width_m, cfg.pai_x_near_m
-        )
-        z_min_m = float(p.min_z) / 1000.0
-        z_max_m = float(p.max_z) / 1000.0
-        pai_points_m = (
-            p.analysis_target.current_points[["X", "Y", "Z"]].to_numpy(dtype=np.float64, copy=False) / 1000.0
-            if p.analysis_target is not None else np.empty((0, 3), dtype=np.float64)
-        )
-        pai_height = estimate_fad_height_from_points(
-            pai_points_m, percentile=cfg.pai_height_percentile,
-            y_min_m=cfg.pai_y_min_m, buffer_m=cfg.pai_height_buffer_m,
-            grubbs_alpha=cfg.pai_grubbs_alpha,
-        )
-        pai_box = make_fad_box_from_footprint_and_height(
-            x_min_m=x_min_m, x_max_m=x_max_m, z_min_m=z_min_m, z_max_m=z_max_m,
-            height=pai_height, y_min_m=cfg.pai_y_min_m,
-        )
-        pai_plot_idx = _plot_interval_indices_from_fused(fused_np, p, step_mm)
-        pai_rows = fused_np[pai_plot_idx]
-        origins_m, directions_m = reconstruct_world_rays(
-            pai_rows, cfg, step_mm=step_mm, lidar_height_mm=lidar_height_mm,
-            roll_offset=roll_offset, pitch_offset=pitch_offset,
-        )
-        dist_mm = pai_rows[:, 3].astype(np.float64, copy=False) if pai_rows.size else np.empty(0)
-        raw_hit_mask = dist_mm > 0.0
-        ranges_m = dist_mm.astype(np.float64, copy=True) / 1000.0
-        ranges_m[~raw_hit_mask] = np.inf
-        pai_traits = compute_pai_traits(
-            origins_m=origins_m, directions_m=directions_m, ranges_m=ranges_m,
-            raw_hit_mask=raw_hit_mask, box=pai_box,
-            g_function=cfg.pai_g_function, g_value=cfg.pai_g_value,
-            layer_thickness_m=cfg.pai_layer_thickness_m,
-            include_layer_columns=cfg.pai_include_layer_columns,
-            run_conditional_profile=cfg.pai_run_conditional_profile,
-            run_joint_profile=cfg.pai_run_joint_profile,
-            diagnostic=cfg.pai_diagnostic,
-        )
-        print(
-            f"[PAI] target={p.name} rays={pai_plot_idx.size} "
-            f"observed={pai_traits['pai_n_rays_observed']} pai={pai_traits['pai_m2_m2']}"
-        )
+        if cfg.run_pai:
+            pai_traits = compute_pai_traits(
+                origins_m=shared_ray_box.origins_m,
+                directions_m=shared_ray_box.directions_m,
+                ranges_m=shared_ray_box.ranges_m,
+                raw_hit_mask=shared_ray_box.raw_hit_mask,
+                explicit_no_return_mask=shared_ray_box.explicit_no_return_mask,
+                max_observation_range_m=cfg.mta_max_observation_range_m,
+                box=shared_ray_box.box,
+                g_function=cfg.pai_g_function, g_value=cfg.pai_g_value,
+                layer_thickness_m=cfg.pai_layer_thickness_m,
+                include_layer_columns=cfg.pai_include_layer_columns,
+                run_conditional_profile=cfg.pai_run_conditional_profile,
+                run_joint_profile=cfg.pai_run_joint_profile,
+                diagnostic=cfg.ray_box_diagnostic,
+                normalize_directions=shared_ray_box.normalize_directions,
+            )
+            pai_traits.update(shared_ray_box.diagnostics)
+            print(
+                f"[PAI] target={p.name} rays={shared_ray_box.ray_ids.size} "
+                f"observed={pai_traits['pai_n_rays_observed']} pai={pai_traits['pai_m2_m2']}"
+            )
 
+    side_label = _plot_side_label(p, row_options)
+    row_width_m = _to_m_units(cfg.row_width_u, cfg.dim_units)
+    target_width_m = row_width_m if side_label in {"left", "right"} else 2.0 * row_width_m
     z_min, z_max = p.min_z, p.max_z
     plot_length_m = max((float(z_max) - float(z_min)) / 1000.0, 0.0)
-    plot_width_m = _compute_plot_width(p.cloud, 2.0 * _to_m_units(cfg.row_width_u, cfg.dim_units))
+    plot_width_m = _compute_plot_width(p.cloud, target_width_m)
     if np.isfinite(plot_width_m) and plot_length_m > 0:
         area_m2 = plot_width_m * plot_length_m
     else:
         area_m2 = float("nan")
     density = n_points / area_m2 if (np.isfinite(area_m2) and area_m2 > 0) else float("nan")
 
-    stand_topo_per_m = float("nan")
-    stand_topo_left_count = float("nan")
-    stand_topo_right_count = float("nan")
+    topology_cfg = next((
+        op for op in (getattr(cfg, "pointcloud_ops", None) or [])
+        if isinstance(op, dict)
+        and str(op.get("name", op.get("op", ""))).strip().lower() == "topology_trait"
+        and op.get("enabled", True) is not False
+    ), {})
     if op_traits:
         stand_topo_count = float(op_traits.get("topo_raw_count", float("nan")))
         stand_topo_per_m = float(op_traits.get("topo_avg_per_m", op_traits.get("topo_count", float("nan"))))
@@ -1604,13 +1735,14 @@ def analyze_plot(
         stand_topo_left_per_m = float(op_traits.get("topo_left_per_m", op_traits.get("topo_count_left", float("nan"))))
         stand_topo_right_per_m = float(op_traits.get("topo_right_per_m", op_traits.get("topo_count_right", float("nan"))))
 
-    side_label = getattr(p, "side_label", None)
-    if side_label is None:
-        side_sign = _plot_side_sign(p, row_options)
-        side_label = "left" if side_sign == "positive" else "right" if side_sign == "negative" else "both"
-    side_label = str(side_label).strip().lower()
-    if side_label not in {"left", "right", "both", "none"}:
-        side_label = "none"
+    if bool(topology_cfg.get("include_per_m2", False)):
+        if np.isfinite(area_m2) and area_m2 > 0.0:
+            stand_topo_per_m2 = stand_topo_count / area_m2
+        side_area_m2 = row_width_m * plot_length_m
+        if np.isfinite(side_area_m2) and side_area_m2 > 0.0:
+            stand_topo_left_per_m2 = stand_topo_left_count / side_area_m2
+            stand_topo_right_per_m2 = stand_topo_right_count / side_area_m2
+
     target_id = p.analysis_target.target_id if p.analysis_target is not None else p.name
 
     result = {
@@ -1636,10 +1768,13 @@ def analyze_plot(
         "plot_width_m": plot_width_m,
         "stand_topo_count": stand_topo_count,
         "stand_topo_per_m": stand_topo_per_m,
+        "stand_topo_per_m2": stand_topo_per_m2,
         "stand_topo_left_count": stand_topo_left_count,
         "stand_topo_right_count": stand_topo_right_count,
         "stand_topo_left_per_m": stand_topo_left_per_m,
         "stand_topo_right_per_m": stand_topo_right_per_m,
+        "stand_topo_left_per_m2": stand_topo_left_per_m2,
+        "stand_topo_right_per_m2": stand_topo_right_per_m2,
         "voxel_count": op_traits.get("voxel_count", float("nan")),
         "voxel_input_points": op_traits.get("voxel_input_points", float("nan")),
         "voxel_input_min_x": op_traits.get("voxel_input_min_x", float("nan")),
@@ -1662,7 +1797,7 @@ def analyze_plot(
     result.update(fad_traits)
     result.update(pai_traits)
     result.update(mta_traits)
-    if bool(getattr(cfg, "mta_diagnostic", False)) and getattr(p, "mta_bin_diagnostics", None) is not None:
+    if bool(getattr(cfg, "ray_box_diagnostic", False)) and getattr(p, "mta_bin_diagnostics", None) is not None:
         result["_mta_diagnostics"] = p.mta_bin_diagnostics.to_dict("records")
 
     print(
@@ -1684,7 +1819,7 @@ _OUTPUT_COUNT_COLUMNS = {
     "mta_n_hits_before_box", "mta_n_unknown", "mta_min_rays_per_bin",
     "mta_min_valid_fit_bins",
     "pai_n_rays_total", "pai_n_rays_intersecting_box", "pai_n_rays_observed",
-    "pai_n_hits", "pai_n_full_gaps", "pai_n_hits_before_box",
+    "pai_n_hits", "pai_n_full_gaps", "pai_n_hits_before_box", "pai_n_unknown",
     "pai_n_layers", "pai_profile_rank", "pai_profile_n_layers", "pai_profile_n_observed",
     "canopy_volume_2p5d_occupied_cells", "canopy_volume_2p5d_total_cells",
 }
@@ -1719,10 +1854,13 @@ def trait_summary_row(rec: dict, cfg: AnalysisConfig) -> dict:
         "plot_width_m": rec.get("plot_width_m", float("nan")),
         "stand_topo_count": rec.get("stand_topo_count", float("nan")),
         "stand_topo_per_m": rec.get("stand_topo_per_m", float("nan")),
+        "stand_topo_per_m2": rec.get("stand_topo_per_m2", float("nan")),
         "stand_topo_left_count": rec.get("stand_topo_left_count", float("nan")),
         "stand_topo_right_count": rec.get("stand_topo_right_count", float("nan")),
         "stand_topo_left_per_m": rec.get("stand_topo_left_per_m", float("nan")),
         "stand_topo_right_per_m": rec.get("stand_topo_right_per_m", float("nan")),
+        "stand_topo_left_per_m2": rec.get("stand_topo_left_per_m2", float("nan")),
+        "stand_topo_right_per_m2": rec.get("stand_topo_right_per_m2", float("nan")),
         "voxel_count": rec.get("voxel_count", float("nan")),
         "voxel_input_points": rec.get("voxel_input_points", float("nan")),
         "voxel_input_min_x": rec.get("voxel_input_min_x", float("nan")),
@@ -1746,7 +1884,10 @@ def trait_summary_row(rec: dict, cfg: AnalysisConfig) -> dict:
             "pai_m2_m2", "pai_height_m", "pai_layer_thickness_m", "pai_n_layers",
         )})
         if bool(getattr(cfg, "pai_include_layer_columns", False)):
-            row.update({key: value for key, value in rec.items() if key.startswith("pai_layer_")})
+            row.update({
+                key: value for key, value in rec.items()
+                if key.startswith("pai_layer_") and key.endswith("_conditional_pai_m2_m2")
+            })
     return row
 
 
@@ -2075,6 +2216,7 @@ def process_scan(
     trait_records = []
     plots = _apply_forced_two_sided_targets(plots, scan_base, cfg)
     plots = _apply_additional_scan_side_split(plots, scan_base, cfg)
+    plots = _filter_plots_for_analysis_side(plots, row_options, cfg)
 
     if bool(getattr(cfg, "write_reference_points", False)) and split_source == "marks" and marker_path is not None:
         write_marker_reference_points(

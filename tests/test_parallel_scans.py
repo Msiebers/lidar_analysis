@@ -106,6 +106,20 @@ def test_null_runs_sequentially_and_records_completion(tmp_path, monkeypatch):
         assert [row["scan_name"] for row in csv.DictReader(f)] == calls
 
 
+def test_yaml_fusion_method_is_honored_without_override(tmp_path, monkeypatch):
+    methods = []
+
+    def process_scan(scan_base, cfg, **kwargs):
+        methods.append(cfg.fusion_method)
+        return _rows(scan_base, **kwargs)
+
+    _run(
+        tmp_path, None, monkeypatch, process_scan,
+        experiment_analysis={"fusion_method": "imu_interp"},
+    )
+    assert methods == ["imu_interp", "imu_interp", "imu_interp"]
+
+
 def test_parallel_two_has_no_duplicate_rows_and_skips_completed(tmp_path, monkeypatch):
     worker_counts = []
 
@@ -205,7 +219,7 @@ def test_mta_diagnostics_are_single_opt_in_file_and_do_not_change_main_results(
                 "mta_deg": value, "mta_method": "bounded_lang_v1",
                 "mta_qc_pass": True, "mta_status": "ok", "points": 1,
             }
-            if cfg.mta_diagnostic:
+            if cfg.ray_box_diagnostic:
                 record["_mta_diagnostics"] = [{
                     "mta_direction_group": "all", "mta_bin_role": "fit",
                     "mta_bin_lower_deg": 25.0, "mta_bin_upper_deg": 30.0,
@@ -216,14 +230,14 @@ def test_mta_diagnostics_are_single_opt_in_file_and_do_not_change_main_results(
 
     off_results, off_output = _run(
         tmp_path / "off", None, monkeypatch, rows,
-        {"run_mta": True, "mta_diagnostic": False},
+        {"run_mta": True, "ray_box": {"diagnostic": False}},
     )
     on_results, on_output = _run(
         tmp_path / "on", None, monkeypatch, rows,
-        {"run_mta": True, "mta_diagnostic": True},
+        {"run_mta": True, "ray_box": {"diagnostic": True}},
     )
-    assert not (off_output / "mta_diagnostics.csv").exists()
-    assert [path.name for path in on_output.glob("*mta*.csv")] == ["mta_diagnostics.csv"]
+    assert not (off_output / "ray_box_diagnostics.csv").exists()
+    assert (on_output / "ray_box_diagnostics.csv").exists()
 
     with open(off_results, newline="", encoding="utf-8") as f:
         off_reader = csv.DictReader(f)
@@ -241,9 +255,10 @@ def test_mta_diagnostics_are_single_opt_in_file_and_do_not_change_main_results(
     assert [(row["scan_name"], row["plot"], row["side"], row["mta_deg"]) for row in off_rows] == expected
     assert [(row["scan_name"], row["plot"], row["side"], row["mta_deg"]) for row in on_rows] == expected
     assert {row["mta_qc_pass"] for row in off_rows + on_rows} == {"True"}
-    with open(on_output / "mta_diagnostics.csv", newline="", encoding="utf-8") as f:
+    with open(on_output / "ray_box_diagnostics.csv", newline="", encoding="utf-8") as f:
         diagnostic_rows = list(csv.DictReader(f))
-    assert len(diagnostic_rows) == 9
+    assert len(diagnostic_rows) == 18
+    assert {row["diagnostic_type"] for row in diagnostic_rows} == {"summary", "mta_bin"}
     assert {"experiment", "date", "scan_name", "scan_number", "plot", "side"} <= set(diagnostic_rows[0])
     assert "[MTA" not in capsys.readouterr().out
 
@@ -264,10 +279,12 @@ def test_pai_layer_columns_go_to_results_when_enabled(tmp_path, monkeypatch):
             "_pai_layers": [
                 {"layer_bottom_m": 0.0, "layer_top_m": 0.5, "layer_mid_m": 0.25,
                  "layer_thickness_m": 0.5, "pad_layer_m2_m3": 0.2,
-                 "pai_layer_m2_m2": 0.1},
+                 "pai_layer_m2_m2": 0.1, "n_rays_intersecting": 8,
+                 "converged": True},
                 {"layer_bottom_m": 0.5, "layer_top_m": 1.0, "layer_mid_m": 0.75,
                  "layer_thickness_m": 0.5, "pad_layer_m2_m3": 0.4,
-                 "pai_layer_m2_m2": 0.2},
+                 "pai_layer_m2_m2": 0.2, "n_rays_intersecting": 7,
+                 "converged": True},
             ],
         }
         if cfg.pai_include_layer_columns:
@@ -284,7 +301,7 @@ def test_pai_layer_columns_go_to_results_when_enabled(tmp_path, monkeypatch):
     )
     _, diagnostics = _run(
         tmp_path / "diagnostics", None, monkeypatch, rows,
-        {"run_pai": True, "pai_diagnostic": True},
+        {"run_pai": True, "ray_box": {"diagnostic": True}},
     )
 
     with open(main, newline="", encoding="utf-8") as f:
@@ -297,7 +314,7 @@ def test_pai_layer_columns_go_to_results_when_enabled(tmp_path, monkeypatch):
     assert not list(off.glob("pai_*.csv"))
     assert not (layers / "pai_layers.csv").exists()
     assert not (layers / "pai_diagnostics.csv").exists()
-    assert (diagnostics / "pai_diagnostics.csv").exists()
+    assert (diagnostics / "ray_box_diagnostics.csv").exists()
     assert not (diagnostics / "pai_layers.csv").exists()
 
     with open(layers / "results.csv", newline="", encoding="utf-8") as f:
@@ -306,13 +323,18 @@ def test_pai_layer_columns_go_to_results_when_enabled(tmp_path, monkeypatch):
     assert len(layer_rows) == 3
     assert "pai_layer_000_050_conditional_pai_m2_m2" in layer_reader.fieldnames
     assert "pai_layer_050_100_conditional_pai_m2_m2" in layer_reader.fieldnames
+    assert not any("_conditional_n_" in name for name in layer_reader.fieldnames)
+    assert not any("_conditional_pad_" in name for name in layer_reader.fieldnames)
     assert {row["pai_layer_000_050_conditional_pai_m2_m2"] for row in layer_rows} == {"0.10"}
-    with open(diagnostics / "pai_diagnostics.csv", newline="", encoding="utf-8") as f:
+    with open(diagnostics / "ray_box_diagnostics.csv", newline="", encoding="utf-8") as f:
         diagnostic_reader = csv.DictReader(f)
         diagnostic_rows = list(diagnostic_reader)
-    assert len(diagnostic_rows) == 6
+    assert len(diagnostic_rows) == 9
+    assert {row["diagnostic_type"] for row in diagnostic_rows} == {"summary", "pai_layer"}
     assert "pad_layer_m2_m3" in diagnostic_reader.fieldnames
-    assert "whole_box_pai_m2_m2" in diagnostic_reader.fieldnames
+    assert "n_rays_intersecting" in diagnostic_reader.fieldnames
+    assert "converged" in diagnostic_reader.fieldnames
+    assert "pai_whole_box_m2_m2" in diagnostic_reader.fieldnames
 
 
 def test_pai_diagnostics_write_whole_box_rows_without_layers(tmp_path, monkeypatch):
@@ -332,15 +354,15 @@ def test_pai_diagnostics_write_whole_box_rows_without_layers(tmp_path, monkeypat
 
     _, output = _run(
         tmp_path / "diagnostics_no_layers", None, monkeypatch, rows,
-        {"run_pai": True, "pai_diagnostic": True},
+        {"run_pai": True, "ray_box": {"diagnostic": True}},
     )
 
-    with open(output / "pai_diagnostics.csv", newline="", encoding="utf-8") as f:
+    with open(output / "ray_box_diagnostics.csv", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
 
     assert len(rows) == 3
-    assert "whole_box_pai_m2_m2" in reader.fieldnames
+    assert "pai_whole_box_m2_m2" in reader.fieldnames
     assert "layer_bottom_m" not in reader.fieldnames
     assert [row["scan_name"] for row in rows] == ["001", "002", "003"]
 
@@ -360,15 +382,14 @@ def test_pai_output_rejects_inconsistent_layer_arithmetic(tmp_path):
         }],
     }
     with pytest.raises(AssertionError, match="Total PAI"):
-        central_runner.append_pai_outputs(
-            tmp_path / "layers.csv", tmp_path / "diagnostics.csv",
-            "exp", "2026_08_26", "scan_001", [rec | {"pai_m2_m2": 0.2}], cfg,
+        central_runner.append_ray_box_diagnostics(
+            tmp_path / "diagnostics.csv", "exp", "2026_08_26", "scan_001",
+            [rec | {"pai_m2_m2": 0.2}],
         )
     with pytest.raises(AssertionError, match="Layer PAI"):
-        central_runner.append_pai_outputs(
-            tmp_path / "layers.csv", tmp_path / "diagnostics.csv",
-            "exp", "2026_08_26", "scan_001",
-            [rec | {"_pai_layers": [rec["_pai_layers"][0] | {"pad_layer_m2_m3": 0.4}]}], cfg,
+        central_runner.append_ray_box_diagnostics(
+            tmp_path / "diagnostics.csv", "exp", "2026_08_26", "scan_001",
+            [rec | {"_pai_layers": [rec["_pai_layers"][0] | {"pad_layer_m2_m3": 0.4}]}],
         )
 
 

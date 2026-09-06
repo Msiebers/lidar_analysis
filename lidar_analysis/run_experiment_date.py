@@ -14,9 +14,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--working", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--config", help="Optional explicit local experiment_config.yaml override")
-    parser.add_argument("--cart-id")
-    parser.add_argument("--force", action="store_true")
-    parser.add_argument("--fusion", default="interp", choices=["interp", "imu_interp", "pps"])
     return parser.parse_args()
 
 
@@ -48,9 +45,6 @@ def call_runner(args: argparse.Namespace, input_dir: Path, config_path: Path) ->
         output_dir=Path(args.output).resolve(),
         experiment_config=experiment_config,
         experiment_analysis=analysis_cfg,
-        cart_id=args.cart_id,
-        force=bool(args.force),
-        fusion_method=args.fusion,
     )
     return 0
 

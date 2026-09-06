@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from lidar_analysis.pointcloud_ops import add_local_ground_height, local_ground_filter
+from lidar_analysis.pointcloud_ops import LocalGroundGrid, add_local_ground_height, local_ground_filter
 
 
 def _cloud(missing=(), bad=None, reverse=False):
@@ -42,9 +42,10 @@ def test_grid_is_snapped_and_opposite_travel_is_symmetric():
     assert _estimate(shifted).height_agl.notna().all()
 
 
-def test_missing_cells_fill_locally_but_large_holes_stay_unreliable():
+def test_missing_cells_do_not_inherit_neighboring_ground():
     near = _estimate(_cloud(missing={(0, 2)}))
-    assert (near.ground_support == "interpolated").any()
+    assert (near.ground_support == "unreliable").any()
+    assert near.ground_Y.isna().any()
     far = _estimate(_cloud(missing={(ix, iz) for ix in (-1, 0, 1) for iz in (1, 2, 3)}))
     assert (far.ground_support == "unreliable").any() or far.ground_Y.isna().any()
 
@@ -66,6 +67,41 @@ def test_filter_uses_agl_after_estimation_and_unsupported_surface_stays_nan():
     unsupported = add_local_ground_height(
         _cloud(), x_bin_size_m=50, z_bin_size_m=50, min_points_per_xz_bin=100)
     assert unsupported.ground_Y.isna().all()
+
+
+def test_ground_seed_height_limits_and_zero_fallback_reject_canopy():
+    canopy_only = _cloud()
+    out = add_local_ground_height(
+        canopy_only, x_bin_size_m=50, z_bin_size_m=50,
+        ground_quantile=.05, min_points_per_xz_bin=5,
+        seed_y_min=-50, seed_y_max=50, fallback_y=0,
+    )
+    assert np.allclose(out.ground_Y, 0.0)
+    assert set(out.ground_support) == {"fallback"}
+
+
+def test_all_occluded_cells_fall_back_instead_of_extending_local_ground():
+    missing = {(ix, iz) for ix in (-1, 0, 1) for iz in (1, 2, 3)}
+    out = add_local_ground_height(
+        _cloud(missing=missing), x_bin_size_m=50, z_bin_size_m=50,
+        ground_quantile=.05, min_points_per_xz_bin=5,
+        seed_y_min=50, seed_y_max=150, fallback_y=0,
+    )
+    assert out.ground_Y.notna().all()
+    assert "fallback" in set(out.ground_support)
+    assert "interpolated" not in set(out.ground_support)
+
+
+def test_ground_query_does_not_blend_observed_cell_into_fallback_cell():
+    grid = LocalGroundGrid(
+        x_centers=np.array([25.0, 75.0]),
+        z_centers=np.array([25.0, 75.0]),
+        ground_y=np.array([[0.0, 100.0], [0.0, 100.0]]),
+        support=np.array([["fallback", "observed"], ["fallback", "observed"]], dtype=object),
+        x_cell=50.0,
+        z_cell=50.0,
+    )
+    assert grid.query(np.array([49.0]), np.array([25.0]))[0] == 0.0
 
 
 def test_x_and_z_cell_sizes_are_independently_configurable():

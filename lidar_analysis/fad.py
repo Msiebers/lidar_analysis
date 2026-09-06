@@ -156,6 +156,18 @@ def _normalize_directions(directions: np.ndarray) -> tuple[np.ndarray, np.ndarra
     return unit, valid
 
 
+def _prepare_directions(directions: np.ndarray, *, normalize: bool = True) -> tuple[np.ndarray, np.ndarray]:
+    if normalize:
+        return _normalize_directions(directions)
+    directions = _as_array_2d("directions_m", directions)
+    norms = np.linalg.norm(directions, axis=1)
+    valid = np.isfinite(directions).all(axis=1) & np.isfinite(norms) & (norms > 0.0)
+    safe = directions.copy()
+    if not np.all(valid):
+        safe[~valid] = np.array([0.0, 0.0, 1.0], dtype=float)
+    return safe, valid
+
+
 def _mad_filter_1d(values: np.ndarray, *, z_thresh: float = 3.5) -> np.ndarray:
     """
     Median absolute deviation fallback filter for 1D values.
@@ -530,6 +542,7 @@ def compute_fad_in_box(
     g_function: str | Callable[[np.ndarray], np.ndarray] = "spherical",
     min_free_path_m: float = 1e-6,
     hit_tolerance_m: float = 1e-4,
+    normalize_directions: bool = True,
 ) -> FadResult:
     """
     Estimate apparent foliage/plant area density inside one FAD box.
@@ -566,7 +579,7 @@ def compute_fad_in_box(
     where the sum runs over all usable (occlusion-free, box-sampling) rays.
     """
     origins_m = _as_array_2d("origins_m", origins_m)
-    directions_unit, valid_dir = _normalize_directions(directions_m)
+    directions_unit, valid_dir = _prepare_directions(directions_m, normalize=normalize_directions)
 
     if origins_m.shape != directions_unit.shape:
         raise ValueError(
@@ -717,6 +730,7 @@ def compute_layered_fad(
     g_function: str | Callable[[np.ndarray], np.ndarray] = "spherical",
     min_free_path_m: float = 1e-6,
     hit_tolerance_m: float = 1e-4,
+    normalize_directions: bool = True,
 ) -> LayeredFadResult:
     """
     Estimate a vertical FAD profile by slicing base_box along the y-axis.
@@ -764,6 +778,7 @@ def compute_layered_fad(
                 g_function=g_function,
                 min_free_path_m=min_free_path_m,
                 hit_tolerance_m=hit_tolerance_m,
+                normalize_directions=normalize_directions,
             )
         )
 
@@ -921,6 +936,7 @@ def compute_fad_traits(
     layer_thickness_m: float | None = 0.10,
     include_layer_columns: bool = True,
     prefix: str = "fad",
+    normalize_directions: bool = True,
 ) -> dict[str, Any]:
     """
     Convenience wrapper that returns a flat trait dictionary.
@@ -947,6 +963,7 @@ def compute_fad_traits(
         raw_hit_mask=raw_hit_mask,
         box=box,
         g_function=g_function,
+        normalize_directions=normalize_directions,
     )
 
     traits = fad_result_to_traits(whole, prefix=prefix)
@@ -967,6 +984,7 @@ def compute_fad_traits(
                 base_box=box,
                 layer_edges_y_m=edges,
                 g_function=g_function,
+                normalize_directions=normalize_directions,
             )
             traits.update(
                 layered_fad_result_to_traits(

@@ -30,9 +30,6 @@ class NormalizedRunRequest:
     working_dir: Path
     output_dir: Path
     config_path: Path
-    force: bool = False
-    fusion_method: str = "interp"
-    cart_id_override: str | None = None
 
 def _load_yaml(path: Path) -> dict:
     if not path.exists():
@@ -50,9 +47,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--working", required=True, help="Local working directory")
     p.add_argument("--output", required=True, help="Local output directory")
     p.add_argument("--config", help="Optional explicit experiment config YAML path")
-    p.add_argument("--cart-id", help="Optional cart id override")
-    p.add_argument("--force", action="store_true", help="Reprocess scans even when outputs already exist")
-    p.add_argument("--fusion", default="interp", choices=["interp", "imu_interp", "pps"], help="Fusion method")
     return p.parse_args()
 
 def resolve_config_path(input_dir: Path, explicit_config: str | None) -> Path:
@@ -108,9 +102,6 @@ def normalize_request(args: argparse.Namespace) -> NormalizedRunRequest:
         working_dir=working_dir,
         output_dir=output_dir,
         config_path=config_path,
-        force=bool(args.force),
-        fusion_method=str(args.fusion),
-        cart_id_override=args.cart_id,
     )
 
 
@@ -262,6 +253,9 @@ def resolve_buffer_u(experiment_config: dict) -> float:
 
 def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: Path) -> AnalysisConfig:
     marks_cfg = experiment_config.get("marks", {}) or {}
+    ray_box_cfg = experiment_config.get("ray_box", {}) or {}
+    if not isinstance(ray_box_cfg, dict):
+        raise ValueError("ray_box must be a mapping")
 
     split_source, mark_target_type = resolve_splitting_style(experiment_config)
     mark_z_buffer_u = resolve_buffer_u(experiment_config)
@@ -317,7 +311,22 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         value = experiment_config.get(yaml_key, _DEFAULTS[field])
         return cast(value) if cast is not None else value
 
+    def pick_ray_box(yaml_key: str, field: str, cast=None):
+        value = ray_box_cfg.get(yaml_key, experiment_config.get(field, _DEFAULTS[field]))
+        if value is None:
+            return None
+        return cast(value) if cast is not None else value
+
     experiment_config = map_deprecated_analysis_keys(experiment_config)
+    apply_ground_filter = experiment_config.get(
+        "apply_ground_filter",
+        experiment_config.get("use_local_ground_filter", _DEFAULTS["apply_ground_filter"]),
+    )
+    analyze_one_side = bool(experiment_config.get("analyze_one_side", _DEFAULTS["analyze_one_side"]))
+    analyze_side = experiment_config.get("analyze_side", _DEFAULTS["analyze_side"])
+    analyze_side = None if analyze_side is None else str(analyze_side).strip().lower()
+    if analyze_one_side and analyze_side not in {"left", "right"}:
+        raise ValueError("analyze_one_side=true requires analyze_side: left or right")
     for key in (
         "mta_angle_bin_deg", "mta_fit_angle_min_deg", "mta_fit_angle_max_deg",
         "mta_min_rays_per_bin", "mta_min_path_m_per_bin", "mta_min_valid_fit_bins",
@@ -341,6 +350,8 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         free_marks_as=str(free_marks_as),
         empty_mark_file=str(empty_mark_file),
         force_two_sided_targets=pick("force_two_sided_targets", "force_two_sided_targets", bool),
+        analyze_one_side=analyze_one_side,
+        analyze_side=analyze_side,
 
         make_point_cloud=pick("generate_pointclouds", "make_point_cloud", bool),
         overwrite_outputs=pick("overwrite_pointclouds", "overwrite_outputs", bool),
@@ -356,14 +367,28 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         rssi_norm_mode=normalize_rssi_mode(pick("rssi_norm_mode", "rssi_norm_mode", str)),
         rssi_norm_transform=normalize_rssi_transform(pick("rssi_norm_transform", "rssi_norm_transform", str)),
         use_rssi_filter=pick("use_rssi_filter", "use_rssi_filter", bool),
-        use_local_ground_filter=pick("use_local_ground_filter", "use_local_ground_filter", bool),
+        use_local_ground_filter=bool(apply_ground_filter),
+        apply_ground_filter=bool(apply_ground_filter),
         local_ground_x_bin_m=pick("local_ground_x_bin_m", "local_ground_x_bin_m", float),
         local_ground_z_bin_m=pick("local_ground_z_bin_m", "local_ground_z_bin_m", float),
         local_ground_quantile=pick("local_ground_quantile", "local_ground_quantile", float),
         local_ground_min_points_per_xz_bin=pick("local_ground_min_points_per_xz_bin", "local_ground_min_points_per_xz_bin", int),
         local_ground_seed_y_min_m=pick("local_ground_seed_y_min_m", "local_ground_seed_y_min_m"),
         local_ground_seed_y_max_m=pick("local_ground_seed_y_max_m", "local_ground_seed_y_max_m"),
+        local_ground_fallback_y_m=pick("local_ground_fallback_y_m", "local_ground_fallback_y_m"),
         min_height_agl_m=pick("min_height_agl_m", "min_height_agl_m", float),
+        ray_box_ground_mode=pick_ray_box("ground_mode", "ray_box_ground_mode", str),
+        ray_box_bottom_agl_m=pick_ray_box("bottom_agl_m", "ray_box_bottom_agl_m", float),
+        ray_box_x_near_m=pick_ray_box("x_near_m", "ray_box_x_near_m", float),
+        ray_box_height_percentile=pick_ray_box("height_percentile", "ray_box_height_percentile", float),
+        ray_box_height_buffer_m=pick_ray_box("height_buffer_m", "ray_box_height_buffer_m", float),
+        ray_box_grubbs_alpha=pick_ray_box("grubbs_alpha", "ray_box_grubbs_alpha", float),
+        ray_box_layer_thickness_m=pick_ray_box("layer_thickness_m", "ray_box_layer_thickness_m", float),
+        ray_box_diagnostic=bool(ray_box_cfg.get(
+            "diagnostic",
+            experiment_config.get("mta_diagnostic", False)
+            or experiment_config.get("pai_diagnostic", False),
+        )),
         rssi_min=pick("rssi_min", "rssi_min"),
         rssi_max=pick("rssi_max", "rssi_max"),
 
@@ -443,16 +468,20 @@ def _pointcloud_op_enabled(cfg: AnalysisConfig, *names: str) -> bool:
 
     return False
 
-def _topology_internal_side_split_enabled(cfg: AnalysisConfig) -> bool:
-    if bool(getattr(cfg, "force_two_sided_targets", False)):
-        return False
+def _topology_config(cfg: AnalysisConfig) -> dict:
     for op_cfg in getattr(cfg, "pointcloud_ops", []) or []:
         if not isinstance(op_cfg, dict):
             continue
         op_name = str(op_cfg.get("name", op_cfg.get("op", ""))).strip().lower()
         if op_name == "topology_trait" and op_cfg.get("enabled", True) is not False:
-            return bool(op_cfg.get("split_sides_for_single_plot", False))
-    return False
+            return op_cfg
+    return {}
+
+
+def _topology_internal_side_split_enabled(cfg: AnalysisConfig) -> bool:
+    return not bool(getattr(cfg, "force_two_sided_targets", False)) and bool(
+        _topology_config(cfg).get("split_sides_for_single_plot", False)
+    )
 
 
 _RESULT_ID_FIELDS = (
@@ -504,6 +533,8 @@ def phenotype_columns(cfg: AnalysisConfig) -> list[str]:
             "stand_topo_count",
             "stand_topo_per_m",
         ])
+        if bool(_topology_config(cfg).get("include_per_m2", False)):
+            cols.append("stand_topo_per_m2")
         if _topology_internal_side_split_enabled(cfg):
             cols.extend([
                 "stand_topo_left_count",
@@ -511,6 +542,11 @@ def phenotype_columns(cfg: AnalysisConfig) -> list[str]:
                 "stand_topo_left_per_m",
                 "stand_topo_right_per_m",
             ])
+            if bool(_topology_config(cfg).get("include_per_m2", False)):
+                cols.extend([
+                    "stand_topo_left_per_m2",
+                    "stand_topo_right_per_m2",
+                ])
 
     if _pointcloud_op_enabled(cfg, "slice_structure_trait"):
         cols.extend([
@@ -570,18 +606,22 @@ def append_trait_rows(
         existing_fields = reader.fieldnames or []
         existing_rows = list(reader)
 
-    layer_prefixes = ("fad_layer_",)
-    if bool(getattr(cfg, "pai_include_layer_columns", False)):
-        layer_prefixes += ("pai_layer_",)
+    def include_layer_field(key: str) -> bool:
+        return key.startswith("fad_layer_") or (
+            bool(getattr(cfg, "pai_include_layer_columns", False))
+            and key.startswith("pai_layer_")
+            and key.endswith("_conditional_pai_m2_m2")
+        )
+
     layer_fields = sorted({
         key
         for key in existing_fields
-        if key.startswith(layer_prefixes) and key not in base_fields
+        if include_layer_field(key) and key not in base_fields
     } | {
         key
         for rec in recs
         for key in rec
-        if key.startswith(layer_prefixes) and key not in base_fields
+        if include_layer_field(key) and key not in base_fields
     })
     insert_at = len(base_fields)
     fieldnames = base_fields[:insert_at] + layer_fields + base_fields[insert_at:]
@@ -612,10 +652,13 @@ def append_trait_rows(
             "plot_width_m": rec.get("plot_width_m"),
             "stand_topo_count": rec.get("stand_topo_count"),
             "stand_topo_per_m": rec.get("stand_topo_per_m"),
+            "stand_topo_per_m2": rec.get("stand_topo_per_m2"),
             "stand_topo_left_count": rec.get("stand_topo_left_count"),
             "stand_topo_right_count": rec.get("stand_topo_right_count"),
             "stand_topo_left_per_m": rec.get("stand_topo_left_per_m"),
             "stand_topo_right_per_m": rec.get("stand_topo_right_per_m"),
+            "stand_topo_left_per_m2": rec.get("stand_topo_left_per_m2"),
+            "stand_topo_right_per_m2": rec.get("stand_topo_right_per_m2"),
             "stacked_hull_volume_m3": rec.get("stacked_hull_volume_m3"),
             "max_spread_m": rec.get("max_spread_m"),
             "spread_at_50_m": rec.get("spread_at_50_m"),
@@ -669,7 +712,7 @@ def append_trait_rows(
     )
 
 
-def append_mta_diagnostics(
+def append_ray_box_diagnostics(
     path: Path,
     experiment: str,
     date_str: str,
@@ -690,8 +733,30 @@ def append_mta_diagnostics(
             "target_type": rec.get("target_type", "plot"),
             "target_id": rec.get("target_id"),
         }
-        for diagnostic in rec.get("_mta_diagnostics", ()):
-            rows.append(identity | dict(diagnostic))
+        scalars = {
+            key: value for key, value in rec.items()
+            if not key.startswith("_") and key.startswith(("ray_box_", "fad_", "pai_", "mta_"))
+        }
+        layers = list(rec.get("_pai_layers", ()))
+        finite_layer_pai = [float(layer["pai_layer_m2_m2"]) for layer in layers
+                            if pd.notna(layer.get("pai_layer_m2_m2"))]
+        if layers and len(finite_layer_pai) == len(layers) and pd.notna(rec.get("pai_m2_m2")):
+            if not np.isclose(float(rec["pai_m2_m2"]), sum(finite_layer_pai)):
+                raise AssertionError("Total PAI must equal the sum of layer PAI")
+        for layer in layers:
+            if pd.notna(layer.get("pad_layer_m2_m3")) and pd.notna(layer.get("pai_layer_m2_m2")):
+                expected = float(layer["pad_layer_m2_m3"]) * float(layer["layer_thickness_m"])
+                if not np.isclose(float(layer["pai_layer_m2_m2"]), expected):
+                    raise AssertionError("Layer PAI must equal PAD times layer thickness")
+        rows.append(identity | {"diagnostic_type": "summary"} | scalars)
+        rows.extend(
+            identity | {"diagnostic_type": "pai_layer"} | dict(layer)
+            for layer in layers
+        )
+        rows.extend(
+            identity | {"diagnostic_type": "mta_bin"} | dict(diagnostic)
+            for diagnostic in rec.get("_mta_diagnostics", ())
+        )
     if not rows:
         return False
 
@@ -700,82 +765,13 @@ def append_mta_diagnostics(
         {key for row in existing + rows for key in row if key not in _RESULT_ID_FIELDS}
     )
     frame = pd.DataFrame.from_records(existing + rows, columns=fieldnames)
-    frame = frame.sort_values(
-        ["date", "scan_number", "plot", "side", "mta_direction_group", "mta_bin_role", "mta_bin_lower_deg"],
-        kind="stable", na_position="last",
-    )
+    sort_columns = [key for key in (
+        "date", "scan_number", "plot", "side", "diagnostic_type",
+        "layer_bottom_m", "mta_direction_group", "mta_bin_role", "mta_bin_lower_deg",
+    ) if key in frame]
+    frame = frame.sort_values(sort_columns, kind="stable", na_position="last")
     frame.to_csv(path, index=False, na_rep="", float_format="%.8g")
     return True
-
-
-def append_pai_outputs(
-    layer_path: Path,
-    diagnostic_path: Path,
-    experiment: str,
-    date_str: str,
-    scan_id: str,
-    recs: Iterable[dict],
-    cfg: AnalysisConfig,
-) -> None:
-    layer_rows = []
-    diagnostic_rows = []
-    for rec in recs:
-        scan_name = str(rec.get("scan_name") or scan_id)
-        identity = {
-            "experiment": experiment, "date": date_str, "scan_name": scan_name,
-            "scan_number": _scan_number(scan_name), "plot": rec.get("plot"),
-            "side": rec.get("side", "none"), "target_type": rec.get("target_type", "plot"),
-            "target_id": rec.get("target_id"),
-        }
-        layers = list(rec.get("_pai_layers", ()))
-        diagnostic_base = identity | {
-            "n_rays_total": rec.get("pai_n_rays_total"),
-            "n_rays_intersecting_box": rec.get("pai_n_rays_intersecting_box"),
-            "n_rays_observed": rec.get("pai_n_rays_observed"),
-            "n_rays_rejected": int(rec.get("pai_n_rays_total") or 0) - int(rec.get("pai_n_rays_observed") or 0),
-            "n_hits": rec.get("pai_n_hits"), "n_gap_rays": rec.get("pai_n_full_gaps"),
-            "gap_fraction": rec.get("pai_gap_fraction"),
-            "mean_chord_length_m": rec.get("pai_mean_chord_m"),
-            "median_chord_length_m": rec.get("pai_median_chord_m"),
-            "log_likelihood": rec.get("pai_log_likelihood"),
-            "g_function": rec.get("pai_g_function"), "g_value": rec.get("pai_g_value"),
-            "pai_height_m": rec.get("pai_height_m"),
-            "whole_box_pad_m2_m3": rec.get("pai_whole_box_pad_m2_m3"),
-            "whole_box_pai_m2_m2": rec.get("pai_whole_box_m2_m2"),
-        }
-        if cfg.pai_diagnostic and not layers:
-            diagnostic_rows.append(diagnostic_base)
-        finite_layers = [float(layer["pai_layer_m2_m2"]) for layer in layers
-                         if pd.notna(layer.get("pai_layer_m2_m2"))]
-        if layers and len(finite_layers) == len(layers) and pd.notna(rec.get("pai_m2_m2")):
-            if not np.isclose(float(rec["pai_m2_m2"]), sum(finite_layers)):
-                raise AssertionError("Total PAI must equal the sum of layer PAI")
-        for layer in layers:
-            thickness = float(layer["layer_thickness_m"])
-            pad = layer.get("pad_layer_m2_m3")
-            layer_pai = layer.get("pai_layer_m2_m2")
-            if pd.notna(pad) and pd.notna(layer_pai) and not np.isclose(float(layer_pai), float(pad) * thickness):
-                raise AssertionError("Layer PAI must equal PAD times layer thickness")
-            if cfg.pai_diagnostic:
-                diagnostic_rows.append(diagnostic_base | layer)
-
-    def write(path: Path, rows: list[dict]) -> None:
-        if not rows:
-            return
-        existing = pd.read_csv(path, dtype={"scan_name": str}).to_dict("records") if path.exists() else []
-        fields = list(_RESULT_ID_FIELDS) + sorted(
-            {key for row in existing + rows for key in row if key not in _RESULT_ID_FIELDS}
-        )
-        frame = pd.DataFrame.from_records(existing + rows, columns=fields)
-        sort_columns = [key for key in ["date", "scan_number", "plot", "side", "layer_bottom_m"] if key in frame.columns]
-        frame = frame.sort_values(
-            sort_columns,
-            kind="stable", na_position="last",
-        )
-        frame.to_csv(path, index=False, na_rep="", float_format="%.8g")
-
-    write(layer_path, layer_rows)
-    write(diagnostic_path, diagnostic_rows)
 
 
 def extract_analysis_cfg(experiment_config: dict) -> dict:
@@ -830,9 +826,7 @@ def run_experiment_date(
     output_dir: Path,
     experiment_config: dict,
     experiment_analysis: dict,
-    cart_id: str | None = None,
     force: bool = False,
-    fusion_method: str | None = None,
 ) -> Path:
     cart_cfg_yaml = input_dir / "cart_config.yaml"
     if not input_dir.exists():
@@ -845,11 +839,9 @@ def run_experiment_date(
 
     pairs, skipped = discover_scan_pairs(input_dir)
     calibration = read_calibration_from_cart_config(cart_cfg_yaml)
-    effective_cart_id = cart_id or str(calibration.get("cart_id", "unknown"))
+    effective_cart_id = str(calibration.get("cart_id", "unknown"))
 
     cfg = build_config(experiment_analysis, force, cart_id=effective_cart_id, data_dir=input_dir)
-    if fusion_method:
-        cfg.fusion_method = fusion_method
 
     row_width_m = pipeline_core._to_m_units(cfg.row_width_u, cfg.dim_units)
     start_m = None if cfg.start_u is None else pipeline_core._to_m_units(cfg.start_u, cfg.dim_units)
@@ -861,15 +853,11 @@ def run_experiment_date(
     pointcloud_out = output_dir / "pointclouds"
     pointcloud_out.mkdir(parents=True, exist_ok=True)
     results_csv = output_dir / "results.csv"
-    mta_diagnostics_csv = output_dir / "mta_diagnostics.csv"
-    pai_layers_csv = output_dir / "pai_layers.csv"
-    pai_diagnostics_csv = output_dir / "pai_diagnostics.csv"
+    ray_box_diagnostics_csv = output_dir / "ray_box_diagnostics.csv"
     completed_path = output_dir / "completed_scans.txt"
     if force:
         completed_path.unlink(missing_ok=True)
-        mta_diagnostics_csv.unlink(missing_ok=True)
-        pai_layers_csv.unlink(missing_ok=True)
-        pai_diagnostics_csv.unlink(missing_ok=True)
+        ray_box_diagnostics_csv.unlink(missing_ok=True)
     if force or not completed_path.exists():
         ensure_results_csv(results_csv, cfg)
     elif not results_csv.exists():
@@ -902,14 +890,9 @@ def run_experiment_date(
 
     def finish(scan_id: str, trait_rows: list[dict]) -> None:
         append_trait_rows(results_csv, experiment, date_name, scan_id, trait_rows, cfg)
-        if cfg.mta_diagnostic:
-            append_mta_diagnostics(
-                mta_diagnostics_csv, experiment, date_name, scan_id, trait_rows
-            )
-        if cfg.run_pai and cfg.pai_diagnostic:
-            append_pai_outputs(
-                pai_layers_csv, pai_diagnostics_csv,
-                experiment, date_name, scan_id, trait_rows, cfg,
+        if cfg.ray_box_diagnostic:
+            append_ray_box_diagnostics(
+                ray_box_diagnostics_csv, experiment, date_name, scan_id, trait_rows
             )
         _record_completed_scan(completed_path, scan_id)
         print(f"[Success] {scan_id}: wrote {len(trait_rows)} phenotype row(s)")
@@ -969,9 +952,6 @@ def main() -> None:
         output_dir=request.output_dir,
         experiment_config=experiment_config,
         experiment_analysis=analysis_cfg,
-        cart_id=request.cart_id_override,
-        force=request.force,
-        fusion_method=request.fusion_method,
     )
 
 

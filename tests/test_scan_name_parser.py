@@ -8,6 +8,7 @@ from lidar_analysis.config import AnalysisConfig
 from lidar_analysis.pipeline_core import (
     Plot,
     _apply_forced_two_sided_targets,
+    _filter_plots_for_analysis_side,
     _filter_fused_indices_for_plot_side,
     analyze_plot,
     parse_scan_name,
@@ -79,6 +80,21 @@ def test_force_two_sided_targets_does_not_duplicate_ampersand_scan(tmp_path):
     assert _apply_forced_two_sided_targets([plot], '1&2', cfg) == [plot]
 
 
+def test_analyze_one_side_filters_targets_before_analysis(tmp_path):
+    cfg = AnalysisConfig(
+        data_dirs=[], calibration_dir=Path('.'), cart_id='CART',
+        force_two_sided_targets=True, analyze_one_side=True, analyze_side='right',
+    )
+    plot = Plot('2', '1', (0.0, 1000.0), out_dir=str(tmp_path), scan_base='2_1')
+    plots = _apply_forced_two_sided_targets([plot], '2_1', cfg)
+
+    selected = _filter_plots_for_analysis_side(plots, ['2', '2'], cfg)
+
+    assert len(selected) == 1
+    assert selected[0].side_label == 'right'
+    assert selected[0].side_sign == 'negative'
+
+
 def test_side_ray_selection_uses_left_positive_x_right_negative_x():
     cfg = AnalysisConfig(data_dirs=[], calibration_dir=Path('.'), cart_id='CART')
     fused_np = np.array([
@@ -104,7 +120,12 @@ def test_forced_two_sided_topology_outputs_side_neutral_rows(tmp_path):
         calibration_dir=Path('.'),
         cart_id='CART',
         force_two_sided_targets=True,
-        pointcloud_ops=[{"op": "topology_trait", "split_sides_for_single_plot": True}],
+        row_width_u=2.0,
+        pointcloud_ops=[{
+            "op": "topology_trait",
+            "include_per_m2": True,
+            "split_sides_for_single_plot": True,
+        }],
     )
     plot = Plot('2', '1', (0.0, 1000.0), out_dir=str(tmp_path), scan_base='2_1')
     plots = _apply_forced_two_sided_targets([plot], '2_1', cfg)
@@ -128,6 +149,7 @@ def test_forced_two_sided_topology_outputs_side_neutral_rows(tmp_path):
     cols = phenotype_columns(cfg)
     assert "stand_topo_count" in cols
     assert "stand_topo_per_m" in cols
+    assert "stand_topo_per_m2" in cols
     assert "stand_topo_left_count" not in cols
     assert "stand_topo_right_count" not in cols
 
@@ -137,6 +159,11 @@ def test_forced_two_sided_topology_outputs_side_neutral_rows(tmp_path):
     for rec in records:
         assert np.isfinite(float(rec["stand_topo_count"]))
         assert np.isfinite(float(rec["stand_topo_per_m"]))
+        assert rec["plot_width_m"] == 2.0
+        assert rec["plot_length_m"] == 1.0
+        assert rec["stand_topo_per_m2"] == rec["stand_topo_count"] / (
+            rec["plot_width_m"] * rec["plot_length_m"]
+        )
         assert np.isnan(float(rec["stand_topo_left_count"]))
         assert np.isnan(float(rec["stand_topo_right_count"]))
 
@@ -146,7 +173,11 @@ def test_internal_topology_side_split_columns_stay_for_unsplit_workflow():
         data_dirs=[],
         calibration_dir=Path('.'),
         cart_id='CART',
-        pointcloud_ops=[{"op": "topology_trait", "split_sides_for_single_plot": True}],
+        pointcloud_ops=[{
+            "op": "topology_trait",
+            "include_per_m2": True,
+            "split_sides_for_single_plot": True,
+        }],
     )
 
     cols = phenotype_columns(cfg)
@@ -157,6 +188,9 @@ def test_internal_topology_side_split_columns_stay_for_unsplit_workflow():
     assert "stand_topo_right_count" in cols
     assert "stand_topo_left_per_m" in cols
     assert "stand_topo_right_per_m" in cols
+    assert "stand_topo_per_m2" in cols
+    assert "stand_topo_left_per_m2" in cols
+    assert "stand_topo_right_per_m2" in cols
 
 
 def _manual_voxel_count(points, voxel_size_m):

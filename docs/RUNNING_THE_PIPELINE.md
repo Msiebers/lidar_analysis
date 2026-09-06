@@ -43,17 +43,12 @@ python3 -m lidar_analysis.central_runner \
   --input INPUT_DIR \
   --working WORKING_DIR \
   --output OUTPUT_DIR \
-  --config CONFIG_YAML \
-  --fusion interp
+  --config CONFIG_YAML
 ```
 
-Optional flags verified in `central_runner.parse_args`:
-
-| Flag | Meaning |
-| --- | --- |
-| `--cart-id ID` | Override cart ID from calibration |
-| `--force` | Set `AnalysisConfig.reprocess_scans` for this run |
-| `--fusion interp|imu_interp|pps` | Override the fusion method |
+Scientific processing settings, including `fusion_method` and IMU controls,
+come only from the selected experiment config. Cart identity comes from
+`cart_config.yaml`.
 
 `--config` is optional only when the experiment config exists at one of the default locations above. For data folders that include `cart_config.yaml` but not `experiment_config.yaml`, use `--config`.
 
@@ -68,8 +63,7 @@ python3 -m lidar_analysis.run_experiment_date \
   --input INPUT_DIR \
   --working WORKING_DIR \
   --output OUTPUT_DIR \
-  --config CONFIG_YAML \
-  --fusion interp
+  --config CONFIG_YAML
 ```
 
 The wrapper resolves `INPUT_DIR/experiment_config.yaml` unless `--config` is supplied. If the data folder has `cart_config.yaml` but no experiment config, pass `--config CONFIG_YAML`.

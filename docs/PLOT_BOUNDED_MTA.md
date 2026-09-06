@@ -117,7 +117,7 @@ observed free path (metres), including right-censored full gaps. Therefore
 
 A bin is exposed when it contains at least 30 observed rays and 1 m of total
 observed path. Bin counts, paths, rates, and QC flags are retained only when
-`mta_diagnostic: true`.
+`ray_box.diagnostic: true`.
 
 ## Separating amount from orientation
 
@@ -184,12 +184,13 @@ calculated, such as fewer than two usable angle bins.
 analysis:
   run_mta: false
   mta_angle_bin_deg: 5.0
-  mta_diagnostic: false
+  ray_box:
+    diagnostic: false
 ```
 
 `mta_angle_bin_deg` accepts any finite positive number, including 2.5, 5, and
 10. Internal compatibility settings remain readable, but the standard Lang fit
-bounds are fixed at 25° and 65°. `mta_diagnostic` is deliberately off by
+bounds are fixed at 25° and 65°. `ray_box.diagnostic` is deliberately off by
 default.
 
 Older `mta_lo_deg`, `mta_hi_deg`, and `mta_n_bins` YAML keys remain readable.
@@ -202,8 +203,8 @@ Method, coverage, fit, and ray-classification values remain internal or are
 written to the diagnostic file. Legacy `lai_mta_*` values may remain internal
 but are not written to the graph-ready CSV.
 
-With `mta_diagnostic: true`, the parent process writes one aggregate
-`mta_diagnostics.csv`. It contains the angular-bin, fit, ray-classification,
+With `ray_box.diagnostic: true`, the parent process writes one aggregate
+`ray_box_diagnostics.csv`. It contains the shared-box, PAI-layer, angular-bin, fit, ray-classification,
 coverage, and box fields needed for auditing, together with `experiment`,
 `date`, `scan_name`, `scan_number`, `plot`, and `side`. Diagnostics do not alter
 the calculation or the primary schema. No MTA diagnostic file is created when

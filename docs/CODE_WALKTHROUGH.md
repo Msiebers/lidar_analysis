@@ -46,8 +46,11 @@ central_runner.main
 
 ```text
 --experiment, --date, --input, --working, --output,
---config, --cart-id, --force, --fusion
+--config
 ```
+
+Scientific processing settings come from the selected experiment config;
+the CLI does not override them.
 
 `central_runner.run_experiment_date` requires `cart_config.yaml`, reads scan pairs, builds `AnalysisConfig`, creates `OUTPUT_DIR/results.csv`, and runs `pipeline_stages.DEFAULT_STAGES`.
 

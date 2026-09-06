@@ -1,14 +1,71 @@
 import numpy as np
+import pandas as pd
 import pytest
 
 import lidar_analysis.pai as pai_module
+from lidar_analysis.analysis_target import AnalysisTarget
 from lidar_analysis.config import AnalysisConfig
-from lidar_analysis.fad import Box3D
+from lidar_analysis.fad import Box3D, estimate_fad_height_from_points, make_fad_box_from_footprint_and_height
 from lidar_analysis.pai import _fit_transmission, compute_pai_traits, layer_path_matrix
-from lidar_analysis.pipeline_core import Plot, analyze_plot
+from lidar_analysis.pipeline_core import Plot, _build_shared_ray_box, analyze_plot
+from lidar_analysis.pointcloud_ops import add_local_ground_height, estimate_local_ground_grid
 
 
 BOX = Box3D(0.0, 1.0, 0.0, 1.0, 0.0, 1.0)
+
+
+def _ground_points(*, x_slope=0.0, z_slope=0.0, offset=0.0):
+    rows = []
+    for x in (0.25, 0.75):
+        for z in (0.25, 0.75):
+            ground = offset + x_slope * x + z_slope * z
+            rows.append((x * 1000.0, ground * 1000.0, z * 1000.0, 1.0))
+            rows.append((x * 1000.0, (ground + 1.0) * 1000.0, z * 1000.0, 1.0))
+    return pd.DataFrame(rows, columns=["X", "Y", "Z", "RSSI"])
+
+
+def _ray_box_cfg(tmp_path):
+    cfg = AnalysisConfig(data_dirs=[], calibration_dir=tmp_path, cart_id="test")
+    cfg.run_pai = True
+    cfg.pai_run_conditional_profile = False
+    cfg.row_width_u = 1.0
+    cfg.ray_box_ground_mode = "local_grid"
+    cfg.ray_box_bottom_agl_m = 0.10
+    cfg.ray_box_x_near_m = 0.0
+    cfg.ray_box_height_percentile = 100.0
+    cfg.ray_box_height_buffer_m = 0.0
+    cfg.ray_box_grubbs_alpha = 0.01
+    cfg.local_ground_x_bin_m = 0.5
+    cfg.local_ground_z_bin_m = 0.5
+    cfg.local_ground_quantile = 0.0
+    cfg.local_ground_min_points_per_xz_bin = 1
+    return cfg
+
+
+def _attach_ground_target(plot, points, cfg):
+    target = AnalysisTarget.from_points(
+        target_id=plot.name, target_type="plot", scan_id="scan_001",
+        points_df=points, source_indices=np.arange(len(points)),
+        row=plot.row, plot=plot.letter, side=getattr(plot, "side_label", None),
+    )
+    grid = estimate_local_ground_grid(
+        target.current_points,
+        x_bin_size_m=cfg.local_ground_x_bin_m * 1000.0,
+        z_bin_size_m=cfg.local_ground_z_bin_m * 1000.0,
+        ground_quantile=cfg.local_ground_quantile,
+        min_points_per_xz_bin=cfg.local_ground_min_points_per_xz_bin,
+    )
+    target.local_ground_grid = grid
+    target.current_points = add_local_ground_height(target.current_points, ground_grid=grid)
+    plot.analysis_target = target
+    return plot
+
+
+def _flat_fused(n):
+    rows = np.zeros((n, 9), dtype=np.float32)
+    rows[:, 2] = np.pi / 2
+    rows[:, 5] = 500.0
+    return rows
 
 
 def _horizontal(ranges, y=0.5, layers=False, joint=False):
@@ -67,6 +124,25 @@ def test_prehit_is_excluded_and_counted():
     assert result["pai_n_rays_observed"] == 2
     assert result["pai_n_hits"] == 1
     assert result["pai_n_full_gaps"] == 1
+
+
+def test_unknown_is_excluded_until_no_return_range_reaches_box_exit():
+    common = dict(
+        origins_m=np.array([[-1.0, 0.5, 0.5]]),
+        directions_m=np.array([[1.0, 0.0, 0.0]]),
+        ranges_m=np.array([np.inf]), raw_hit_mask=np.array([False]),
+        explicit_no_return_mask=np.array([True]), box=BOX,
+        layer_thickness_m=None,
+    )
+    unknown = compute_pai_traits(**common, max_observation_range_m=1.5)
+    gap = compute_pai_traits(**common, max_observation_range_m=2.0)
+
+    assert unknown["pai_n_unknown"] == 1
+    assert unknown["pai_n_rays_observed"] == 0
+    assert np.isnan(unknown["pai_m2_m2"])
+    assert gap["pai_n_unknown"] == 0
+    assert gap["pai_n_full_gaps"] == 1
+    assert gap["pai_m2_m2"] == 0.0
 
 
 def test_all_hits_are_reported_as_saturated_not_finite():
@@ -245,6 +321,135 @@ def test_conditional_profile_honors_include_layer_columns_false():
     assert np.isfinite(result["pai_conditional_from_layers_m2_m2"])
     assert result["pai_m2_m2"] == pytest.approx(result["pai_conditional_from_layers_m2_m2"])
     assert not any(key.startswith("pai_layer_") and key != "pai_layer_thickness_m" for key in result)
+
+
+def test_shared_ray_box_uses_local_ground_only_for_bottom(tmp_path):
+    def run(ground_y):
+        cfg = _ray_box_cfg(tmp_path)
+        plot = Plot("scan", "1", (0.0, 1000.0), str(tmp_path), scan_base="scan_001")
+        points = pd.DataFrame(
+            [(x, y * 1000.0, z, 1.0) for x in (250.0, 750.0) for z in (250.0, 750.0)
+             for y in (ground_y, 1.0)],
+            columns=["X", "Y", "Z", "RSSI"],
+        )
+        plot = _attach_ground_target(plot, points, cfg)
+        return _build_shared_ray_box(
+            plot, _flat_fused(2), cfg, ["scan", "scan"],
+            step_mm=1.0, lidar_height_mm=500.0,
+            roll_offset=0.0, pitch_offset=0.0,
+        )
+
+    flat = run(0.0)
+    raised_ground = run(0.2)
+
+    assert raised_ground.diagnostics["ray_box_ground_mode"] == "local_grid"
+    assert flat.box.y_min == pytest.approx(0.10)
+    assert raised_ground.box.y_min == pytest.approx(0.30)
+    assert raised_ground.diagnostics["ray_box_ground_reference_y_m"] == pytest.approx(0.20)
+    assert flat.box.y_max == pytest.approx(1.0)
+    assert raised_ground.box.y_max == pytest.approx(flat.box.y_max)
+
+
+def test_apply_ground_filter_false_does_not_drop_points_but_estimates_ground(tmp_path):
+    cfg = _ray_box_cfg(tmp_path)
+    cfg.apply_ground_filter = False
+    cfg.use_local_ground_filter = False
+    plot = Plot("scan", "1", (0.0, 1000.0), str(tmp_path), scan_base="scan_001")
+    points = _ground_points()
+    row = analyze_plot(
+        plot, points.to_numpy(dtype=np.float32), np.arange(len(points)),
+        _flat_fused(len(points)), "scan_001", cfg, ["scan", "scan"],
+        lidar_height_mm=500.0, step_mm=1.0,
+    )
+
+    assert row["points"] == len(points)
+    assert {"ground_Y", "height_agl"} <= set(plot.analysis_target.current_points)
+    assert plot.analysis_target.diagnostics["local_ground"]["apply_ground_filter"] is False
+
+
+def test_pai_fad_mta_share_one_ray_box(tmp_path):
+    cfg = _ray_box_cfg(tmp_path)
+    cfg.run_fad = True
+    cfg.run_mta = True
+    cfg.mta_min_rays_per_bin = 1
+    cfg.mta_min_path_m_per_bin = 0.0
+    plot = Plot("scan", "1", (0.0, 1000.0), str(tmp_path), scan_base="scan_001")
+    points = _ground_points()
+    row = analyze_plot(
+        plot, points.to_numpy(dtype=np.float32), np.arange(len(points)),
+        _flat_fused(len(points)), "scan_001", cfg, ["scan", "scan"],
+        lidar_height_mm=500.0, step_mm=1.0,
+    )
+
+    assert row["fad_x_min_m"] == pytest.approx(row["pai_x_min_m"])
+    assert row["fad_x_max_m"] == pytest.approx(row["pai_x_max_m"])
+    assert row["fad_y_min_m"] == pytest.approx(row["pai_y_min_m"])
+    assert row["mta_y_min_m"] == pytest.approx(row["pai_y_min_m"])
+    assert row["ray_box_ground_mode"] == "local_grid"
+
+
+def test_explicit_shared_geometry_defines_box_when_pai_is_enabled(tmp_path):
+    cfg = _ray_box_cfg(tmp_path)
+    cfg.run_fad = True
+    cfg.run_mta = True
+    cfg.ray_box_ground_mode = "global_y"
+    cfg.pai_x_near_m = 0.2
+    cfg.pai_y_min_m = 0.1
+    cfg.pai_height_percentile = 99.0
+    cfg.pai_height_buffer_m = 0.0
+    cfg.pai_grubbs_alpha = 0.01
+    cfg.ray_box_x_near_m = 0.6
+    cfg.ray_box_bottom_agl_m = 0.3
+    cfg.ray_box_height_percentile = 50.0
+    cfg.ray_box_height_buffer_m = 0.4
+    cfg.ray_box_grubbs_alpha = 0.2
+    cfg.fad_x_near_m = 0.5
+    cfg.fad_y_min_m = 0.25
+
+    plot = Plot("scan", "1", (0.0, 1000.0), str(tmp_path), scan_base="scan_001")
+    plot.side_sign = "positive"
+    points = _ground_points()
+    plot.analysis_target = AnalysisTarget.from_points(
+        target_id=plot.name, target_type="plot", scan_id="scan_001",
+        points_df=points, source_indices=np.arange(len(points)),
+    )
+    shared = _build_shared_ray_box(
+        plot, _flat_fused(len(points)), cfg, ["scan", "scan"],
+        step_mm=1.0, lidar_height_mm=500.0,
+        roll_offset=0.0, pitch_offset=0.0,
+    )
+    pai_points_m = points[["X", "Y", "Z"]].to_numpy(dtype=float) / 1000.0
+    expected_height = estimate_fad_height_from_points(
+        pai_points_m,
+        percentile=cfg.ray_box_height_percentile,
+        y_min_m=cfg.ray_box_bottom_agl_m,
+        buffer_m=cfg.ray_box_height_buffer_m,
+        grubbs_alpha=cfg.ray_box_grubbs_alpha,
+    )
+    expected_box = make_fad_box_from_footprint_and_height(
+        x_min_m=cfg.ray_box_x_near_m, x_max_m=cfg.row_width_u,
+        z_min_m=0.0, z_max_m=1.0,
+        height=expected_height, y_min_m=cfg.ray_box_bottom_agl_m,
+    )
+
+    assert shared.box == expected_box
+
+
+def test_local_grid_ray_box_keeps_vertical_rays_inside_footprint(tmp_path):
+    cfg = _ray_box_cfg(tmp_path)
+    plot = Plot("scan", "1", (0.0, 1000.0), str(tmp_path), scan_base="scan_001")
+    plot = _attach_ground_target(plot, _ground_points(), cfg)
+    fused = _flat_fused(1)
+    fused[:, 2] = 0.0
+
+    ray_box = _build_shared_ray_box(
+        plot, fused, cfg, ["scan", "scan"],
+        step_mm=1.0, lidar_height_mm=500.0,
+        roll_offset=0.0, pitch_offset=0.0,
+    )
+
+    assert ray_box.diagnostics["ray_box_local_ground_rays_rejected"] == 0
+    assert np.linalg.norm(ray_box.directions_m[0]) > 0.0
 
 
 def test_joint_profile_default_off_skips_matrix(monkeypatch):

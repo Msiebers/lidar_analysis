@@ -20,6 +20,8 @@ class AnalysisConfig:
     free_marks_as: str = "none"
     empty_mark_file: str = "skip"
     force_two_sided_targets: bool = False
+    analyze_one_side: bool = False
+    analyze_side: str | None = None
     additional_scan_side_split: bool = False
     additional_scan_side_axis: str = "x"
     additional_scan_positive_side_label: str = "right"
@@ -39,13 +41,23 @@ class AnalysisConfig:
     rssi_norm_transform: str = "sqrt"
     use_rssi_filter: bool = False
     use_local_ground_filter: bool = False
+    apply_ground_filter: bool = False
     local_ground_x_bin_m: float = 0.05
     local_ground_z_bin_m: float = 0.05
     local_ground_quantile: float = 0.05
     local_ground_min_points_per_xz_bin: int = 5
     local_ground_seed_y_min_m: float | None = None
     local_ground_seed_y_max_m: float | None = None
+    local_ground_fallback_y_m: float | None = None
     min_height_agl_m: float = 0.05
+    ray_box_ground_mode: str = "global_y"
+    ray_box_bottom_agl_m: float | None = None
+    ray_box_x_near_m: float | None = None
+    ray_box_height_percentile: float | None = None
+    ray_box_height_buffer_m: float | None = None
+    ray_box_grubbs_alpha: float | None = None
+    ray_box_layer_thickness_m: float | None = None
+    ray_box_diagnostic: bool = False
     rssi_min: float | None = None
     rssi_max: float | None = None
     fusion_method: str = "interp"
@@ -123,6 +135,7 @@ def default_analysis_yaml_dict() -> dict:
         "mta_lo_deg",
         "mta_hi_deg",
         "mta_n_bins",
+        "mta_diagnostic",
         "mta_fit_angle_min_deg",
         "mta_fit_angle_max_deg",
         "mta_min_rays_per_bin",
@@ -133,6 +146,7 @@ def default_analysis_yaml_dict() -> dict:
         "pai_run_layers",
         "pai_run_joint_profile",
         "pai_run_conditional_profile",
+        "pai_diagnostic",
     ]:
         d.pop(k,None)
     d["generate_pointclouds"] = d.pop("make_point_cloud")

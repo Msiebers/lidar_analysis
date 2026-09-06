@@ -2,24 +2,24 @@ experiment_name: example_experiment
 processing_mode: local
 processing:
   # null = sequential/off; set 2 or 4 to process that many scans concurrently.
-  parallel_scans: null
-  # parallel_scans: 2
-  # parallel_scans: 4
+  parallel_scans: 8
 config_reviewed: false
 config_note: Full reusable experiment config template. Copy and edit for a real run.
 
 analysis:
-  # Commented alternatives below replace the active line; do not enable both.
   # Window splitting
-  split_source: distance  # options: distance, marks
+  split_source: marks  # options: distance, marks
 
   # Marks define windows along the scan. The scan filename defines the biological target.
   marks:
-    target_type: auto  # options: auto, plant, plot
-    buffer_u: 0.0
-    missing_file: error  # options: error, skip, distance
-    empty_file: skip  # options: skip, error, distance
-    free_marks_as: none  # options: none, plant, plot
+    target_type: plot  # options: auto, plant, plot
+    buffer_u: 0.07
+    missing_file: error  
+    # options: error, skip, distance
+    empty_file: skip  
+    # options: skip, error, distance
+    free_marks_as: plot  
+    # options: none, plant, plot
     dirname: markers
     write_pointcloud: false  # options: true, false
     write_reference_points: false  # options: true, false
@@ -31,77 +31,55 @@ analysis:
   # Does not apply to legacy scan_* additional scans; those use additional_scan_side_split.
   force_two_sided_targets: false  # options: true, false
 
-  # Process One Side
-  # Set true to process only the selected side from each scan.
-  analyze_one_side: false  # options: true, false
-  analyze_side: null  # options: null, left, right
-
   # Legacy scan_* additional scans only. Normal field scans should use & in the scan name
   # for natural two-sided outputs, or force_two_sided_targets only for old datasets.
-  additional_scan_side_split: false  # options: true, false
+  additional_scan_side_split: true  # options: true, false
   additional_scan_side_axis: x  # options: x
   additional_scan_positive_side_label: right
   additional_scan_negative_side_label: left
 
   # Dimensions / global masks
-  dim_units: m  # options: ft (feet), m (meters)
-  row_width_u: 5.0
+  dim_units: m # options ft (feet) or m (meters)
+  row_width_u: 1.5
   start_u: 0.0
   split_u: 0.0
-  end_buffer_u: 0.5
+  end_buffer_u: 0.0
   n_plots: null
-  x_min_u: null
+  x_min_u: 0.2
   max_y_u: null
-  min_radius_u: null
-
+  min_radius_u: 0.05
+  
   # Outputs
-  generate_pointclouds: true
+  generate_pointclouds: false
   overwrite_pointclouds: true
   write_lidar_per_plot: true
 
   # Fusion / IMU
-  fusion_method: interp  # options: pps, imu_interp, interp
-  use_imu: false
-  # BNO085 Euler degrees from Pico. Signs are mounting-specific; validate from
-  # the physical ground plane, not left/right point-count equality.
+  fusion_method: imu_interp  
+  # options: interp, pps, imu_interp
+  use_imu: true
   imu_zero_mode: dense_median  # options: dense_median, calibration
   imu_zero_fraction: 0.5
   use_heading: false
   heading_sign: 1.0
-  roll_sign: -1.0
+  roll_sign: 1.0
   pitch_sign: -1.0
 
-  # use_local_ground_filter is the legacy compatibility key.
+  # Local ground filtering
   use_local_ground_filter: false
-  # false keeps all points; local ground remains available to ray_box.
-  apply_ground_filter: false
-  # apply_ground_filter: true
-  local_ground_x_bin_m: 0.025
-  local_ground_z_bin_m: 0.025
+  local_ground_x_bin_m: 0.10
+  local_ground_z_bin_m: 0.25
   local_ground_quantile: 0.10
-  local_ground_min_points_per_xz_bin: 5
-  # Only raw Y values in this band may seed a ground cell.
-  local_ground_seed_y_min_m: -0.10
-  local_ground_seed_y_max_m: 0.10
-  # Every cell without its own trustworthy ground estimate uses Y=0.
-  local_ground_fallback_y_m: 0.0
-  min_height_agl_m: 0.05
-
-  ray_box:
-    diagnostic: false  # writes ray_box_diagnostics.csv for FAD, MTA, and PAI
-    ground_mode: local_grid  # options: local_grid, global_y
-    # This geometry defines the single box shared by PAI, FAD, and MTA.
-    bottom_agl_m: 0.10
-    x_near_m: 0.0
-    height_percentile: 99.0
-    height_buffer_m: 0.0
-    grubbs_alpha: 0.01
-    layer_thickness_m: 0.10
+  local_ground_smooth_bins: 5
+  local_ground_min_points_per_xz_bin: 10
+  local_ground_min_x_bins_per_z: 3
+  local_ground_seed_y_min_m: null
+  local_ground_seed_y_max_m: null
+  min_height_agl_m: 0.10
 
   # RSSI normalization / filtering
   normalize_rssi: false
   rssi_norm_mode: percentile  # options: percentile, zscore
-  rssi_norm_transform: sqrt  # options: none, log1p, exponential, sqrt
   use_rssi_filter: false
   rssi_min: null
   rssi_max: null
@@ -110,38 +88,39 @@ analysis:
   run_height: false
   run_lai: false
   run_mta: false
-  mta_angle_bin_deg: 5.0
-  # Shared PAI/MTA proof range for treating an explicit no-return as a full gap.
-  mta_max_observation_range_m: 60.0  # options: null, positive meters
   run_fad: false
-  # run_fad: true
-  run_pai: false
-  # run_pai: true
+  run_pai: true
+
+  # MTA settings
+  mta_lo_deg: 25.0
+  mta_hi_deg: 65.0
+  mta_n_bins: 8
+  mta_min_rays_per_bin: 30
 
   # FAD settings
   fad_height_percentile: 99.0
-  fad_x_near_m: 0.0
-  fad_y_min_m: 0.03
+  fad_x_near_m: 0.2
+  fad_y_min_m: 0.1
   fad_height_buffer_m: 0.0
   fad_grubbs_alpha: 0.01
   fad_g_function: spherical
   fad_run_layers: false
-  # fad_run_layers: true
   fad_layer_thickness_m: 0.10
   fad_include_layer_columns: true
-  # fad_include_layer_columns: false
 
   # Bounded gap/transmission PAI settings (independent of FAD)
   pai_g_function: spherical
   pai_g_value: 0.5
-  pai_height_percentile: 99.0
-  pai_grubbs_alpha: 0.01
-  pai_y_min_m: 0.10
-  pai_x_near_m: 0.0
+  pai_height_percentile: 99.99
+  pai_grubbs_alpha: 0.0001
+  pai_y_min_m: 0.1
+  pai_x_near_m: 0.2
   pai_height_buffer_m: 0.0
+  pai_run_layers: true
+  pai_run_joint_profile: false
+  pai_run_conditional_profile: true
   pai_layer_thickness_m: 0.10
-  pai_include_layer_columns: false
-  # pai_include_layer_columns: true  # one integrated PAI number per layer in results.csv
+  pai_include_layer_columns: true
 
   # YAML-ordered point-cloud analysis operations.
   # Operations run in the order listed below.
@@ -159,8 +138,8 @@ analysis:
       max: null
 
     - op: sor_filter
-      enabled: false  # options: true, false
-      mean_k: 12
+      enabled: true  # options: true, false
+      mean_k: 3
       std_ratio: 2.0
 
     - op: bilateral_scalar_filter
@@ -188,7 +167,6 @@ analysis:
       enabled: false  # options: true, false
       min_persistence: 0.35
       z_bin_m: 0.05
-      include_per_m2: false  # options: true, false
       split_sides_for_single_plot: false  # options: true, false
       skip_whole_when_split: false  # options: true, false
       write_topology_objects: false  # options: true, false
@@ -204,10 +182,6 @@ analysis:
       clump_grid_m: 0.05
       clump_connectivity: 8  # options: 4, 8
 
-    - op: canopy_volume_2p5d
-      enabled: false  # options: true, false
-      cell_size_m: 0.01
-      height_percentile: 95.0
-
   # Optional backend config. pointcloud_ops currently support scipy only; leave null.
   pcl_backend: null
+

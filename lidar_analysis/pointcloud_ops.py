@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
 from scipy.interpolate import RegularGridInterpolator
-from scipy.ndimage import distance_transform_edt
 try:
     from .topology.stand_count import topology_stand_count
 except ImportError:
@@ -17,12 +17,65 @@ except Exception:
     ConvexHull = None
     QhullError = Exception
 
-def add_local_ground_height(
+@dataclass(frozen=True)
+class LocalGroundGrid:
+    """Snapped X-Z local ground grid. Coordinates/ground are in millimetres."""
+
+    x_centers: np.ndarray
+    z_centers: np.ndarray
+    ground_y: np.ndarray
+    support: np.ndarray
+    x_cell: float
+    z_cell: float
+
+    def query(self, x, z) -> np.ndarray:
+        x = np.asarray(x, dtype=float)
+        z = np.asarray(z, dtype=float)
+        ground = np.full(x.shape, np.nan, dtype=float)
+        if self.x_centers.size == 0 or self.z_centers.size == 0 or not np.isfinite(self.ground_y).any():
+            return ground
+        query = np.column_stack([
+            np.clip(z.ravel(), self.z_centers[0], self.z_centers[-1]),
+            np.clip(x.ravel(), self.x_centers[0], self.x_centers[-1]),
+        ])
+        values = RegularGridInterpolator(
+            (self.z_centers, self.x_centers),
+            self.ground_y,
+            method="nearest",
+            bounds_error=False,
+            fill_value=np.nan,
+        )(query)
+        return values.reshape(x.shape)
+
+    def query_support(self, x, z) -> np.ndarray:
+        x = np.asarray(x, dtype=float)
+        z = np.asarray(z, dtype=float)
+        point_support = np.full(x.shape, "unreliable", object)
+        if self.x_centers.size == 0 or self.z_centers.size == 0 or self.support.size == 0:
+            return point_support
+        query = np.column_stack([
+            np.clip(z.ravel(), self.z_centers[0], self.z_centers[-1]),
+            np.clip(x.ravel(), self.x_centers[0], self.x_centers[-1]),
+        ])
+        indices = RegularGridInterpolator(
+            (self.z_centers, self.x_centers),
+            np.arange(self.ground_y.size).reshape(self.ground_y.shape),
+            method="nearest",
+            bounds_error=False,
+            fill_value=-1,
+        )(query).astype(int)
+        valid = indices >= 0
+        flat = point_support.ravel()
+        flat[valid] = self.support.ravel()[indices[valid]]
+        return point_support
+
+
+def estimate_local_ground_grid(
     points, x_col="X", y_col="Y", z_col="Z", z_bin_size_m=50.0,
     x_bin_size_m=50.0, ground_quantile=0.05, min_points_per_xz_bin=5,
-    seed_y_min=None, seed_y_max=None,
-):
-    """Estimate a snapped X-Z ground grid; input coordinates are millimetres."""
+    seed_y_min=None, seed_y_max=None, fallback_y=None,
+) -> LocalGroundGrid:
+    """Estimate snapped X-Z quantile ground grid; input coordinates are millimetres."""
     out = _as_df(points)
     x_cell, z_cell = float(x_bin_size_m), float(z_bin_size_m)
     if x_cell <= 0 or z_cell <= 0:
@@ -30,6 +83,10 @@ def add_local_ground_height(
     q = float(ground_quantile)
     if not 0 <= q <= 1:
         raise ValueError("ground_quantile must be between 0 and 1")
+    if seed_y_min is not None and seed_y_max is not None and float(seed_y_min) > float(seed_y_max):
+        raise ValueError("local ground seed Y minimum must not exceed maximum")
+    if fallback_y is not None and not np.isfinite(float(fallback_y)):
+        raise ValueError("local ground fallback Y must be finite")
     for col in (x_col, y_col, z_col):
         if col not in out:
             raise ValueError(f"add_local_ground_height missing required column {col!r}")
@@ -37,25 +94,34 @@ def add_local_ground_height(
     x = pd.to_numeric(out[x_col], errors="coerce").to_numpy(float)
     y = pd.to_numeric(out[y_col], errors="coerce").to_numpy(float)
     z = pd.to_numeric(out[z_col], errors="coerce").to_numpy(float)
-    seed = np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
+    footprint = np.isfinite(x) & np.isfinite(z)
+    seed = footprint & np.isfinite(y)
     if seed_y_min is not None:
         seed &= y >= float(seed_y_min)
     if seed_y_max is not None:
         seed &= y <= float(seed_y_max)
-    if not seed.any():
-        out["ground_Y"] = np.nan; out["height_agl"] = np.nan
-        out["ground_support"] = "unreliable"
-        return out
+    if not footprint.any():
+        return LocalGroundGrid(
+            np.asarray([], dtype=float),
+            np.asarray([], dtype=float),
+            np.empty((0, 0), dtype=float),
+            np.empty((0, 0), dtype=object),
+            x_cell,
+            z_cell,
+        )
 
-    ix = np.floor(x[seed] / x_cell).astype(int)
-    iz = np.floor(z[seed] / z_cell).astype(int)
-    ixs, izs = np.arange(ix.min(), ix.max() + 1), np.arange(iz.min(), iz.max() + 1)
+    ix_all = np.floor(x[footprint] / x_cell).astype(int)
+    iz_all = np.floor(z[footprint] / z_cell).astype(int)
+    ixs, izs = np.arange(ix_all.min(), ix_all.max() + 1), np.arange(iz_all.min(), iz_all.max() + 1)
     grid = np.full((len(izs), len(ixs)), np.nan)
-    cells = (pd.DataFrame({"ix": ix, "iz": iz, "y": y[seed]})
-             .groupby(["iz", "ix"])["y"]
-             .agg(n="size", value=lambda s: s.quantile(q)).reset_index())
-    for row in cells[cells.n >= int(min_points_per_xz_bin)].itertuples():
-        grid[row.iz - izs[0], row.ix - ixs[0]] = row.value
+    if seed.any():
+        ix = np.floor(x[seed] / x_cell).astype(int)
+        iz = np.floor(z[seed] / z_cell).astype(int)
+        cells = (pd.DataFrame({"ix": ix, "iz": iz, "y": y[seed]})
+                 .groupby(["iz", "ix"])["y"]
+                 .agg(n="size", value=lambda s: s.quantile(q)).reset_index())
+        for row in cells[cells.n >= int(min_points_per_xz_bin)].itertuples():
+            grid[row.iz - izs[0], row.ix - ixs[0]] = row.value
 
     observed = np.isfinite(grid)
     max_step = np.tan(np.deg2rad(20.0)) * np.hypot(x_cell, z_cell)
@@ -71,25 +137,44 @@ def add_local_ground_height(
 
     support = np.full(grid.shape, "unreliable", object)
     support[reliable] = "observed"
-    if reliable.any():
-        distance, nearest = distance_transform_edt(
-            ~reliable, sampling=(z_cell, x_cell), return_indices=True)
-        fill = (~reliable) & (distance <= np.hypot(x_cell, z_cell))
-        grid[fill] = grid[nearest[0][fill], nearest[1][fill]]
-        support[fill] = "interpolated"
+    if fallback_y is not None:
+        fallback = ~np.isfinite(grid)
+        grid[fallback] = float(fallback_y)
+        support[fallback] = "fallback"
 
-    xc, zc = (ixs + 0.5) * x_cell, (izs + 0.5) * z_cell
-    ground = np.full(len(out), np.nan)
-    point_support = np.full(len(out), "unreliable", object)
-    if len(xc) > 1 and len(zc) > 1 and np.isfinite(grid).any():
-        query = np.column_stack([np.clip(z, zc[0], zc[-1]), np.clip(x, xc[0], xc[-1])])
-        ground = RegularGridInterpolator((zc, xc), grid, bounds_error=False, fill_value=np.nan)(query)
-        indices = RegularGridInterpolator(
-            (zc, xc), np.arange(grid.size).reshape(grid.shape), method="nearest",
-            bounds_error=False, fill_value=-1,
-        )(query).astype(int)
-        valid = indices >= 0
-        point_support[valid] = support.ravel()[indices[valid]]
+    return LocalGroundGrid((ixs + 0.5) * x_cell, (izs + 0.5) * z_cell, grid, support, x_cell, z_cell)
+
+
+def add_local_ground_height(
+    points, x_col="X", y_col="Y", z_col="Z", z_bin_size_m=50.0,
+    x_bin_size_m=50.0, ground_quantile=0.05, min_points_per_xz_bin=5,
+    seed_y_min=None, seed_y_max=None, fallback_y=None,
+    ground_grid: LocalGroundGrid | None = None,
+):
+    """Add ground_Y/height_agl from snapped X-Z grid; input coordinates are millimetres."""
+    out = _as_df(points)
+    for col in (x_col, y_col, z_col):
+        if col not in out:
+            raise ValueError(f"add_local_ground_height missing required column {col!r}")
+    if ground_grid is None:
+        ground_grid = estimate_local_ground_grid(
+            out,
+            x_col=x_col,
+            y_col=y_col,
+            z_col=z_col,
+            z_bin_size_m=z_bin_size_m,
+            x_bin_size_m=x_bin_size_m,
+            ground_quantile=ground_quantile,
+            min_points_per_xz_bin=min_points_per_xz_bin,
+            seed_y_min=seed_y_min,
+            seed_y_max=seed_y_max,
+            fallback_y=fallback_y,
+        )
+    x = pd.to_numeric(out[x_col], errors="coerce").to_numpy(float)
+    y = pd.to_numeric(out[y_col], errors="coerce").to_numpy(float)
+    z = pd.to_numeric(out[z_col], errors="coerce").to_numpy(float)
+    ground = ground_grid.query(x, z)
+    point_support = ground_grid.query_support(x, z)
     out["ground_Y"] = ground
     out["height_agl"] = y - ground
     out["ground_support"] = point_support

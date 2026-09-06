@@ -19,7 +19,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--experiments-root", required=True, help="Local experiments root for configs and optional published outputs.")
     parser.add_argument("--workspace-root", required=True, help="Workspace root for caches, manifests, logs, and run artifacts.")
     parser.add_argument("--publish", action="store_true", help="Publish outputs into the local experiments root.")
-    parser.add_argument("--force", action="store_true", help="Force a rerun even if the manifest indicates the date is current.")
     parser.add_argument("--reuse-staged-input", action="store_true", help="Reuse cached staged input instead of copying from raw_root again.")
     return parser.parse_args()
 
@@ -38,7 +37,6 @@ def main() -> None:
         args.experiment,
         args.date,
         paths=paths,
-        force=args.force,
         publish=args.publish,
         restage=not args.reuse_staged_input,
     )
