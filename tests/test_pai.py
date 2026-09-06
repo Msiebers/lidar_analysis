@@ -294,6 +294,20 @@ def test_z_pai_diagonal_path_is_partitioned_once_at_layer_boundary():
     assert sum(layer["n_hits"] for layer in result["_z_pai_layers"]) == 1
 
 
+def test_z_pai_clamps_tolerated_boundary_hit_to_box_exit():
+    result = compute_z_pai_traits(
+        origins_m=np.array([[-1.0, 0.5, 0.5]]),
+        directions_m=np.array([[1.0, 0.0, 0.0]]),
+        ranges_m=np.array([2.0 + 5e-5]),
+        raw_hit_mask=np.array([True]),
+        box=BOX, layer_thickness_m=1.0,
+    )
+
+    assert result["z_pai_n_hits"] == 1
+    assert result["z_pai_total_observed_path_m"] == pytest.approx(1.0)
+    assert result["z_pai_m2_m2"] == pytest.approx(2.0)
+
+
 def test_conditional_hit_in_later_layer_is_gap_in_prior_layer():
     direction = np.array([1.0, 0.5, 0.0])
     direction /= np.linalg.norm(direction)

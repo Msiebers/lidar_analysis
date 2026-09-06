@@ -73,7 +73,10 @@ def _first_event_layer_paths(
     edges = np.asarray(layer_edges_y_m, dtype=float)
     observed = np.asarray(events["observed"], dtype=bool)
     entry = np.asarray(events["entry_m"], dtype=float)
-    stop = entry + np.asarray(events["path_m"], dtype=float)
+    stop = np.minimum(
+        entry + np.asarray(events["path_m"], dtype=float),
+        np.asarray(events["exit_m"], dtype=float),
+    )
     matrix = np.zeros((len(origins), len(edges) - 1), dtype=float)
 
     vertical = directions[:, 1]
@@ -168,14 +171,20 @@ def compute_z_pai_traits(
         normalize_directions=normalize_directions,
     )
     paths = _first_event_layer_paths(np.asarray(origins_m, dtype=float), events, edges)
-    expected_path = float(np.sum(events["path_m"][events["observed"]]))
+    observed_path = np.clip(
+        np.minimum(events["entry_m"] + events["path_m"], events["exit_m"])
+        - events["entry_m"],
+        0.0,
+        None,
+    )
+    expected_path = float(np.sum(observed_path[events["observed"]]))
     if not np.isclose(float(np.sum(paths)), expected_path, rtol=1e-9, atol=1e-9):
         raise AssertionError("Z_PAI layer paths must sum to observed first-event path")
 
     hit_layer = np.full(n_total, -1, dtype=int)
     hit_rows = np.flatnonzero(events["hit"])
     if hit_rows.size:
-        stop = events["entry_m"] + events["path_m"]
+        stop = np.minimum(events["entry_m"] + events["path_m"], events["exit_m"])
         hit_y = (
             np.asarray(origins_m, dtype=float)[hit_rows, 1]
             + events["directions"][hit_rows, 1] * stop[hit_rows]
