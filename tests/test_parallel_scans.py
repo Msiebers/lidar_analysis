@@ -393,6 +393,30 @@ def test_pai_output_rejects_inconsistent_layer_arithmetic(tmp_path):
         )
 
 
+def test_z_pai_uses_consolidated_ray_box_diagnostics(tmp_path):
+    path = tmp_path / "ray_box_diagnostics.csv"
+    central_runner.append_ray_box_diagnostics(
+        path, "exp", "2026_08_26", "scan_001", [{
+            "scan_name": "scan_001", "plot": "1", "side": "left",
+            "z_pai_m2_m2": 0.3, "z_pai_total_observed_path_m": 12.0,
+            "_z_pai_layers": [
+                {"layer_bottom_m": 0.0, "layer_top_m": 0.5,
+                 "layer_thickness_m": 0.5, "pad_layer_m2_m3": 0.2,
+                 "pai_layer_m2_m2": 0.1},
+                {"layer_bottom_m": 0.5, "layer_top_m": 1.0,
+                 "layer_thickness_m": 0.5, "pad_layer_m2_m3": 0.4,
+                 "pai_layer_m2_m2": 0.2},
+            ],
+        }],
+    )
+
+    with open(path, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert {row["diagnostic_type"] for row in rows} == {"summary", "z_pai_layer"}
+    summary = next(row for row in rows if row["diagnostic_type"] == "summary")
+    assert summary["z_pai_total_observed_path_m"] == "12"
+
+
 def test_true_duplicate_result_identity_raises(tmp_path):
     cfg = AnalysisConfig(data_dirs=[], calibration_dir=tmp_path, cart_id="test")
     path = tmp_path / "results.csv"

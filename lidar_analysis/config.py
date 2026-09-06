@@ -96,6 +96,7 @@ class AnalysisConfig:
     fad_layer_thickness_m: float | None = 0.10
     fad_include_layer_columns: bool = True
     run_pai: bool = False
+    run_z_pai: bool = False
     pai_g_function: str = "spherical"
     pai_g_value: float = 0.5
     pai_height_percentile: float = 99.0

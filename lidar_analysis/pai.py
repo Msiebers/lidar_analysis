@@ -62,6 +62,183 @@ def _fit_transmission(chords: np.ndarray, gaps: np.ndarray, g_value: float):
     return float(result.x), float(-result.fun), bool(result.success), False
 
 
+def _first_event_layer_paths(
+    origins_m: np.ndarray,
+    events: dict[str, np.ndarray],
+    layer_edges_y_m: np.ndarray,
+) -> np.ndarray:
+    """Observed path in each height layer, ending at the first return or box exit."""
+    origins = np.asarray(origins_m, dtype=float)
+    directions = np.asarray(events["directions"], dtype=float)
+    edges = np.asarray(layer_edges_y_m, dtype=float)
+    observed = np.asarray(events["observed"], dtype=bool)
+    entry = np.asarray(events["entry_m"], dtype=float)
+    stop = entry + np.asarray(events["path_m"], dtype=float)
+    matrix = np.zeros((len(origins), len(edges) - 1), dtype=float)
+
+    vertical = directions[:, 1]
+    moving = observed & (np.abs(vertical) > 1e-12)
+    for index, (bottom, top) in enumerate(zip(edges[:-1], edges[1:])):
+        first = np.full(len(origins), np.inf, dtype=float)
+        last = np.full(len(origins), -np.inf, dtype=float)
+        first[moving] = np.minimum(
+            (bottom - origins[moving, 1]) / vertical[moving],
+            (top - origins[moving, 1]) / vertical[moving],
+        )
+        last[moving] = np.maximum(
+            (bottom - origins[moving, 1]) / vertical[moving],
+            (top - origins[moving, 1]) / vertical[moving],
+        )
+        matrix[moving, index] = np.clip(
+            np.minimum(last[moving], stop[moving])
+            - np.maximum(first[moving], entry[moving]),
+            0.0,
+            None,
+        )
+
+    horizontal = observed & ~moving
+    if np.any(horizontal):
+        layer_index = np.searchsorted(edges, origins[horizontal, 1], side="right") - 1
+        layer_index[np.isclose(origins[horizontal, 1], edges[-1])] = len(edges) - 2
+        rows = np.flatnonzero(horizontal)
+        valid = (layer_index >= 0) & (layer_index < len(edges) - 1)
+        matrix[rows[valid], layer_index[valid]] = np.clip(
+            stop[rows[valid]] - entry[rows[valid]], 0.0, None
+        )
+    return matrix
+
+
+def compute_z_pai_traits(
+    *, origins_m, directions_m, ranges_m, raw_hit_mask, box: Box3D,
+    explicit_no_return_mask=None, max_observation_range_m: float | None = 60.0,
+    g_function: str = "spherical", g_value: float = 0.5,
+    layer_thickness_m: float = 0.1, include_layer_columns: bool = False,
+    diagnostic: bool = False, normalize_directions: bool = True,
+) -> dict[str, Any]:
+    """Finite-box, fixed-G Zhao first-event maximum-likelihood PAI profile."""
+    if str(g_function).strip().lower() != "spherical" or not np.isclose(float(g_value), 0.5):
+        raise ValueError("Z_PAI requires the spherical G=0.5 assumption")
+
+    n_total = len(np.asarray(origins_m))
+    base: dict[str, Any] = {
+        "z_pai_m2_m2": np.nan,
+        "z_pai_height_m": box.y_max - box.y_min,
+        "z_pai_layer_thickness_m": layer_thickness_m,
+        "z_pai_n_layers": 0,
+        "z_pai_n_supported_layers": 0,
+        "z_pai_profile_support_fraction": 0.0,
+        "z_pai_profile_complete": False,
+        "z_pai_n_rays_total": n_total,
+        "z_pai_n_rays_intersecting_box": 0,
+        "z_pai_n_rays_observed": 0,
+        "z_pai_n_hits": 0,
+        "z_pai_n_full_gaps": 0,
+        "z_pai_n_hits_before_box": 0,
+        "z_pai_n_unknown": 0,
+        "z_pai_total_observed_path_m": 0.0,
+        "z_pai_log_likelihood": np.nan,
+        "z_pai_g_function": "spherical",
+        "z_pai_g_value": float(g_value),
+    }
+    if not box_is_valid(box):
+        return base
+    if layer_thickness_m is None:
+        raise ValueError("Z_PAI requires pai_layer_thickness_m")
+
+    edges = make_layer_edges(
+        y_min_m=box.y_min, y_max_m=box.y_max,
+        layer_thickness_m=float(layer_thickness_m),
+    )
+    base["z_pai_n_layers"] = len(edges) - 1
+    raw_hits = np.asarray(raw_hit_mask, dtype=bool)
+    ranges = np.asarray(ranges_m, dtype=float)
+    no_returns = (
+        (~raw_hits & np.isinf(ranges))
+        if explicit_no_return_mask is None
+        else np.asarray(explicit_no_return_mask, dtype=bool)
+    )
+    events = classify_first_events(
+        origins_m=np.asarray(origins_m, dtype=float),
+        directions_m=directions_m,
+        ranges_m=ranges,
+        raw_hit_mask=raw_hits,
+        explicit_no_return_mask=no_returns,
+        box=box,
+        max_observation_range_m=max_observation_range_m,
+        normalize_directions=normalize_directions,
+    )
+    paths = _first_event_layer_paths(np.asarray(origins_m, dtype=float), events, edges)
+    expected_path = float(np.sum(events["path_m"][events["observed"]]))
+    if not np.isclose(float(np.sum(paths)), expected_path, rtol=1e-9, atol=1e-9):
+        raise AssertionError("Z_PAI layer paths must sum to observed first-event path")
+
+    hit_layer = np.full(n_total, -1, dtype=int)
+    hit_rows = np.flatnonzero(events["hit"])
+    if hit_rows.size:
+        stop = events["entry_m"] + events["path_m"]
+        hit_y = (
+            np.asarray(origins_m, dtype=float)[hit_rows, 1]
+            + events["directions"][hit_rows, 1] * stop[hit_rows]
+        )
+        hit_y = np.clip(hit_y, edges[0], edges[-1])
+        indices = np.searchsorted(edges, hit_y, side="right") - 1
+        indices[np.isclose(hit_y, edges[-1])] = len(edges) - 2
+        for edge_index, edge in enumerate(edges[1:-1], start=1):
+            boundary = np.isclose(hit_y, edge, rtol=0.0, atol=1e-8)
+            indices[boundary & (events["directions"][hit_rows, 1] > 0.0)] = edge_index - 1
+        hit_layer[hit_rows] = indices
+
+    thicknesses = np.diff(edges)
+    layer_pai = np.full(len(thicknesses), np.nan)
+    layer_rows = []
+    log_likelihood = 0.0
+    for index, (bottom, top, thickness) in enumerate(zip(edges[:-1], edges[1:], thicknesses)):
+        exposure = float(np.sum(paths[:, index]))
+        hits = int(np.sum(hit_layer == index))
+        pad = hits / (float(g_value) * exposure) if exposure > 0.0 else np.nan
+        layer_pai[index] = pad * thickness if np.isfinite(pad) else np.nan
+        layer_log_likelihood = (
+            hits * np.log(float(g_value) * pad) - float(g_value) * pad * exposure
+            if hits > 0 and np.isfinite(pad) else 0.0
+        )
+        log_likelihood += layer_log_likelihood
+        if include_layer_columns:
+            label = f"{round(bottom * 100):03d}_{round(top * 100):03d}"
+            base[f"z_pai_layer_{label}_m2_m2"] = float(layer_pai[index])
+        if diagnostic:
+            layer_rows.append({
+                "layer_bottom_m": float(bottom),
+                "layer_top_m": float(top),
+                "layer_thickness_m": float(thickness),
+                "pad_layer_m2_m3": float(pad),
+                "pai_layer_m2_m2": float(layer_pai[index]),
+                "n_rays_observed": int(np.sum(paths[:, index] > 0.0)),
+                "n_hits": hits,
+                "total_observed_path_m": exposure,
+                "layer_log_likelihood": float(layer_log_likelihood),
+            })
+
+    supported = np.isfinite(layer_pai)
+    complete = bool(layer_pai.size and np.all(supported))
+    base.update({
+        "z_pai_m2_m2": float(np.sum(layer_pai)) if complete else np.nan,
+        "z_pai_n_supported_layers": int(np.sum(supported)),
+        "z_pai_profile_support_fraction": float(np.sum(thicknesses[supported]) / np.sum(thicknesses)),
+        "z_pai_profile_complete": complete,
+        "z_pai_n_rays_intersecting_box": int(np.sum(events["intersects"])),
+        "z_pai_n_rays_observed": int(np.sum(events["observed"])),
+        "z_pai_n_hits": int(np.sum(events["hit"])),
+        "z_pai_n_full_gaps": int(np.sum(events["gap"])),
+        "z_pai_n_hits_before_box": int(np.sum(events["before"])),
+        "z_pai_n_unknown": int(np.sum(events["unknown"])),
+        "z_pai_total_observed_path_m": float(np.sum(paths)),
+        "z_pai_log_likelihood": float(log_likelihood) if np.any(supported) else np.nan,
+    })
+    if layer_rows:
+        base["_z_pai_layers"] = layer_rows
+    return base
+
+
 def layer_path_matrix(origins_m, directions_m, box: Box3D, layer_edges_y_m, *, normalize_directions=True):
     origins = np.asarray(origins_m, dtype=float)
     directions, valid = _prepare_directions(directions_m, normalize=normalize_directions)

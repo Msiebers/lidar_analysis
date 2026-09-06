@@ -432,6 +432,7 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         fad_layer_thickness_m=pick("fad_layer_thickness_m", "fad_layer_thickness_m"),
         fad_include_layer_columns=pick("fad_include_layer_columns", "fad_include_layer_columns", bool),
         run_pai=pick("run_pai", "run_pai", bool),
+        run_z_pai=pick("run_z_pai", "run_z_pai", bool),
         pai_g_function=pick("pai_g_function", "pai_g_function", str),
         pai_g_value=pick("pai_g_value", "pai_g_value", float),
         pai_height_percentile=pick("pai_height_percentile", "pai_height_percentile", float),
@@ -521,6 +522,8 @@ def phenotype_columns(cfg: AnalysisConfig) -> list[str]:
 
     if bool(getattr(cfg, "run_pai", False)):
         cols.extend(["pai_m2_m2", "pai_height_m", "pai_layer_thickness_m", "pai_n_layers"])
+    if bool(getattr(cfg, "run_z_pai", False)):
+        cols.append("z_pai_m2_m2")
 
     cols.extend([
         "point_density_m2",
@@ -609,8 +612,10 @@ def append_trait_rows(
     def include_layer_field(key: str) -> bool:
         return key.startswith("fad_layer_") or (
             bool(getattr(cfg, "pai_include_layer_columns", False))
-            and key.startswith("pai_layer_")
-            and key.endswith("_conditional_pai_m2_m2")
+            and (
+                (key.startswith("pai_layer_") and key.endswith("_conditional_pai_m2_m2"))
+                or (key.startswith("z_pai_layer_") and key.endswith("_m2_m2"))
+            )
         )
 
     layer_fields = sorted({
@@ -735,7 +740,7 @@ def append_ray_box_diagnostics(
         }
         scalars = {
             key: value for key, value in rec.items()
-            if not key.startswith("_") and key.startswith(("ray_box_", "fad_", "pai_", "mta_"))
+            if not key.startswith("_") and key.startswith(("ray_box_", "fad_", "pai_", "z_pai_", "mta_"))
         }
         layers = list(rec.get("_pai_layers", ()))
         finite_layer_pai = [float(layer["pai_layer_m2_m2"]) for layer in layers
@@ -748,10 +753,20 @@ def append_ray_box_diagnostics(
                 expected = float(layer["pad_layer_m2_m3"]) * float(layer["layer_thickness_m"])
                 if not np.isclose(float(layer["pai_layer_m2_m2"]), expected):
                     raise AssertionError("Layer PAI must equal PAD times layer thickness")
+        z_layers = list(rec.get("_z_pai_layers", ()))
+        finite_z_pai = [float(layer["pai_layer_m2_m2"]) for layer in z_layers
+                        if pd.notna(layer.get("pai_layer_m2_m2"))]
+        if z_layers and len(finite_z_pai) == len(z_layers) and pd.notna(rec.get("z_pai_m2_m2")):
+            if not np.isclose(float(rec["z_pai_m2_m2"]), sum(finite_z_pai)):
+                raise AssertionError("Total Z_PAI must equal the sum of layer Z_PAI")
         rows.append(identity | {"diagnostic_type": "summary"} | scalars)
         rows.extend(
             identity | {"diagnostic_type": "pai_layer"} | dict(layer)
             for layer in layers
+        )
+        rows.extend(
+            identity | {"diagnostic_type": "z_pai_layer"} | dict(layer)
+            for layer in z_layers
         )
         rows.extend(
             identity | {"diagnostic_type": "mta_bin"} | dict(diagnostic)

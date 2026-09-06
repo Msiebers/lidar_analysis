@@ -195,6 +195,12 @@ def test_pai_main_schema_is_layer_integrated_and_compact(tmp_path):
         "pai_m2_m2", "pai_height_m", "pai_layer_thickness_m", "pai_n_layers",
     ]
 
+    z_cfg = build_config({"run_z_pai": True}, force=False, cart_id="CART", data_dir=tmp_path)
+    assert z_cfg.run_z_pai is True
+    assert [name for name in phenotype_columns(z_cfg) if name.startswith("z_pai_")] == [
+        "z_pai_m2_m2",
+    ]
+
 
 def test_build_config_maps_local_ground_grid_settings(tmp_path):
     from lidar_analysis.central_runner import build_config
@@ -295,6 +301,7 @@ def test_full_experiment_config_template_loads(tmp_path):
     assert cfg.additional_scan_side_axis == "x"
     assert cfg.markers_dirname == "markers"
     assert cfg.run_pai is False
+    assert cfg.run_z_pai is False
     assert cfg.pai_g_function == "spherical"
     assert cfg.pai_g_value == 0.5
     assert cfg.pai_height_percentile == 99.0

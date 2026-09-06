@@ -53,6 +53,7 @@ created.
 | `pai_height_m` | Vertical height of the shared ray box; ground-relative when `ray_box.ground_mode: local_grid` | m |
 | `pai_layer_thickness_m` | Requested nominal layer thickness | m |
 | `pai_n_layers` | Number of actual layers, including a shorter final layer when needed | count |
+| `z_pai_m2_m2` | Optional fixed-G Zhao first-event PAI integrated over the same plot-bounded layers | m² m⁻² |
 
 `pai_m2_m2` is the only publication PAI estimate in the main table. Whole-box
 PAI/PAD, convergence flags, ray counts, gap fractions, likelihoods, and bounds
@@ -67,6 +68,10 @@ The `pai_layer` rows in `ray_box_diagnostics.csv` add PAD, hit/gap/unknown count
 chord lengths, likelihood, G function, conditioning, fit status, ground
 diagnostics, whole-box comparison, and layer support fields. The writer verifies
 `pai_layer_m2_m2 = pad_layer_m2_m3 * layer_thickness_m`.
+
+When `run_z_pai: true`, `z_pai_m2_m2` is written alongside the unchanged
+publication PAI. `z_pai_layer` records in `ray_box_diagnostics.csv` report each
+layer's first-return count, observed path, PAD, PAI increment, and likelihood.
 
 ## Topology fields
 

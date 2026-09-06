@@ -140,11 +140,12 @@ Older configs may still use compatibility aliases such as `splitting_style`, top
 | `run_mta` | `false` | `pipeline_core.analyze_plot`, `lidar_analysis/mta.py` | Adds the plot-bounded `bounded_lang_v1` MTA |
 | `mta_angle_bin_deg` | `5.0` | `lidar_analysis/mta.py` | Angular-bin width; standard fitting bins remain anchored to the complete 25–65 degree interval |
 | `ray_box.diagnostic` | `false` | `central_runner.run_experiment_date` | Writes one `ray_box_diagnostics.csv` containing shared-box summaries, PAI layers, and MTA angular bins |
-| `ray_box` geometry | shared when provided | `central_runner.build_config`, `pipeline_core._build_shared_ray_box` | Defines the single FAD/MTA/PAI volume; legacy trait-specific geometry is used only when a shared value is omitted |
+| `ray_box` geometry | shared when provided | `central_runner.build_config`, `pipeline_core._build_shared_ray_box` | Defines the single FAD/MTA/PAI/Z_PAI volume; legacy trait-specific geometry is used only when a shared value is omitted |
 | `ray_box.ground_mode` | `global_y` | `pipeline_core._build_shared_ray_box` | `local_grid` moves only the box bottom using the plot's median local-ground elevation; the canopy top remains the raw-Y PAI top |
 | `analyze_one_side` | `false` | `pipeline_core.process_scan` | When true, analyzes and writes only the side selected by `analyze_side` |
 | `analyze_side` | `null` | `pipeline_core.process_scan` | Required as `left` or `right` when `analyze_one_side` is true |
 | `run_pai` | `false` | `pipeline_core.analyze_plot`, `lidar_analysis/pai.py` | Integrates bounded layer PAI increments into the publication value `pai_m2_m2` |
+| `run_z_pai` | `false` | `pipeline_core.analyze_plot`, `lidar_analysis/pai.py` | Adds `z_pai_m2_m2`, the fixed-G Zhao first-event estimate using the same Raybox and height layers |
 | `pai_layer_thickness_m` | `0.10` | `lidar_analysis/pai.py` | Nominal vertical layer thickness in metres |
 | `pai_include_layer_columns` | `false` | `central_runner.run_experiment_date` | Adds one integrated PAI number per vertical layer to `results.csv` |
 | `run_topology` | `false` compatibility shim | legacy branch in `pipeline_core.analyze_plot` | Prefer `pointcloud_ops: [{op: topology_trait}]` |
@@ -165,6 +166,14 @@ layer exit. The layer PAD is multiplied by the actual layer
 thickness, and `pai_m2_m2` is the sum of those layer PAI increments. Whole-box
 PAI and PAD remain audit values only. Existing `pai_run_*profile` keys remain
 readable for compatibility but are not primary controls in generated configs.
+
+Z_PAI is additive and does not replace `pai_m2_m2`. It uses the same Raybox,
+layer thickness, spherical `G=0.5`, and first-event classes. Within each layer
+it estimates `PAD = hits / (G * observed path)`, where hit paths stop at the
+measured return and verified gaps stop at the layer exit. Empty distance between
+the scanner and Raybox is not canopy exposure. This is the unpenalized,
+piecewise-constant, fixed-G special case of the Zhao first-event likelihood; it
+is mathematically a contact-frequency estimator. Enable it with `run_z_pai: true`.
 
 Supported operation names are defined by `pointcloud_ops._SUPPORTED_OPS`:
 

@@ -6,7 +6,12 @@ import lidar_analysis.pai as pai_module
 from lidar_analysis.analysis_target import AnalysisTarget
 from lidar_analysis.config import AnalysisConfig
 from lidar_analysis.fad import Box3D, estimate_fad_height_from_points, make_fad_box_from_footprint_and_height
-from lidar_analysis.pai import _fit_transmission, compute_pai_traits, layer_path_matrix
+from lidar_analysis.pai import (
+    _fit_transmission,
+    compute_pai_traits,
+    compute_z_pai_traits,
+    layer_path_matrix,
+)
 from lidar_analysis.pipeline_core import Plot, _build_shared_ray_box, analyze_plot
 from lidar_analysis.pointcloud_ops import add_local_ground_height, estimate_local_ground_grid
 
@@ -234,6 +239,59 @@ def test_conditional_profile_uses_layer_not_within_layer_hit_location():
     key = "pai_layer_000_050_conditional_pad_m2_m3"
     assert near[key] == pytest.approx(far[key])
     assert near[key] == pytest.approx(2.0 * np.log(2.0), rel=1e-5)
+
+
+def test_z_pai_uses_exact_first_event_distance():
+    common = dict(
+        origins_m=np.tile([-1.0, 0.25, 0.5], (3, 1)),
+        directions_m=np.tile([1.0, 0.0, 0.0], (3, 1)),
+        raw_hit_mask=np.array([True, True, False]), box=BOX,
+        layer_thickness_m=1.0,
+    )
+    near = compute_z_pai_traits(ranges_m=np.array([1.1, 1.2, np.inf]), **common)
+    far = compute_z_pai_traits(ranges_m=np.array([1.8, 1.9, np.inf]), **common)
+
+    assert near["z_pai_total_observed_path_m"] == pytest.approx(1.3)
+    assert far["z_pai_total_observed_path_m"] == pytest.approx(2.7)
+    assert near["z_pai_m2_m2"] == pytest.approx(2.0 / (0.5 * 1.3))
+    assert far["z_pai_m2_m2"] == pytest.approx(2.0 / (0.5 * 2.7))
+    assert near["z_pai_m2_m2"] > far["z_pai_m2_m2"]
+
+
+def test_z_pai_integrates_exact_event_layers():
+    result = compute_z_pai_traits(
+        origins_m=np.array([
+            [-1.0, 0.25, 0.5], [-1.0, 0.25, 0.5],
+            [-1.0, 0.75, 0.5], [-1.0, 0.75, 0.5],
+        ]),
+        directions_m=np.tile([1.0, 0.0, 0.0], (4, 1)),
+        ranges_m=np.array([1.5, np.inf, 1.5, np.inf]),
+        raw_hit_mask=np.array([True, False, True, False]),
+        box=BOX, layer_thickness_m=0.5,
+        include_layer_columns=True, diagnostic=True,
+    )
+
+    expected_layer_pai = (1.0 / (0.5 * 1.5)) * 0.5
+    assert result["z_pai_profile_complete"] is True
+    assert result["z_pai_n_supported_layers"] == 2
+    assert result["z_pai_layer_000_050_m2_m2"] == pytest.approx(expected_layer_pai)
+    assert result["z_pai_layer_050_100_m2_m2"] == pytest.approx(expected_layer_pai)
+    assert result["z_pai_m2_m2"] == pytest.approx(2.0 * expected_layer_pai)
+    assert len(result["_z_pai_layers"]) == 2
+
+
+def test_z_pai_diagonal_path_is_partitioned_once_at_layer_boundary():
+    direction = np.array([1.0, 1.0, 0.0]) / np.sqrt(2.0)
+    result = compute_z_pai_traits(
+        origins_m=np.tile([-1.0, -1.0, 0.5], (2, 1)),
+        directions_m=np.tile(direction, (2, 1)),
+        ranges_m=np.array([1.5 * np.sqrt(2.0), np.inf]),
+        raw_hit_mask=np.array([True, False]),
+        box=BOX, layer_thickness_m=0.5, diagnostic=True,
+    )
+
+    assert result["z_pai_total_observed_path_m"] == pytest.approx(1.5 * np.sqrt(2.0))
+    assert sum(layer["n_hits"] for layer in result["_z_pai_layers"]) == 1
 
 
 def test_conditional_hit_in_later_layer_is_gap_in_prior_layer():
@@ -465,6 +523,7 @@ def test_joint_profile_default_off_skips_matrix(monkeypatch):
 def test_pipeline_result_row_contains_independent_pai_fields(tmp_path):
     cfg = AnalysisConfig(data_dirs=[], calibration_dir=tmp_path, cart_id="test")
     cfg.run_pai = True
+    cfg.run_z_pai = True
     cfg.pai_run_layers = False
     cfg.row_width_u = 1.5
     plot = Plot("scan", "1", (0.0, 1000.0), str(tmp_path), scan_base="scan_001")
@@ -486,3 +545,5 @@ def test_pipeline_result_row_contains_independent_pai_fields(tmp_path):
     assert row["pai_pad_m2_m3"] > 0.0
     assert row["pai_x_min_m"] == 0.0
     assert row["pai_x_max_m"] == 1.5
+    assert row["z_pai_n_hits"] == 2
+    assert "z_pai_m2_m2" in row

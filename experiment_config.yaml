@@ -89,9 +89,9 @@ analysis:
   min_height_agl_m: 0.1
 
   ray_box:
-    diagnostic: false  # writes ray_box_diagnostics.csv for FAD, MTA, and PAI
+    diagnostic: false  # writes ray_box_diagnostics.csv for FAD, MTA, PAI, and Z_PAI
     ground_mode: local_grid  # options: local_grid, global_y
-    # This geometry defines the single box shared by PAI, FAD, and MTA.
+    # This geometry defines the single box shared by PAI, Z_PAI, FAD, and MTA.
     bottom_agl_m: 0.10
     x_near_m: 0.4
     height_percentile: 99.99
@@ -112,11 +112,12 @@ analysis:
   run_lai: false
   run_mta: false
   mta_angle_bin_deg: 5.0
-  # Shared PAI/MTA proof range for treating an explicit no-return as a full gap.
+  # Shared PAI/Z_PAI/MTA proof range for treating an explicit no-return as a full gap.
   mta_max_observation_range_m: 60.0  # options: null, positive meters
   run_fad: false
   # run_fad: true
   run_pai: true
+  run_z_pai: true  # options: true, false; exact first-event PAI using the same Raybox/layers
 
   # FAD settings are present but inactive because run_fad is false
   fad_height_percentile: 99.0
@@ -132,7 +133,7 @@ analysis:
   fad_include_layer_columns: true
   # fad_include_layer_columns: false
 
-  # Bounded gap/transmission PAI settings (independent of FAD)
+  # Bounded PAI settings shared by PAI and Z_PAI (independent of FAD)
   pai_g_function: spherical
   pai_g_value: 0.5
   pai_height_percentile: 99.0
@@ -142,7 +143,7 @@ analysis:
   pai_height_buffer_m: 0.0
   pai_layer_thickness_m: 0.10
   pai_include_layer_columns: false
-  # pai_include_layer_columns: true  # one integrated PAI number per layer in results.csv
+  # pai_include_layer_columns: true  # one PAI and Z_PAI increment per layer in results.csv
   
   # YAML-ordered point-cloud analysis operations.
   # Operations run in the order listed below.

@@ -35,7 +35,7 @@ try:
         height_result_to_traits,
         make_fad_box_from_footprint_and_height,
     )
-    from .pai import compute_pai_traits
+    from .pai import compute_pai_traits, compute_z_pai_traits
     from .mta import compute_mta_traits
 except Exception:
     from config import AnalysisConfig
@@ -58,7 +58,7 @@ except Exception:
         height_result_to_traits,
         make_fad_box_from_footprint_and_height,
     )
-    from pai import compute_pai_traits
+    from pai import compute_pai_traits, compute_z_pai_traits
     from mta import compute_mta_traits
 
 # ----------------------
@@ -1422,6 +1422,7 @@ def analyze_plot(
     lai_plot_idx = np.empty((0,), dtype=np.int32)
     fad_traits = {}
     pai_traits = {}
+    z_pai_traits = {}
     mta_traits = {}
     op_traits = {}
     topo_object_points = []
@@ -1461,7 +1462,7 @@ def analyze_plot(
                 or getattr(cfg, "use_local_ground_filter", False)
             )
             ray_traits_need_ground = (
-                (bool(getattr(cfg, "run_fad", False)) or bool(getattr(cfg, "run_mta", False)) or bool(getattr(cfg, "run_pai", False)))
+                (bool(getattr(cfg, "run_fad", False)) or bool(getattr(cfg, "run_mta", False)) or bool(getattr(cfg, "run_pai", False)) or bool(getattr(cfg, "run_z_pai", False)))
                 and _ray_box_ground_mode(cfg) == "local_grid"
             )
             if not apply_ground_filter and not ray_traits_need_ground:
@@ -1627,7 +1628,7 @@ def analyze_plot(
         n_angles = int(lai_traits.get("lai_n_angles", 0) or 0)
 
     shared_ray_box = None
-    if cfg.run_fad or cfg.run_mta or cfg.run_pai:
+    if cfg.run_fad or cfg.run_mta or cfg.run_pai or cfg.run_z_pai:
         shared_ray_box = _build_shared_ray_box(
             p, fused_np, cfg, row_options, step_mm, lidar_height_mm, roll_offset, pitch_offset
         )
@@ -1707,6 +1708,29 @@ def analyze_plot(
             print(
                 f"[PAI] target={p.name} rays={shared_ray_box.ray_ids.size} "
                 f"observed={pai_traits['pai_n_rays_observed']} pai={pai_traits['pai_m2_m2']}"
+            )
+
+        if cfg.run_z_pai:
+            z_pai_traits = compute_z_pai_traits(
+                origins_m=shared_ray_box.origins_m,
+                directions_m=shared_ray_box.directions_m,
+                ranges_m=shared_ray_box.ranges_m,
+                raw_hit_mask=shared_ray_box.raw_hit_mask,
+                explicit_no_return_mask=shared_ray_box.explicit_no_return_mask,
+                max_observation_range_m=cfg.mta_max_observation_range_m,
+                box=shared_ray_box.box,
+                g_function=cfg.pai_g_function,
+                g_value=cfg.pai_g_value,
+                layer_thickness_m=cfg.pai_layer_thickness_m,
+                include_layer_columns=cfg.pai_include_layer_columns,
+                diagnostic=cfg.ray_box_diagnostic,
+                normalize_directions=shared_ray_box.normalize_directions,
+            )
+            z_pai_traits.update(shared_ray_box.diagnostics)
+            print(
+                f"[Z_PAI] target={p.name} rays={shared_ray_box.ray_ids.size} "
+                f"observed={z_pai_traits['z_pai_n_rays_observed']} "
+                f"z_pai={z_pai_traits['z_pai_m2_m2']}"
             )
 
     side_label = _plot_side_label(p, row_options)
@@ -1796,6 +1820,7 @@ def analyze_plot(
             result.pop(key, None)
     result.update(fad_traits)
     result.update(pai_traits)
+    result.update(z_pai_traits)
     result.update(mta_traits)
     if bool(getattr(cfg, "ray_box_diagnostic", False)) and getattr(p, "mta_bin_diagnostics", None) is not None:
         result["_mta_diagnostics"] = p.mta_bin_diagnostics.to_dict("records")
@@ -1821,6 +1846,9 @@ _OUTPUT_COUNT_COLUMNS = {
     "pai_n_rays_total", "pai_n_rays_intersecting_box", "pai_n_rays_observed",
     "pai_n_hits", "pai_n_full_gaps", "pai_n_hits_before_box", "pai_n_unknown",
     "pai_n_layers", "pai_profile_rank", "pai_profile_n_layers", "pai_profile_n_observed",
+    "z_pai_n_rays_total", "z_pai_n_rays_intersecting_box", "z_pai_n_rays_observed",
+    "z_pai_n_hits", "z_pai_n_full_gaps", "z_pai_n_hits_before_box", "z_pai_n_unknown",
+    "z_pai_n_layers", "z_pai_n_supported_layers",
     "canopy_volume_2p5d_occupied_cells", "canopy_volume_2p5d_total_cells",
 }
 
@@ -1887,6 +1915,13 @@ def trait_summary_row(rec: dict, cfg: AnalysisConfig) -> dict:
             row.update({
                 key: value for key, value in rec.items()
                 if key.startswith("pai_layer_") and key.endswith("_conditional_pai_m2_m2")
+            })
+    if bool(getattr(cfg, "run_z_pai", False)):
+        row["z_pai_m2_m2"] = rec.get("z_pai_m2_m2")
+        if bool(getattr(cfg, "pai_include_layer_columns", False)):
+            row.update({
+                key: value for key, value in rec.items()
+                if key.startswith("z_pai_layer_") and key.endswith("_m2_m2")
             })
     return row
 
