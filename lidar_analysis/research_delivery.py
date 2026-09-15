@@ -15,6 +15,27 @@ from typing import Iterable
 
 import yaml
 
+from lidar_analysis.research_delivery_layout import (
+    COMBINED_RESULTS_FILE,
+    CONFIG_SNAPSHOT_FILE,
+    DATE_INDEX_FILE,
+    DATE_SUBDIRS,
+    EXPERIMENT_SUMMARY_FILE,
+    MANIFEST_DIR,
+    MANIFEST_FILE,
+    MANIFEST_SCHEMA_VERSION,
+    MARKER_FILE,
+    MISSING_METRICS_FILE,
+    README_FILE,
+    SUMMARY_DIR,
+    SUMMARY_SUBDIRS,
+    artifact_role,
+    date_outliers_file,
+    date_qc_flags_file,
+    date_ranking_file,
+    date_results_file,
+    date_source_reference_file,
+)
 from lidar_analysis.research_delivery_plots import generate_delivery_graphs
 
 
@@ -41,6 +62,7 @@ class DeliveryConfig:
     outlier_iqr_multiplier: float = 1.5
     generate_graphs: bool = True
     graph_dpi: int = 160
+    dates: tuple[str, ...] = ()
 
     @classmethod
     def from_mapping(cls, data: dict[str, object]) -> "DeliveryConfig":
@@ -65,6 +87,18 @@ class DeliveryConfig:
         if isinstance(raw_graph_dpi, bool) or not isinstance(raw_graph_dpi, int):
             raise ValueError("graph_dpi must be an integer from 72 through 600")
 
+        raw_dates = data.get("dates")
+        if raw_dates is None:
+            raw_dates = ()
+        if not isinstance(raw_dates, (list, tuple)):
+            raise ValueError("dates must be a list of quoted 'YYYY_MM_DD' strings")
+        if any(not isinstance(value, str) for value in raw_dates):
+            raise ValueError(
+                "dates entries must be quoted strings such as '2026_05_14' "
+                "(unquoted YAML reads 2026_05_14 as a number)"
+            )
+        parsed_dates = tuple(sorted(value.strip() for value in raw_dates))
+
         config = cls(
             experiment=str(data["experiment"]).strip(),
             raw_experiment_root=Path(str(data["raw_experiment_root"])).expanduser(),
@@ -76,6 +110,7 @@ class DeliveryConfig:
             outlier_iqr_multiplier=float(data.get("outlier_iqr_multiplier", 1.5)),
             generate_graphs=raw_generate_graphs,
             graph_dpi=raw_graph_dpi,
+            dates=parsed_dates,
         )
         config.validate()
         return config
@@ -97,6 +132,11 @@ class DeliveryConfig:
             raise ValueError("graph_dpi must be an integer from 72 through 600")
         if len(set(self.metrics)) != len(self.metrics):
             raise ValueError("metrics must not contain duplicates")
+        for date_name in self.dates:
+            if not isinstance(date_name, str) or not DATE_PATTERN.fullmatch(date_name):
+                raise ValueError(f"dates must use YYYY_MM_DD format: {date_name!r}")
+        if len(set(self.dates)) != len(self.dates):
+            raise ValueError("dates must not contain duplicates")
 
         unsupported = sorted(set(self.metrics) - set(CANONICAL_RANKING_METRICS))
         if unsupported:
@@ -119,7 +159,7 @@ class DeliveryConfig:
             )
 
     def as_dict(self) -> dict[str, object]:
-        return {
+        data: dict[str, object] = {
             "experiment": self.experiment,
             "raw_experiment_root": str(self.raw_experiment_root.resolve()),
             "analysis_experiment_root": str(self.analysis_experiment_root.resolve()),
@@ -132,6 +172,9 @@ class DeliveryConfig:
             "graph_dpi": self.graph_dpi,
             "test_preview": True,
         }
+        if self.dates:
+            data["dates"] = list(self.dates)
+        return data
 
 
 @dataclass
@@ -157,6 +200,7 @@ class DateInspection:
     marker_reference_csv_files: int = 0
     analysis_config_path: Path | None = None
     analysis_config_sha256: str = ""
+    results_sha256: str = ""
 
 
 @dataclass(frozen=True)
@@ -341,6 +385,15 @@ def inspect_experiment(config: DeliveryConfig) -> list[DateInspection]:
     raw_dates = _date_directories(config.raw_experiment_root.resolve())
     analysis_dates = _date_directories(config.analysis_experiment_root.resolve())
     date_names = sorted(set(raw_dates) | set(analysis_dates))
+    if config.dates:
+        unknown_dates = sorted(set(config.dates) - set(date_names))
+        if unknown_dates:
+            raise ValueError(
+                "Requested date(s) not found in either input root: "
+                + ", ".join(unknown_dates)
+            )
+        requested_dates = set(config.dates)
+        date_names = [name for name in date_names if name in requested_dates]
     inspections: list[DateInspection] = []
 
     for date_name in date_names:
@@ -409,6 +462,7 @@ def inspect_experiment(config: DeliveryConfig) -> list[DateInspection]:
                     _add_flag(inspection, "error", "output", inspection.reason)
                 else:
                     inspection.status = "usable"
+                    inspection.results_sha256 = sha256_file(results_path)
                     inspection.reason = "Canonical results.csv is available."
 
         if inspection.rows and "scan_id" in inspection.fieldnames:
@@ -627,7 +681,9 @@ def _date_index_row(inspection: DateInspection) -> dict[str, object]:
         "source_dir": str(inspection.source_dir or ""),
         "analysis_date_dir": str(inspection.analysis_date_dir or ""),
         "results_path": str(inspection.results_path or ""),
+        "results_sha256": inspection.results_sha256,
         "results_rows": len(inspection.rows),
+        "pointcloud_dir": str(inspection.pointcloud_dir or ""),
         "lidar_files": inspection.lidar_files,
         "pico_files": inspection.pico_files,
         "scan_pairs": inspection.scan_pairs,
@@ -642,89 +698,173 @@ def _date_index_row(inspection: DateInspection) -> dict[str, object]:
     }
 
 
+def _write_results_snapshot(destination: Path, inspection: DateInspection) -> None:
+    """Freeze a byte-identical copy of the canonical results file (intentional snapshot)."""
+    if inspection.results_path is None or not inspection.results_sha256:
+        raise ValueError(f"{inspection.date}: no fingerprinted results file to snapshot")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(inspection.results_path, destination)
+    if sha256_file(destination) != inspection.results_sha256:
+        raise RuntimeError(
+            f"{inspection.date}: results file changed during the build: {inspection.results_path}"
+        )
+
+
+def _write_source_reference(path: Path, inspection: DateInspection) -> None:
+    index_row = _date_index_row(inspection)
+    usable = inspection.status == "usable"
+    lines = [
+        f"# Source reference: {inspection.date}",
+        "",
+        "Raw scans and point clouds are not copied into this delivery; they are referenced read-only below.",
+        "Provenance for every date: `../../manifest/experiment_date_index.csv`.",
+        "",
+        "## Status",
+        "",
+        f"- Status: {inspection.status}",
+        f"- Reason: {inspection.reason}",
+        "",
+        "## Read-only inputs",
+        "",
+    ]
+    for key in (
+        "raw_date_dir",
+        "source_dir",
+        "analysis_date_dir",
+        "results_path",
+        "results_sha256",
+        "pointcloud_dir",
+        "analysis_config_path",
+        "analysis_config_sha256",
+    ):
+        lines.append(f"- {key}: `{index_row[key] or 'unavailable'}`")
+    lines += ["", "## Quality control", ""]
+    if usable:
+        lines += [
+            "- Delivery results snapshot: `../results/results.csv` "
+            "(byte-identical copy of `results_path`; verify with `results_sha256`).",
+            "- Results QC flags: `../qc/qc_flags.csv`",
+            "- Outliers: `../qc/outliers.csv`",
+        ]
+    else:
+        lines += [
+            "- Results QC was not performed because this date has no usable canonical results.",
+            "",
+            "## Inspection findings",
+            "",
+        ]
+        lines += [
+            f"- {flag['severity']} ({flag['category']}): {flag['message']}"
+            for flag in inspection.qc_flags
+        ] or ["- none"]
+    lines.append("")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _write_readme(path: Path, config: DeliveryConfig) -> None:
+    ranking_dir = ranking_directory_name(config.top_fraction)
+    lines = [
+        f"# {config.experiment}: research delivery (TEST PREVIEW)",
+        "",
+        "This folder is an internal, rebuildable test preview built from existing canonical LiDAR results.",
+        "Raw scans, point clouds, and analysis results were read only and were not modified.",
+        "Only each date's `results.csv` is copied, as a frozen snapshot.",
+        "",
+        "## Where to start",
+        "",
+        "1. `summary/EXPERIMENT_SUMMARY.md`: overview, date status, and interpretation notes.",
+        "2. `summary/growth/`: box plots of each metric across scan dates.",
+        "3. `summary/data/combined_results.csv`: all usable result rows from every date in one table.",
+        "4. `<date>/`: one folder per scan date, named `YYYY_MM_DD`.",
+        "",
+        "## Inside each date folder",
+        "",
+        "Every date folder has the same four subfolders. A subfolder is empty when that date has no",
+        "usable results, or when graphs are disabled.",
+        "",
+        f"- `results/`: `results.csv` (frozen copy of the canonical results) and `{ranking_dir}/<metric>.csv` rankings.",
+        f"- `graphs/`: `<metric>_distribution.png` and `<metric>_{ranking_dir}.png`.",
+        "- `qc/`: `qc_flags.csv` and `outliers.csv`, present only when results QC was performed.",
+        "- `metadata/`: `source_reference.md` with date status, read-only input locations, and inspection findings.",
+        "",
+        "## Tracing a value back to its source",
+        "",
+        "Every result row keeps its `scan_id`, `row`, and `plot`. In `summary/data/combined_results.csv`,",
+        "`_delivery_results_path` points to the date snapshot inside this folder and `_source_results_path`",
+        "points to the original analysis file. `manifest/experiment_date_index.csv` links each date to its",
+        "raw scans, point clouds, results file, and SHA-256 fingerprints.",
+        "",
+        "## Technical files",
+        "",
+        "- `summary_config.yaml`: the delivery configuration used for this build.",
+        "- `summary/qc/missing_metrics.csv`: metrics that could not be ranked, by date.",
+        "- `manifest/`: technical provenance (`experiment_date_index.csv`) and `delivery_manifest.json`",
+        "  (build identity plus a fingerprint inventory of every file). Researchers rarely need these.",
+        "",
+    ]
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _artifact_inventory(root: Path) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    for path in root.rglob("*"):
+        if path.is_symlink():
+            raise ValueError(f"Delivery must not contain symlinks: {path}")
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root).as_posix()
+        if relative == MANIFEST_FILE:
+            continue
+        entries.append(
+            {"path": relative, "role": artifact_role(relative), "sha256": sha256_file(path)}
+        )
+    return sorted(entries, key=lambda entry: entry["path"])
+
+
 def _write_date_output(
     root: Path,
     inspection: DateInspection,
     config: DeliveryConfig,
 ) -> dict[str, list[dict[str, object]]]:
-    date_root = root / inspection.date
-    source_dir = date_root / "source"
-    metadata_dir = date_root / "metadata"
-    pointclouds_dir = date_root / "pointclouds"
-    results_dir = date_root / "results"
-    for directory in (source_dir, metadata_dir, pointclouds_dir, results_dir):
-        directory.mkdir(parents=True, exist_ok=True)
-
-    source_note = (
-        "# Test preview source reference\n\n"
-        "Source scans were not copied or modified.\n\n"
-        f"Read-only source: `{inspection.source_dir or 'unavailable'}`\n"
-    )
-    (source_dir / "README.md").write_text(source_note, encoding="utf-8")
-
-    pointcloud_note = (
-        "# Test preview point-cloud reference\n\n"
-        "Point-cloud files were not copied or modified.\n\n"
-        f"Read-only point-cloud directory: `{inspection.pointcloud_dir or 'unavailable'}`\n"
-    )
-    (pointclouds_dir / "README.md").write_text(pointcloud_note, encoding="utf-8")
-
-    _write_csv(
-        pointclouds_dir / "pointcloud_inventory.csv",
-        [
-            {
-                "pointcloud_dir": str(inspection.pointcloud_dir or ""),
-                "all_csv_files": inspection.pointcloud_csv_files,
-                "main_pointcloud_csv_files": inspection.main_pointcloud_csv_files,
-                "topology_pointcloud_csv_files": inspection.topology_pointcloud_csv_files,
-                "marker_reference_csv_files": inspection.marker_reference_csv_files,
-            }
-        ],
-    )
-    (metadata_dir / "date_status.json").write_text(
-        json.dumps(_date_index_row(inspection), indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    _write_csv(
-        results_dir / "qc" / "qc_flags.csv",
-        [dict(row) for row in inspection.qc_flags],
-        fieldnames=("severity", "category", "message"),
-    )
+    date = inspection.date
+    for name in DATE_SUBDIRS:
+        (root / date / name).mkdir(parents=True, exist_ok=True)
 
     rankings: dict[str, list[dict[str, object]]] = {}
-    all_outliers: list[dict[str, object]] = []
     if inspection.status == "usable":
-        _write_csv(
-            results_dir / "results.csv",
-            [dict(row) for row in inspection.rows],
-            fieldnames=inspection.fieldnames,
-        )
+        _write_results_snapshot(root / date_results_file(date), inspection)
+        all_outliers: list[dict[str, object]] = []
+        ranking_dir = ranking_directory_name(config.top_fraction)
         for metric in config.metrics:
             selected = select_top_rows(
                 inspection.rows, metric, config.top_fraction, config.include_ties
             )
             rankings[metric] = selected
             if selected:
-                _write_csv(
-                    results_dir / ranking_directory_name(config.top_fraction) / f"{metric}.csv",
-                    selected,
-                )
+                _write_csv(root / date_ranking_file(date, ranking_dir, metric), selected)
             all_outliers.extend(
                 find_outliers(inspection.rows, metric, config.outlier_iqr_multiplier)
             )
+        _write_csv(
+            root / date_qc_flags_file(date),
+            [dict(row) for row in inspection.qc_flags],
+            fieldnames=("severity", "category", "message"),
+        )
+        _write_csv(
+            root / date_outliers_file(date),
+            all_outliers,
+            fieldnames=(
+                "_outlier_metric",
+                "_outlier_direction",
+                "_outlier_value",
+                "_outlier_lower_bound",
+                "_outlier_upper_bound",
+                "_outlier_method",
+            ),
+        )
 
-    _write_csv(
-        results_dir / "outliers" / "outliers.csv",
-        all_outliers,
-        fieldnames=(
-            "_outlier_metric",
-            "_outlier_direction",
-            "_outlier_value",
-            "_outlier_lower_bound",
-            "_outlier_upper_bound",
-            "_outlier_method",
-        ),
-    )
+    _write_source_reference(root / date_source_reference_file(date), inspection)
     return rankings
 
 
@@ -765,6 +905,12 @@ def _write_experiment_summary(
         f"- Usable canonical result dates: {', '.join(usable) if usable else 'none'}",
         f"- Incomplete/unusable dates: {', '.join(incomplete) if incomplete else 'none'}",
         f"- Latest usable date used for summary rankings: {latest_usable_date or 'none'}",
+        (
+            f"- Latest usable date rankings: `../{latest_usable_date}/results/"
+            f"{ranking_directory_name(config.top_fraction)}/`"
+            if latest_usable_date
+            else "- Latest usable date rankings: none"
+        ),
         "",
         "## Rankings",
         "",
@@ -780,6 +926,7 @@ def _write_experiment_summary(
         "",
         f"- Graph generation enabled: {config.generate_graphs}",
         f"- Graph resolution: {config.graph_dpi} DPI",
+        "- Per-date graphs are in `../<date>/graphs/`; cross-date growth box plots are in `growth/`.",
         "- Graphs use the same finite, row-level QC eligibility as the ranking CSVs.",
         "- Cross-date graphs are marked EXPLORATORY ONLY when historical configuration fingerprints differ or are unavailable for usable dates.",
         "",
@@ -793,7 +940,8 @@ def _write_experiment_summary(
         "## Traceability",
         "",
         f"- Delivery configuration SHA-256: `{config_sha256}`",
-        "- See `experiment_date_index.csv` for exact read-only input paths and config fingerprints.",
+        "- See `../manifest/experiment_date_index.csv` for exact read-only input paths, "
+        "results fingerprints, and config fingerprints.",
         "",
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -852,12 +1000,17 @@ def build_delivery(
     target_parent.mkdir(parents=True, exist_ok=True)
     staging_dir = Path(tempfile.mkdtemp(prefix=f".{run_id}.", dir=target_parent))
     try:
-        (staging_dir / ".research_delivery_test_output").write_text(
+        # Build identity (run_id, created_at_utc) is written ONLY to the manifest.
+        (staging_dir / MARKER_FILE).write_text(
             "Internal rebuildable test preview.\n", encoding="utf-8"
         )
-        (staging_dir / "summary_config.yaml").write_text(
+        (staging_dir / CONFIG_SNAPSHOT_FILE).write_text(
             yaml.safe_dump(config.as_dict(), sort_keys=False), encoding="utf-8"
         )
+        _write_readme(staging_dir / README_FILE, config)
+        for name in SUMMARY_SUBDIRS:
+            (staging_dir / SUMMARY_DIR / name).mkdir(parents=True, exist_ok=True)
+        (staging_dir / MANIFEST_DIR).mkdir(parents=True, exist_ok=True)
 
         date_rankings: dict[str, dict[str, list[dict[str, object]]]] = {}
         date_metric_values: dict[str, dict[str, list[float]]] = {}
@@ -876,6 +1029,7 @@ def build_delivery(
                     {
                         **row,
                         "_delivery_date": inspection.date,
+                        "_delivery_results_path": date_results_file(inspection.date),
                         "_source_results_path": str(inspection.results_path),
                     }
                     for row in inspection.rows
@@ -891,33 +1045,22 @@ def build_delivery(
                         }
                     )
 
-        summary_dir = staging_dir / "summary"
         _write_csv(
-            summary_dir / "experiment_date_index.csv",
+            staging_dir / DATE_INDEX_FILE,
             [_date_index_row(inspection) for inspection in inspections],
         )
         _write_csv(
-            summary_dir / "combined_results.csv",
+            staging_dir / COMBINED_RESULTS_FILE,
             combined_rows,
-            fieldnames=("_delivery_date", "_source_results_path"),
+            fieldnames=("_delivery_date", "_delivery_results_path", "_source_results_path"),
         )
         _write_csv(
-            summary_dir / "missing_metrics.csv",
+            staging_dir / MISSING_METRICS_FILE,
             missing_metrics,
             fieldnames=("date", "metric", "status", "reason"),
         )
-        if latest_usable_date is not None:
-            for metric, rows in date_rankings[latest_usable_date].items():
-                if rows:
-                    _write_csv(
-                        summary_dir
-                        / f"latest_date_{ranking_directory_name(config.top_fraction)}"
-                        / f"{metric}.csv",
-                        rows,
-                    )
-
         _write_experiment_summary(
-            summary_dir / "EXPERIMENT_SUMMARY.md",
+            staging_dir / EXPERIMENT_SUMMARY_FILE,
             config,
             inspections,
             latest_usable_date,
@@ -935,25 +1078,30 @@ def build_delivery(
                 graph_dpi=config.graph_dpi,
                 date_metric_values=date_metric_values,
                 date_rankings=date_rankings,
-                latest_usable_date=latest_usable_date,
                 exploratory=_cross_date_graphs_are_exploratory(inspections),
             )
         manifest = {
-            "schema_version": 1,
+            "schema_version": MANIFEST_SCHEMA_VERSION,
             "test_preview": True,
             "experiment": config.experiment,
             "run_id": run_id,
             "created_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "delivery_config_sha256": config_sha256,
             "latest_usable_date": latest_usable_date,
-            "dates": [_date_index_row(inspection) for inspection in inspections],
+            "date_count": len(inspections),
+            "dates": [
+                {"date": inspection.date, "status": inspection.status}
+                for inspection in inspections
+            ],
+            "date_index": DATE_INDEX_FILE,
             "immutable_inputs_modified": False,
             "source_scans_copied": False,
             "pointclouds_copied": False,
             "graphs_generated": bool(graph_files),
             "graph_files": graph_files,
+            "artifacts": _artifact_inventory(staging_dir),
         }
-        (staging_dir / "delivery_manifest.json").write_text(
+        (staging_dir / MANIFEST_FILE).write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
         staging_dir.rename(target_dir)

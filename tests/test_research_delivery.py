@@ -237,31 +237,23 @@ def test_write_builds_separate_rankings_without_changing_inputs(
     assert result.latest_usable_date == "2026_05_28"
     target = result.target_dir
     assert (target / ".research_delivery_test_output").is_file()
-    assert (target / "2026_05_27" / "metadata" / "date_status.json").is_file()
+    assert (target / "2026_05_27" / "metadata" / "source_reference.md").is_file()
     assert not (target / "2026_05_27" / "results" / "results.csv").exists()
 
-    points = read_rows(
-        target / "2026_05_28" / "results" / "top_15_percent" / "points.csv"
-    )
+    points = read_rows(target / "2026_05_28" / "results" / "top_15_percent" / "points.csv")
     assert [row["plot"] for row in points] == ["1", "2"]
     assert {row["_ranking_value"] for row in points} == {"100.0"}
 
     density = read_rows(
-        target
-        / "2026_05_28"
-        / "results"
-        / "top_15_percent"
-        / "point_density_m2.csv"
+        target / "2026_05_28" / "results" / "top_15_percent" / "point_density_m2.csv"
     )
     assert [row["plot"] for row in density] == ["3"]
     assert all(row["plot"] != "5" for row in density)
 
-    latest_points = read_rows(
-        target / "summary" / "latest_date_top_15_percent" / "points.csv"
-    )
-    assert latest_points == points
-
-    date_index = {row["date"]: row for row in read_rows(target / "summary" / "experiment_date_index.csv")}
+    date_index = {
+        row["date"]: row
+        for row in read_rows(target / "manifest" / "experiment_date_index.csv")
+    }
     assert date_index["2026_05_27"]["status"] == "incomplete"
     assert date_index["2026_05_28"]["status"] == "usable"
 
@@ -269,8 +261,9 @@ def test_write_builds_separate_rankings_without_changing_inputs(
     assert "TEST PREVIEW" in summary
     assert "Per-date algorithm enable/disable differences are not acceptable" in summary
     assert "inconsistent" in summary
+    assert "2026_05_28/results/top_15_percent" in summary
 
-    assert not list((target / "2026_05_28" / "pointclouds").glob("plot_*.csv"))
+    assert not list(target.rglob("plot_*.csv"))
     assert file_hashes(raw_root) == raw_before
     assert file_hashes(analysis_root) == analysis_before
 
@@ -284,60 +277,36 @@ def test_graph_enabled_preview_builds_expected_deterministic_inventory(
     result = build_delivery(graph_config, run_id="preview_v2_graphs", write=True)
     target = result.target_dir
     metrics = graph_config.metrics
-    usable_dates = ("2026_05_14", "2026_05_28")
     expected = {
-        f"{date}/results/graphs/{metric}_{suffix}.png"
-        for date in usable_dates
+        f"{date}/graphs/{metric}_{suffix}.png"
+        for date in USABLE_DATES
         for metric in metrics
         for suffix in ("distribution", "top_15_percent")
     }
-    expected.update(f"summary/graphs/{metric}_by_date.png" for metric in metrics)
-    expected.update(
-        f"summary/latest_date_top_15_percent/graphs/{metric}.png"
-        for metric in metrics
-    )
+    expected.update(f"summary/growth/{metric}_by_date.png" for metric in metrics)
 
-    graph_paths = sorted(path for path in target.rglob("*.png"))
-    graph_files = [str(path.relative_to(target)) for path in graph_paths]
-    assert len(graph_files) == 18
+    graph_paths = sorted(target.rglob("*.png"))
+    graph_files = [path.relative_to(target).as_posix() for path in graph_paths]
+    assert len(graph_files) == 15
     assert set(graph_files) == expected
     assert all(path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n") for path in graph_paths)
-    assert not (target / "2026_05_27" / "results" / "graphs").exists()
+    assert (target / "2026_05_27" / "graphs").is_dir()
+    assert not list((target / "2026_05_27" / "graphs").iterdir())
     assert not (target / ".matplotlib-cache").exists()
 
-    for metric in metrics:
-        source = target / "2026_05_28" / "results" / "graphs" / (
-            f"{metric}_top_15_percent.png"
-        )
-        latest = (
-            target
-            / "summary"
-            / "latest_date_top_15_percent"
-            / "graphs"
-            / f"{metric}.png"
-        )
-        assert source.read_bytes() == latest.read_bytes()
-
-    points_ranking = read_rows(
-        target / "2026_05_28" / "results" / "top_15_percent" / "points.csv"
-    )
-    points_graph = (
-        target
-        / "2026_05_28"
-        / "results"
-        / "graphs"
-        / "points_top_15_percent.png"
-    ).read_bytes()
+    points_ranking = read_rows(target / "2026_05_28" / "results" / "top_15_percent" / "points.csv")
+    points_graph = (target / "2026_05_28" / "graphs" / "points_top_15_percent.png").read_bytes()
     assert {row["_ranking_cutoff"] for row in points_ranking} == {"100.0"}
     assert b"selected=2, eligible=4, cutoff=100" in points_graph
 
-    manifest = json.loads((target / "delivery_manifest.json").read_text(encoding="utf-8"))
+    manifest = load_manifest(target)
     assert manifest["graphs_generated"] is True
     assert manifest["graph_files"] == sorted(expected)
-    assert manifest["graph_files"] == sorted(manifest["graph_files"])
+    png_artifacts = {a["path"] for a in manifest["artifacts"] if a["path"].endswith(".png")}
+    assert png_artifacts == expected
 
     for metric in metrics:
-        summary_graph = target / "summary" / "graphs" / f"{metric}_by_date.png"
+        summary_graph = target / "summary" / "growth" / f"{metric}_by_date.png"
         assert b"EXPLORATORY ONLY" in summary_graph.read_bytes()
 
 
@@ -350,15 +319,9 @@ def test_graph_disabled_mode_preserves_non_graph_outputs(
 
     assert not list(result.target_dir.rglob("*.png"))
     assert (
-        result.target_dir
-        / "2026_05_28"
-        / "results"
-        / "top_15_percent"
-        / "points.csv"
+        result.target_dir / "2026_05_28" / "results" / "top_15_percent" / "points.csv"
     ).is_file()
-    manifest = json.loads(
-        (result.target_dir / "delivery_manifest.json").read_text(encoding="utf-8")
-    )
+    manifest = load_manifest(result.target_dir)
     assert manifest["graphs_generated"] is False
     assert manifest["graph_files"] == []
 
@@ -430,3 +393,380 @@ def test_rejects_unvalidated_geometry_metric(
 
     with pytest.raises(ValueError, match="Unvalidated ranking metric"):
         unsafe.validate()
+
+
+
+# ---------------------------------------------------------------------------
+# Research Delivery V2A: folder contract + generated-duplicate elimination
+# ---------------------------------------------------------------------------
+
+DATE_SUBDIRS = ("results", "graphs", "qc", "metadata")
+ALL_DATES = ("2026_05_14", "2026_05_27", "2026_05_28")
+USABLE_DATES = ("2026_05_14", "2026_05_28")
+INCOMPLETE_DATE = "2026_05_27"
+KNOWN_ARTIFACT_ROLES = {
+    "readme",
+    "delivery_config",
+    "build_marker",
+    "experiment_summary",
+    "experiment_results",
+    "experiment_qc",
+    "growth_graph",
+    "date_index",
+    "date_results_snapshot",
+    "date_ranking",
+    "date_graph",
+    "date_qc",
+    "date_metadata",
+}
+
+
+def load_manifest(target: Path) -> dict:
+    return json.loads(
+        (target / "manifest" / "delivery_manifest.json").read_text(encoding="utf-8")
+    )
+
+
+def relative_files(root: Path) -> set[str]:
+    return {
+        path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()
+    }
+
+
+def sha256_bytes(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_folder_contract_layout_is_consistent_for_every_date(
+    experiment: tuple[DeliveryConfig, Path, Path, Path],
+) -> None:
+    config, _raw_root, _analysis_root, _delivery_root = experiment
+    target = build_delivery(config, run_id="contract_layout", write=True).target_dir
+
+    assert {path.name for path in target.iterdir()} == {
+        "README.md",
+        "summary_config.yaml",
+        "summary",
+        "manifest",
+        ".research_delivery_test_output",
+        *ALL_DATES,
+    }
+    # Every date has the same four folders, even when some are empty.
+    for date in ALL_DATES:
+        date_root = target / date
+        assert {path.name for path in date_root.iterdir()} == set(DATE_SUBDIRS)
+        assert all((date_root / name).is_dir() for name in DATE_SUBDIRS)
+        assert (date_root / "metadata" / "source_reference.md").is_file()
+    # QC artifacts exist only where results QC was actually performed.
+    for date in USABLE_DATES:
+        assert (target / date / "results" / "results.csv").is_file()
+        assert (target / date / "qc" / "qc_flags.csv").is_file()
+        assert (target / date / "qc" / "outliers.csv").is_file()
+    for name in ("results", "graphs", "qc"):
+        assert not list((target / INCOMPLETE_DATE / name).iterdir())
+
+    assert {path.name for path in (target / "summary").iterdir()} == {
+        "EXPERIMENT_SUMMARY.md",
+        "data",
+        "growth",
+        "qc",
+    }
+    assert (target / "summary" / "data" / "combined_results.csv").is_file()
+    assert (target / "summary" / "qc" / "missing_metrics.csv").is_file()
+    assert sorted(path.name for path in (target / "manifest").iterdir()) == [
+        "delivery_manifest.json",
+        "experiment_date_index.csv",
+    ]
+
+    readme = (target / "README.md").read_text(encoding="utf-8")
+    for token in ("summary/", "manifest/", "results/", "graphs/", "qc/", "metadata/"):
+        assert token in readme
+
+
+def test_incomplete_date_status_is_recorded_without_qc_artifacts(
+    experiment: tuple[DeliveryConfig, Path, Path, Path],
+) -> None:
+    config, _raw_root, _analysis_root, _delivery_root = experiment
+    target = build_delivery(config, run_id="incomplete_date", write=True).target_dir
+    index = {
+        row["date"]: row
+        for row in read_rows(target / "manifest" / "experiment_date_index.csv")
+    }
+    row = index[INCOMPLETE_DATE]
+    assert row["status"] == "incomplete"
+    assert row["reason"]
+
+    reference = (target / INCOMPLETE_DATE / "metadata" / "source_reference.md").read_text(
+        encoding="utf-8"
+    )
+    assert "incomplete" in reference
+    assert row["reason"] in reference
+    assert "Results QC was not performed" in reference
+    # Input-availability findings from inspection are preserved, not dropped.
+    assert "Inspection findings" in reference
+    assert "is unavailable; its ranking will be skipped" in reference
+
+    missing = read_rows(target / "summary" / "qc" / "missing_metrics.csv")
+    assert {r["metric"] for r in missing if r["date"] == INCOMPLETE_DATE} == set(config.metrics)
+
+    usable_reference = (target / "2026_05_28" / "metadata" / "source_reference.md").read_text(
+        encoding="utf-8"
+    )
+    assert "Results QC was not performed" not in usable_reference
+
+
+def test_declared_generated_redundancies_are_absent(
+    experiment: tuple[DeliveryConfig, Path, Path, Path],
+) -> None:
+    config, _raw_root, _analysis_root, _delivery_root = experiment
+    graph_config = replace(config, generate_graphs=True, graph_dpi=72)
+    target = build_delivery(graph_config, run_id="no_redundancy", write=True).target_dir
+    files = relative_files(target)
+
+    # Latest-date copies and the legacy summary graph folder are not generated.
+    assert not [f for f in files if f.startswith(("summary/latest_date_", "summary/graphs/"))]
+    # Legacy top-level / summary locations are gone.
+    for legacy in (
+        "delivery_manifest.json",
+        "summary/experiment_date_index.csv",
+        "summary/combined_results.csv",
+        "summary/missing_metrics.csv",
+    ):
+        assert legacy not in files
+    for date in ALL_DATES:
+        assert not (target / date / "source").exists()
+        assert not (target / date / "pointclouds").exists()
+        assert not (target / date / "metadata" / "date_status.json").exists()
+        for legacy_dir in ("graphs", "qc", "outliers"):
+            assert not (target / date / "results" / legacy_dir).exists()
+    assert not [f for f in files if f.endswith("pointcloud_inventory.csv")]
+
+    # Each of these artifacts has exactly one canonical home.
+    assert [f for f in files if f.endswith("experiment_date_index.csv")] == [
+        "manifest/experiment_date_index.csv"
+    ]
+    assert [f for f in files if f.endswith("combined_results.csv")] == [
+        "summary/data/combined_results.csv"
+    ]
+    ranking_files = [f for f in files if "/top_15_percent/" in f]
+    assert ranking_files
+    assert all(f.split("/")[1:3] == ["results", "top_15_percent"] for f in ranking_files)
+
+
+def test_manifest_is_self_describing_and_inventories_every_artifact(
+    experiment: tuple[DeliveryConfig, Path, Path, Path],
+) -> None:
+    config, _raw_root, _analysis_root, _delivery_root = experiment
+    graph_config = replace(config, generate_graphs=True, graph_dpi=72)
+    result = build_delivery(graph_config, run_id="manifest_v2", write=True)
+    target = result.target_dir
+    manifest = load_manifest(target)
+
+    assert manifest["schema_version"] == 2
+    assert manifest["test_preview"] is True
+    assert manifest["experiment"] == "MeadowFescue_2026"
+    assert manifest["run_id"] == "manifest_v2"
+    assert manifest["created_at_utc"]
+    assert manifest["delivery_config_sha256"] == result.config_sha256
+    assert manifest["latest_usable_date"] == "2026_05_28"
+    assert manifest["immutable_inputs_modified"] is False
+    assert manifest["source_scans_copied"] is False
+    assert manifest["pointclouds_copied"] is False
+    assert manifest["date_index"] == "manifest/experiment_date_index.csv"
+    assert (target / manifest["date_index"]).is_file()
+    assert manifest["date_count"] == 3
+    # Lightweight date list only; full provenance lives in the date index.
+    assert manifest["dates"] == [
+        {"date": "2026_05_14", "status": "usable"},
+        {"date": "2026_05_27", "status": "incomplete"},
+        {"date": "2026_05_28", "status": "usable"},
+    ]
+
+    artifacts = manifest["artifacts"]
+    paths = [artifact["path"] for artifact in artifacts]
+    assert paths == sorted(paths)
+    assert set(paths) == relative_files(target) - {"manifest/delivery_manifest.json"}
+    for artifact in artifacts:
+        assert set(artifact) == {"path", "role", "sha256"}
+        artifact_path = Path(artifact["path"])
+        assert not artifact_path.is_absolute()
+        assert ".." not in artifact_path.parts
+        assert sha256_bytes(target / artifact_path) == artifact["sha256"]
+
+    roles = {artifact["path"]: artifact["role"] for artifact in artifacts}
+    assert set(roles.values()) <= KNOWN_ARTIFACT_ROLES
+    assert roles["README.md"] == "readme"
+    assert roles["summary_config.yaml"] == "delivery_config"
+    assert roles[".research_delivery_test_output"] == "build_marker"
+    assert roles["summary/EXPERIMENT_SUMMARY.md"] == "experiment_summary"
+    assert roles["summary/data/combined_results.csv"] == "experiment_results"
+    assert roles["summary/qc/missing_metrics.csv"] == "experiment_qc"
+    assert roles["summary/growth/points_by_date.png"] == "growth_graph"
+    assert roles["manifest/experiment_date_index.csv"] == "date_index"
+    assert roles["2026_05_28/results/results.csv"] == "date_results_snapshot"
+    assert roles["2026_05_28/results/top_15_percent/points.csv"] == "date_ranking"
+    assert roles["2026_05_28/graphs/points_distribution.png"] == "date_graph"
+    assert roles["2026_05_28/qc/outliers.csv"] == "date_qc"
+    assert roles["2026_05_28/qc/qc_flags.csv"] == "date_qc"
+    assert roles["2026_05_28/metadata/source_reference.md"] == "date_metadata"
+    assert roles["2026_05_27/metadata/source_reference.md"] == "date_metadata"
+    assert set(manifest["graph_files"]) == {
+        path for path, role in roles.items() if role in {"date_graph", "growth_graph"}
+    }
+
+
+def test_results_snapshot_is_a_verifiable_copy_of_its_source(
+    experiment: tuple[DeliveryConfig, Path, Path, Path],
+    tmp_path: Path,
+) -> None:
+    config, _raw_root, analysis_root, _delivery_root = experiment
+    # SAFETY GUARD: the mutation below is only allowed on pytest's temporary fixture.
+    assert analysis_root.resolve().is_relative_to(tmp_path.resolve())
+    assert not analysis_root.resolve().is_relative_to(Path("/media"))
+    may14_source = analysis_root / "2026_05_14" / "output" / "results.csv"
+    assert may14_source.resolve().is_relative_to(tmp_path.resolve())
+
+    # A byte-order mark must survive: the snapshot is a frozen copy, not a re-serialization.
+    may14_source.write_bytes(b"\xef\xbb\xbf" + may14_source.read_bytes())
+
+    target = build_delivery(config, run_id="snapshot", write=True).target_dir
+    index = {
+        row["date"]: row
+        for row in read_rows(target / "manifest" / "experiment_date_index.csv")
+    }
+    for date in USABLE_DATES:
+        row = index[date]
+        source = Path(row["results_path"])
+        assert source.is_absolute() and source.is_file()
+        source_hash = sha256_bytes(source)
+        assert row["results_sha256"] == source_hash
+        # Intentional, documented duplication: frozen delivery snapshot of an input.
+        assert sha256_bytes(target / date / "results" / "results.csv") == source_hash
+        assert row["pointcloud_dir"] and Path(row["pointcloud_dir"]).is_dir()
+    assert index[INCOMPLETE_DATE]["results_sha256"] == ""
+    assert index[INCOMPLETE_DATE]["pointcloud_dir"] == ""
+
+
+def test_combined_results_trace_back_to_date_snapshot_and_source(
+    experiment: tuple[DeliveryConfig, Path, Path, Path],
+) -> None:
+    config, _raw_root, _analysis_root, _delivery_root = experiment
+    target = build_delivery(config, run_id="traceability", write=True).target_dir
+    index = {
+        row["date"]: row
+        for row in read_rows(target / "manifest" / "experiment_date_index.csv")
+    }
+    combined = read_rows(target / "summary" / "data" / "combined_results.csv")
+    assert len(combined) == 7
+
+    snapshot_ids: dict[str, set[tuple[str, str, str]]] = {}
+    for row in combined:
+        relative = row["_delivery_results_path"]
+        assert relative == f"{row['_delivery_date']}/results/results.csv"
+        snapshot = target / relative
+        assert snapshot.is_file()
+        if relative not in snapshot_ids:
+            snapshot_ids[relative] = {
+                (r["scan_id"], r["row"], r["plot"]) for r in read_rows(snapshot)
+            }
+        assert (row["scan_id"], row["row"], row["plot"]) in snapshot_ids[relative]
+        assert row["_source_results_path"] == index[row["_delivery_date"]]["results_path"]
+        assert Path(row["_source_results_path"]).is_file()
+
+    reference = (target / "2026_05_28" / "metadata" / "source_reference.md").read_text(
+        encoding="utf-8"
+    )
+    for key in ("raw_date_dir", "source_dir", "results_path", "results_sha256", "pointcloud_dir"):
+        assert index["2026_05_28"][key] in reference
+    assert "../../manifest/experiment_date_index.csv" in reference
+
+
+def test_build_identity_lives_only_in_manifest(
+    experiment: tuple[DeliveryConfig, Path, Path, Path],
+) -> None:
+    """Contract: run_id and created_at_utc appear only in delivery_manifest.json.
+
+    Graphs are disabled so the comparison cannot depend on PNG rendering.
+    """
+    config, _raw_root, _analysis_root, _delivery_root = experiment
+    first = build_delivery(config, run_id="repeat_a", write=True).target_dir
+    second = build_delivery(config, run_id="repeat_b", write=True).target_dir
+
+    first_hashes = {k.replace("\\", "/"): v for k, v in file_hashes(first).items()}
+    second_hashes = {k.replace("\\", "/"): v for k, v in file_hashes(second).items()}
+    assert set(first_hashes) == set(second_hashes)
+    differing = {k for k in first_hashes if first_hashes[k] != second_hashes[k]}
+    assert differing == {"manifest/delivery_manifest.json"}
+
+    for root, run_id in ((first, "repeat_a"), (second, "repeat_b")):
+        for relative in relative_files(root) - {"manifest/delivery_manifest.json"}:
+            assert run_id.encode() not in (root / relative).read_bytes(), relative
+
+    first_manifest = load_manifest(first)
+    second_manifest = load_manifest(second)
+    for manifest in (first_manifest, second_manifest):
+        manifest.pop("created_at_utc")
+        manifest.pop("run_id")
+    assert first_manifest == second_manifest
+
+
+def test_dates_filter_builds_only_requested_dates(
+    experiment: tuple[DeliveryConfig, Path, Path, Path],
+) -> None:
+    config, _raw_root, _analysis_root, _delivery_root = experiment
+    filtered = replace(config, dates=USABLE_DATES)
+
+    result = build_delivery(filtered, run_id="filtered", write=True)
+
+    assert [inspection.date for inspection in result.dates] == list(USABLE_DATES)
+    target = result.target_dir
+    assert not (target / INCOMPLETE_DATE).exists()
+    assert [
+        row["date"] for row in read_rows(target / "manifest" / "experiment_date_index.csv")
+    ] == list(USABLE_DATES)
+    assert load_manifest(target)["dates"] == [
+        {"date": date, "status": "usable"} for date in USABLE_DATES
+    ]
+
+
+def test_dates_filter_is_optional_in_config_snapshot(
+    experiment: tuple[DeliveryConfig, Path, Path, Path],
+) -> None:
+    config, _raw_root, _analysis_root, _delivery_root = experiment
+    assert "dates" not in config.as_dict()
+    assert replace(config, dates=("2026_05_14",)).as_dict()["dates"] == ["2026_05_14"]
+
+
+def test_dates_filter_is_parsed_from_mapping(
+    experiment: tuple[DeliveryConfig, Path, Path, Path],
+) -> None:
+    config, raw_root, analysis_root, delivery_root = experiment
+    mapping = {
+        "experiment": config.experiment,
+        "raw_experiment_root": str(raw_root),
+        "analysis_experiment_root": str(analysis_root),
+        "delivery_root": str(delivery_root),
+        "dates": ["2026_05_28", "2026_05_14"],
+    }
+    assert DeliveryConfig.from_mapping(mapping).dates == ("2026_05_14", "2026_05_28")
+    assert DeliveryConfig.from_mapping({**mapping, "dates": None}).dates == ()
+    with pytest.raises(ValueError, match="dates must be a list"):
+        DeliveryConfig.from_mapping({**mapping, "dates": "2026_05_14"})
+
+
+@pytest.mark.parametrize(
+    ("dates", "message"),
+    [
+        (("2026_05_30",), "not found"),
+        (("2026-05-14",), "YYYY_MM_DD"),
+        (("2026_05_14", "2026_05_14"), "duplicates"),
+    ],
+)
+def test_rejects_invalid_dates_filter(
+    experiment: tuple[DeliveryConfig, Path, Path, Path],
+    dates: tuple[str, ...],
+    message: str,
+) -> None:
+    config, _raw_root, _analysis_root, _delivery_root = experiment
+    with pytest.raises(ValueError, match=message):
+        build_delivery(replace(config, dates=dates), run_id="bad_dates")

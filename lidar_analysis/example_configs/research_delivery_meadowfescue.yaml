@@ -17,3 +17,8 @@ outlier_iqr_multiplier: 1.5
 # Researcher-friendly PNGs use Matplotlib's noninteractive Agg backend.
 generate_graphs: true
 graph_dpi: 160
+
+# Optional: build only these dates (quote each entry). Omit to include every date found.
+# dates:
+#   - "2026_05_14"
+#   - "2026_05_28"

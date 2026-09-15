@@ -6,6 +6,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from lidar_analysis.research_delivery_layout import date_graph_dir, growth_graph_file
+
 
 METRIC_LABELS = {
     "points": "Point count",
@@ -199,7 +201,6 @@ def generate_delivery_graphs(
     graph_dpi: int,
     date_metric_values: Mapping[str, Mapping[str, Sequence[float]]],
     date_rankings: Mapping[str, Mapping[str, Sequence[Mapping[str, object]]]],
-    latest_usable_date: str | None,
     exploratory: bool,
 ) -> list[str]:
     """Generate preview PNGs and return their sorted paths relative to ``root``."""
@@ -224,15 +225,9 @@ def generate_delivery_graphs(
                 if not values or not selected:
                     continue
                 distribution_path = (
-                    root / date / "results" / "graphs" / f"{metric}_distribution.png"
+                    root / date_graph_dir(date) / f"{metric}_distribution.png"
                 )
-                ranking_path = (
-                    root
-                    / date
-                    / "results"
-                    / "graphs"
-                    / f"{metric}_{ranking_directory}.png"
-                )
+                ranking_path = root / date_graph_dir(date) / f"{metric}_{ranking_directory}.png"
                 _plot_distribution(
                     pyplot,
                     path=distribution_path,
@@ -263,7 +258,7 @@ def generate_delivery_graphs(
             ]
             if not values_by_date:
                 continue
-            summary_path = root / "summary" / "graphs" / f"{metric}_by_date.png"
+            summary_path = root / growth_graph_file(metric)
             _plot_by_date(
                 pyplot,
                 path=summary_path,
@@ -274,23 +269,6 @@ def generate_delivery_graphs(
                 dpi=graph_dpi,
             )
             graph_paths.append(summary_path)
-
-        if latest_usable_date is not None:
-            latest_graph_dir = root / latest_usable_date / "results" / "graphs"
-            latest_copy_dir = (
-                root
-                / "summary"
-                / f"latest_date_{ranking_directory}"
-                / "graphs"
-            )
-            for metric in metrics:
-                source = latest_graph_dir / f"{metric}_{ranking_directory}.png"
-                if not source.is_file():
-                    continue
-                destination = latest_copy_dir / f"{metric}.png"
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(source, destination)
-                graph_paths.append(destination)
 
         return sorted(str(path.relative_to(root)) for path in graph_paths)
     finally:
