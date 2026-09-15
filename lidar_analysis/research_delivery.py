@@ -21,6 +21,8 @@ from lidar_analysis.research_delivery_layout import (
     DATE_INDEX_FILE,
     DATE_SUBDIRS,
     EXPERIMENT_SUMMARY_FILE,
+    GRAPH_TYPE_SCOPES,
+    GRAPH_TYPES,
     MANIFEST_DIR,
     MANIFEST_FILE,
     MANIFEST_SCHEMA_VERSION,
@@ -29,12 +31,14 @@ from lidar_analysis.research_delivery_layout import (
     README_FILE,
     SUMMARY_DIR,
     SUMMARY_SUBDIRS,
+    GraphSpec,
     artifact_role,
     date_outliers_file,
     date_qc_flags_file,
     date_ranking_file,
     date_results_file,
     date_source_reference_file,
+    default_graph_specs,
 )
 from lidar_analysis.research_delivery_plots import generate_delivery_graphs
 
@@ -63,6 +67,7 @@ class DeliveryConfig:
     generate_graphs: bool = True
     graph_dpi: int = 160
     dates: tuple[str, ...] = ()
+    graphs: tuple[GraphSpec, ...] | None = None
 
     @classmethod
     def from_mapping(cls, data: dict[str, object]) -> "DeliveryConfig":
@@ -99,6 +104,34 @@ class DeliveryConfig:
             )
         parsed_dates = tuple(sorted(value.strip() for value in raw_dates))
 
+        raw_graphs = data.get("graphs")
+        if raw_graphs is None:
+            parsed_graphs: tuple[GraphSpec, ...] | None = None
+        else:
+            if not isinstance(raw_graphs, (list, tuple)):
+                raise ValueError(
+                    "graphs must be a list of mappings, each with type, metric, and scope"
+                )
+            specs = []
+            for entry in raw_graphs:
+                if not isinstance(entry, dict):
+                    raise ValueError(
+                        "graphs[] entries must be mappings with type, metric, and scope"
+                    )
+                missing_keys = [key for key in ("type", "metric", "scope") if key not in entry]
+                if missing_keys:
+                    raise ValueError(
+                        f"graphs[] entry missing key(s): {', '.join(missing_keys)}"
+                    )
+                specs.append(
+                    GraphSpec(
+                        type=str(entry["type"]).strip(),
+                        metric=str(entry["metric"]).strip(),
+                        scope=str(entry["scope"]).strip(),
+                    )
+                )
+            parsed_graphs = tuple(specs)
+
         config = cls(
             experiment=str(data["experiment"]).strip(),
             raw_experiment_root=Path(str(data["raw_experiment_root"])).expanduser(),
@@ -111,6 +144,7 @@ class DeliveryConfig:
             generate_graphs=raw_generate_graphs,
             graph_dpi=raw_graph_dpi,
             dates=parsed_dates,
+            graphs=parsed_graphs,
         )
         config.validate()
         return config
@@ -146,6 +180,31 @@ class DeliveryConfig:
                 f"This test builder currently permits only: {allowed}"
             )
 
+        if self.graphs is not None:
+            seen_combinations: set[tuple[str, str]] = set()
+            for spec in self.graphs:
+                if spec.type not in GRAPH_TYPES:
+                    raise ValueError(
+                        f"graphs[].type must be one of {', '.join(GRAPH_TYPES)}: {spec.type!r}"
+                    )
+                expected_scope = GRAPH_TYPE_SCOPES[spec.type]
+                if spec.scope != expected_scope:
+                    raise ValueError(
+                        f"graphs[].type {spec.type!r} requires scope {expected_scope!r}, "
+                        f"got {spec.scope!r}"
+                    )
+                if spec.metric not in self.metrics:
+                    raise ValueError(
+                        f"graphs[].metric {spec.metric!r} is not in this config's metrics"
+                    )
+                combination = (spec.type, spec.metric)
+                if combination in seen_combinations:
+                    raise ValueError(
+                        "graphs must not repeat the same type/metric combination: "
+                        f"{spec.type}/{spec.metric}"
+                    )
+                seen_combinations.add(combination)
+
         raw_root = self.raw_experiment_root.resolve()
         analysis_root = self.analysis_experiment_root.resolve()
         delivery_root = self.delivery_root.resolve()
@@ -174,6 +233,8 @@ class DeliveryConfig:
         }
         if self.dates:
             data["dates"] = list(self.dates)
+        if self.graphs is not None:
+            data["graphs"] = [spec.as_dict() for spec in self.graphs]
         return data
 
 
@@ -644,6 +705,52 @@ def find_outliers(
     return output
 
 
+def metric_graph_rows(
+    rows: list[dict[str, str]], date: str, metric: str, outlier_multiplier: float
+) -> list[dict[str, object]]:
+    """QC-eligible rows for one date/metric, each carrying identity and outlier status.
+
+    This is the canonical source for histogram and growth-boxplot graph data.
+    It reuses ``_row_passes_qc`` (the same QC eligibility as the ranking CSVs)
+    and ``find_outliers`` (the same IQR rule as ``qc/outliers.csv``) so graph
+    data can never diverge from the scientific QC and outlier calculations.
+    """
+    outlier_directions = {
+        (
+            str(row.get("scan_id", "")).strip(),
+            str(row.get("row", "")).strip(),
+            str(row.get("plot", "")).strip(),
+        ): row["_outlier_direction"]
+        for row in find_outliers(rows, metric, outlier_multiplier)
+    }
+    records: list[dict[str, object]] = []
+    for row in rows:
+        if not _row_passes_qc(row):
+            continue
+        value = as_finite_float(row.get(metric))
+        if value is None:
+            continue
+        identity = (
+            str(row.get("scan_id", "")).strip(),
+            str(row.get("row", "")).strip(),
+            str(row.get("plot", "")).strip(),
+        )
+        records.append(
+            {
+                "date": date,
+                "scan_id": row.get("scan_id", ""),
+                "row": row.get("row", ""),
+                "plot": row.get("plot", ""),
+                "metric": metric,
+                "value": value,
+                "qc_status": row.get("qc_status", row.get("qc_pass", "")),
+                "is_outlier": identity in outlier_directions,
+                "outlier_direction": outlier_directions.get(identity, ""),
+            }
+        )
+    return records
+
+
 def _field_union(rows: Iterable[dict[str, object]], preferred: Iterable[str] = ()) -> list[str]:
     fields: list[str] = []
     for field_name in preferred:
@@ -1013,7 +1120,7 @@ def build_delivery(
         (staging_dir / MANIFEST_DIR).mkdir(parents=True, exist_ok=True)
 
         date_rankings: dict[str, dict[str, list[dict[str, object]]]] = {}
-        date_metric_values: dict[str, dict[str, list[float]]] = {}
+        date_metric_rows: dict[str, dict[str, list[dict[str, object]]]] = {}
         combined_rows: list[dict[str, object]] = []
         missing_metrics: list[dict[str, object]] = []
         for inspection in inspections:
@@ -1021,8 +1128,10 @@ def build_delivery(
                 staging_dir, inspection, config
             )
             if inspection.status == "usable":
-                date_metric_values[inspection.date] = {
-                    metric: finite_qc_values(inspection.rows, metric)
+                date_metric_rows[inspection.date] = {
+                    metric: metric_graph_rows(
+                        inspection.rows, inspection.date, metric, config.outlier_iqr_multiplier
+                    )
                     for metric in config.metrics
                 }
                 combined_rows.extend(
@@ -1068,15 +1177,18 @@ def build_delivery(
         )
         graph_files: list[str] = []
         if config.generate_graphs:
+            graph_specs = (
+                config.graphs if config.graphs is not None else default_graph_specs(config.metrics)
+            )
             graph_files = generate_delivery_graphs(
                 staging_dir,
                 experiment=config.experiment,
-                metrics=config.metrics,
+                graph_specs=graph_specs,
                 top_fraction=config.top_fraction,
                 ranking_directory=ranking_directory_name(config.top_fraction),
                 include_ties=config.include_ties,
                 graph_dpi=config.graph_dpi,
-                date_metric_values=date_metric_values,
+                date_metric_rows=date_metric_rows,
                 date_rankings=date_rankings,
                 exploratory=_cross_date_graphs_are_exploratory(inspections),
             )

@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import csv
 import os
 import shutil
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from lidar_analysis.research_delivery_layout import date_graph_dir, growth_graph_file
+from lidar_analysis.research_delivery_layout import (
+    GraphSpec,
+    date_graph_data_file,
+    date_graph_dir,
+    growth_graph_data_file,
+    growth_graph_file,
+)
 
 
 METRIC_LABELS = {
@@ -45,6 +52,35 @@ def _save_figure(figure: Any, path: Path, *, dpi: int, description: str) -> None
         bbox_inches="tight",
         metadata={**PNG_METADATA, "Description": description},
     )
+
+
+GRAPH_DATA_FIELDS = (
+    "date",
+    "scan_id",
+    "row",
+    "plot",
+    "metric",
+    "value",
+    "qc_status",
+    "is_outlier",
+    "outlier_direction",
+)
+
+
+def _write_graph_data_csv(path: Path, records: Sequence[Mapping[str, object]]) -> None:
+    """Write the canonical, row-identified data behind one graph.
+
+    This is the single source researchers use to trace a plotted point (or an
+    outlier) back to its scan_id/row/plot. It is not a duplicate of any other
+    file: the ranking chart reuses the existing per-date ranking CSV instead
+    of getting one of these.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=GRAPH_DATA_FIELDS)
+        writer.writeheader()
+        for record in records:
+            writer.writerow({key: record.get(key, "") for key in GRAPH_DATA_FIELDS})
 
 
 def _plot_distribution(
@@ -194,16 +230,22 @@ def generate_delivery_graphs(
     root: Path,
     *,
     experiment: str,
-    metrics: Sequence[str],
+    graph_specs: Sequence[GraphSpec],
     top_fraction: float,
     ranking_directory: str,
     include_ties: bool,
     graph_dpi: int,
-    date_metric_values: Mapping[str, Mapping[str, Sequence[float]]],
+    date_metric_rows: Mapping[str, Mapping[str, Sequence[Mapping[str, object]]]],
     date_rankings: Mapping[str, Mapping[str, Sequence[Mapping[str, object]]]],
     exploratory: bool,
 ) -> list[str]:
-    """Generate preview PNGs and return their sorted paths relative to ``root``."""
+    """Generate the requested preview PNGs (plus graph-data CSVs) for ``graph_specs``.
+
+    Returns the sorted PNG paths relative to ``root``. Each histogram/boxplot PNG
+    gets a companion CSV of the rows it plots (see ``_write_graph_data_csv``); the
+    ranking PNG has no companion because its data already lives in the per-date
+    ranking CSV under ``results/<ranking_dir>/<metric>.csv``.
+    """
     cache_dir = root / ".matplotlib-cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     previous_mplconfigdir = os.environ.get("MPLCONFIGDIR")
@@ -218,57 +260,78 @@ def generate_delivery_graphs(
         from matplotlib import pyplot
 
         graph_paths: list[Path] = []
-        for date in sorted(date_metric_values):
-            for metric in metrics:
-                values = date_metric_values[date].get(metric, ())
-                selected = date_rankings.get(date, {}).get(metric, ())
-                if not values or not selected:
-                    continue
-                distribution_path = (
-                    root / date_graph_dir(date) / f"{metric}_distribution.png"
-                )
-                ranking_path = root / date_graph_dir(date) / f"{metric}_{ranking_directory}.png"
-                _plot_distribution(
-                    pyplot,
-                    path=distribution_path,
-                    experiment=experiment,
-                    date=date,
-                    metric=metric,
-                    values=values,
-                    dpi=graph_dpi,
-                )
-                _plot_top_fraction(
-                    pyplot,
-                    path=ranking_path,
-                    experiment=experiment,
-                    date=date,
-                    metric=metric,
-                    fraction=top_fraction,
-                    include_ties=include_ties,
-                    rows=selected,
-                    dpi=graph_dpi,
-                )
-                graph_paths.extend((distribution_path, ranking_path))
+        dates = sorted(date_metric_rows)
 
-        for metric in metrics:
-            values_by_date = [
-                (date, date_metric_values[date][metric])
-                for date in sorted(date_metric_values)
-                if date_metric_values[date].get(metric)
-            ]
-            if not values_by_date:
-                continue
-            summary_path = root / growth_graph_file(metric)
-            _plot_by_date(
-                pyplot,
-                path=summary_path,
-                experiment=experiment,
-                metric=metric,
-                values_by_date=values_by_date,
-                exploratory=exploratory,
-                dpi=graph_dpi,
-            )
-            graph_paths.append(summary_path)
+        for spec in graph_specs:
+            if spec.type == "histogram":
+                for date in dates:
+                    records = date_metric_rows.get(date, {}).get(spec.metric, ())
+                    if not records:
+                        continue
+                    values = [record["value"] for record in records]
+                    path = root / date_graph_dir(date) / f"{spec.metric}_distribution.png"
+                    _plot_distribution(
+                        pyplot,
+                        path=path,
+                        experiment=experiment,
+                        date=date,
+                        metric=spec.metric,
+                        values=values,
+                        dpi=graph_dpi,
+                    )
+                    _write_graph_data_csv(
+                        root / date_graph_data_file(date, f"{spec.metric}_distribution"),
+                        records,
+                    )
+                    graph_paths.append(path)
+
+            elif spec.type == "ranking":
+                for date in dates:
+                    selected = date_rankings.get(date, {}).get(spec.metric, ())
+                    if not selected:
+                        continue
+                    path = root / date_graph_dir(date) / f"{spec.metric}_{ranking_directory}.png"
+                    _plot_top_fraction(
+                        pyplot,
+                        path=path,
+                        experiment=experiment,
+                        date=date,
+                        metric=spec.metric,
+                        fraction=top_fraction,
+                        include_ties=include_ties,
+                        rows=selected,
+                        dpi=graph_dpi,
+                    )
+                    graph_paths.append(path)
+
+            elif spec.type == "boxplot":
+                values_by_date = [
+                    (date, [record["value"] for record in date_metric_rows[date][spec.metric]])
+                    for date in dates
+                    if date_metric_rows.get(date, {}).get(spec.metric)
+                ]
+                if not values_by_date:
+                    continue
+                path = root / growth_graph_file(spec.metric)
+                _plot_by_date(
+                    pyplot,
+                    path=path,
+                    experiment=experiment,
+                    metric=spec.metric,
+                    values_by_date=values_by_date,
+                    exploratory=exploratory,
+                    dpi=graph_dpi,
+                )
+                all_records = [
+                    record
+                    for date in dates
+                    for record in date_metric_rows.get(date, {}).get(spec.metric, ())
+                ]
+                _write_graph_data_csv(root / growth_graph_data_file(spec.metric), all_records)
+                graph_paths.append(path)
+
+            else:
+                raise ValueError(f"Unsupported graph type: {spec.type!r}")
 
         return sorted(str(path.relative_to(root)) for path in graph_paths)
     finally:

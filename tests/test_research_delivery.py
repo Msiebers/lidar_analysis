@@ -14,6 +14,7 @@ from lidar_analysis.research_delivery import (
     build_delivery,
     inspect_experiment,
 )
+from lidar_analysis.research_delivery_layout import GraphSpec
 
 
 RESULT_FIELDS = [
@@ -412,10 +413,12 @@ KNOWN_ARTIFACT_ROLES = {
     "experiment_results",
     "experiment_qc",
     "growth_graph",
+    "growth_graph_data",
     "date_index",
     "date_results_snapshot",
     "date_ranking",
     "date_graph",
+    "date_graph_data",
     "date_qc",
     "date_metadata",
 }
@@ -606,6 +609,8 @@ def test_manifest_is_self_describing_and_inventories_every_artifact(
     assert roles["2026_05_28/results/results.csv"] == "date_results_snapshot"
     assert roles["2026_05_28/results/top_15_percent/points.csv"] == "date_ranking"
     assert roles["2026_05_28/graphs/points_distribution.png"] == "date_graph"
+    assert roles["2026_05_28/graphs/points_distribution.csv"] == "date_graph_data"
+    assert roles["summary/growth/points_by_date.csv"] == "growth_graph_data"
     assert roles["2026_05_28/qc/outliers.csv"] == "date_qc"
     assert roles["2026_05_28/qc/qc_flags.csv"] == "date_qc"
     assert roles["2026_05_28/metadata/source_reference.md"] == "date_metadata"
@@ -770,3 +775,149 @@ def test_rejects_invalid_dates_filter(
     config, _raw_root, _analysis_root, _delivery_root = experiment
     with pytest.raises(ValueError, match=message):
         build_delivery(replace(config, dates=dates), run_id="bad_dates")
+
+
+# ---------------------------------------------------------------------------
+# Research Delivery V2B: config-driven graphs + graph-data traceability
+# ---------------------------------------------------------------------------
+
+
+def test_graphs_config_rejects_invalid_entries(
+    experiment: tuple[DeliveryConfig, Path, Path, Path],
+) -> None:
+    config, _raw_root, _analysis_root, _delivery_root = experiment
+
+    with pytest.raises(ValueError, match="type must be one of"):
+        replace(
+            config,
+            graphs=(GraphSpec(type="pie", metric="points", scope="date"),),
+        ).validate()
+
+    with pytest.raises(ValueError, match="requires scope"):
+        replace(
+            config,
+            graphs=(GraphSpec(type="histogram", metric="points", scope="summary"),),
+        ).validate()
+
+    with pytest.raises(ValueError, match="is not in this config's metrics"):
+        replace(
+            config,
+            graphs=(GraphSpec(type="histogram", metric="height_m", scope="date"),),
+        ).validate()
+
+    with pytest.raises(ValueError, match="must not repeat"):
+        replace(
+            config,
+            graphs=(
+                GraphSpec(type="histogram", metric="points", scope="date"),
+                GraphSpec(type="histogram", metric="points", scope="date"),
+            ),
+        ).validate()
+
+
+def test_graphs_config_selects_only_requested_graphs(
+    experiment: tuple[DeliveryConfig, Path, Path, Path],
+) -> None:
+    config, _raw_root, _analysis_root, _delivery_root = experiment
+    subset_config = replace(
+        config,
+        generate_graphs=True,
+        graph_dpi=72,
+        graphs=(GraphSpec(type="histogram", metric="points", scope="date"),),
+    )
+
+    target = build_delivery(subset_config, run_id="graphs_subset", write=True).target_dir
+
+    png_files = {p.relative_to(target).as_posix() for p in target.rglob("*.png")}
+    assert png_files == {
+        "2026_05_14/graphs/points_distribution.png",
+        "2026_05_28/graphs/points_distribution.png",
+    }
+    graphish_csvs = {
+        p.relative_to(target).as_posix()
+        for p in target.rglob("*.csv")
+        if "/graphs/" in p.relative_to(target).as_posix()
+        or p.relative_to(target).as_posix().startswith("summary/growth/")
+    }
+    assert graphish_csvs == {
+        "2026_05_14/graphs/points_distribution.csv",
+        "2026_05_28/graphs/points_distribution.csv",
+    }
+    manifest = load_manifest(target)
+    assert set(manifest["graph_files"]) == png_files
+
+
+def test_histogram_graph_data_traces_back_to_results(
+    experiment: tuple[DeliveryConfig, Path, Path, Path],
+) -> None:
+    config, _raw_root, _analysis_root, _delivery_root = experiment
+    graph_config = replace(config, generate_graphs=True, graph_dpi=72)
+
+    target = build_delivery(graph_config, run_id="histogram_trace", write=True).target_dir
+
+    records = read_rows(target / "2026_05_28" / "graphs" / "points_distribution.csv")
+    # scan28e fails QC and is excluded; the other four rows are eligible.
+    assert len(records) == 4
+    assert {r["scan_id"] for r in records} == {"scan28a", "scan28b", "scan28c", "scan28d"}
+    results_rows = {
+        row["scan_id"]: row
+        for row in read_rows(target / "2026_05_28" / "results" / "results.csv")
+    }
+    for record in records:
+        source = results_rows[record["scan_id"]]
+        assert record["row"] == source["row"]
+        assert record["plot"] == source["plot"]
+        assert float(record["value"]) == float(source["points"])
+        assert record["date"] == "2026_05_28"
+        assert record["metric"] == "points"
+
+
+def test_boxplot_graph_data_covers_all_usable_dates(
+    experiment: tuple[DeliveryConfig, Path, Path, Path],
+) -> None:
+    config, _raw_root, _analysis_root, _delivery_root = experiment
+    graph_config = replace(config, generate_graphs=True, graph_dpi=72)
+
+    target = build_delivery(graph_config, run_id="boxplot_trace", write=True).target_dir
+
+    records = read_rows(target / "summary" / "growth" / "points_by_date.csv")
+    assert {r["date"] for r in records} == {"2026_05_14", "2026_05_28"}
+    assert len(records) == 6  # 2 QC-eligible rows on 2026_05_14 + 4 on 2026_05_28
+
+
+def test_graph_data_outlier_flag_matches_find_outliers(
+    experiment: tuple[DeliveryConfig, Path, Path, Path],
+) -> None:
+    config, _raw_root, _analysis_root, _delivery_root = experiment
+    graph_config = replace(config, generate_graphs=True, graph_dpi=72)
+
+    target = build_delivery(graph_config, run_id="outlier_trace", write=True).target_dir
+
+    inspections = {item.date: item for item in inspect_experiment(config)}
+    expected_outliers = {
+        row["scan_id"]
+        for row in research_delivery.find_outliers(
+            inspections["2026_05_28"].rows, "point_density_m2", config.outlier_iqr_multiplier
+        )
+    }
+    records = read_rows(
+        target / "2026_05_28" / "graphs" / "point_density_m2_distribution.csv"
+    )
+    assert records  # sanity: the fixture actually produced rows to check
+    for record in records:
+        assert (record["is_outlier"] == "True") == (record["scan_id"] in expected_outliers)
+
+
+def test_ranking_graph_has_no_redundant_data_file(
+    experiment: tuple[DeliveryConfig, Path, Path, Path],
+) -> None:
+    config, _raw_root, _analysis_root, _delivery_root = experiment
+    graph_config = replace(config, generate_graphs=True, graph_dpi=72)
+
+    target = build_delivery(graph_config, run_id="ranking_no_dup", write=True).target_dir
+
+    assert not (target / "2026_05_28" / "graphs" / "points_top_15_percent.csv").exists()
+    ranking_csv = read_rows(
+        target / "2026_05_28" / "results" / "top_15_percent" / "points.csv"
+    )
+    assert {"scan_id", "row", "plot"} <= set(ranking_csv[0])

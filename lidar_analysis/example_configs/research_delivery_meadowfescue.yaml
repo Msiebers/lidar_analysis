@@ -22,3 +22,17 @@ graph_dpi: 160
 # dates:
 #   - "2026_05_14"
 #   - "2026_05_28"
+
+# Optional: choose exactly which graphs to build. Omit this section entirely to get
+# every graph type for every metric above (the default, unchanged from V2A).
+# Each entry needs a type, a metric (must be listed above), and a scope:
+#   type: histogram  scope: date     -> per-date distribution histogram
+#   type: ranking    scope: date     -> per-date top-fraction ranking chart
+#   type: boxplot    scope: summary  -> cross-date box plot in summary/growth/
+# graphs:
+#   - type: histogram
+#     metric: point_density_m2
+#     scope: date
+#   - type: boxplot
+#     metric: point_density_m2
+#     scope: summary
