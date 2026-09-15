@@ -259,7 +259,7 @@ def test_write_builds_separate_rankings_without_changing_inputs(
     assert date_index["2026_05_28"]["status"] == "usable"
 
     summary = (target / "summary" / "EXPERIMENT_SUMMARY.md").read_text(encoding="utf-8")
-    assert "TEST PREVIEW" in summary
+    assert "Preview Build" in summary
     assert "Per-date algorithm enable/disable differences are not acceptable" in summary
     assert "inconsistent" in summary
     assert "2026_05_28/results/top_15_percent" in summary

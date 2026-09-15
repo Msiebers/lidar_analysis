@@ -872,9 +872,9 @@ def _write_source_reference(path: Path, inspection: DateInspection) -> None:
 def _write_readme(path: Path, config: DeliveryConfig) -> None:
     ranking_dir = ranking_directory_name(config.top_fraction)
     lines = [
-        f"# {config.experiment}: research delivery (TEST PREVIEW)",
+        f"# {config.experiment}: Research Delivery (Preview Build)",
         "",
-        "This folder is an internal, rebuildable test preview built from existing canonical LiDAR results.",
+        "This folder is an internal, rebuildable preview build generated from existing canonical LiDAR results.",
         "Raw scans, point clouds, and analysis results were read only and were not modified.",
         "Only each date's `results.csv` is copied, as a frozen snapshot.",
         "",
@@ -1002,7 +1002,7 @@ def _write_experiment_summary(
         historical_config_status = "consistent across discovered dates"
 
     lines = [
-        f"# TEST PREVIEW: {config.experiment} Research Delivery",
+        f"# {config.experiment} Research Delivery — Preview Build",
         "",
         "This folder is an internal, rebuildable preview. It is not an official researcher delivery.",
         "Raw scans, collected point clouds, and existing analysis results were read only and were not modified.",
@@ -1109,7 +1109,7 @@ def build_delivery(
     try:
         # Build identity (run_id, created_at_utc) is written ONLY to the manifest.
         (staging_dir / MARKER_FILE).write_text(
-            "Internal rebuildable test preview.\n", encoding="utf-8"
+            "Internal rebuildable preview build.\n", encoding="utf-8"
         )
         (staging_dir / CONFIG_SNAPSHOT_FILE).write_text(
             yaml.safe_dump(config.as_dict(), sort_keys=False), encoding="utf-8"
