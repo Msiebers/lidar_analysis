@@ -130,9 +130,10 @@ def cart_config_snapshot_path(root: Path) -> Path:
 # ---------------------------------------------------------------------
 # Discovery
 # ---------------------------------------------------------------------
-def list_raw_experiments() -> list[str]:
+def list_raw_experiments(*, log_missing: bool = True) -> list[str]:
     if not RAW_ROOT.exists():
-        append_log(WATCHER_LOG, f"RAW_ROOT_MISSING path={RAW_ROOT}")
+        if log_missing:
+            append_log(WATCHER_LOG, f"RAW_ROOT_MISSING path={RAW_ROOT}")
         return []
     return sorted(p.name for p in RAW_ROOT.iterdir() if p.is_dir())
 
@@ -426,9 +427,14 @@ def write_input_snapshots(root: Path) -> None:
 
 def local_output_complete(root: Path) -> bool:
     has_results = results_csv_path(root).exists()
+    analysis = load_yaml(source_dir(root) / "experiment_config.yaml").get("analysis", {})
+    requires_pointclouds = analysis.get(
+        "generate_pointclouds",
+        analysis.get("make_point_cloud", True),
+    )
     local_pointclouds = pointclouds_dir(root)
     has_pointclouds = local_pointclouds.exists() and any(p.is_file() for p in local_pointclouds.rglob("*"))
-    return has_results and has_pointclouds
+    return has_results and (not requires_pointclouds or has_pointclouds)
 
 
 def clean_processing_outputs(root: Path) -> None:
@@ -499,8 +505,9 @@ def parse_args() -> argparse.Namespace:
 
     poll_parser = subparsers.add_parser("poll", help="Sync mounted CartCity raw data to local raw_mirror")
     poll_parser.add_argument("--once", action="store_true", help="Accepted for compatibility; poll is always one cycle.")
-    poll_parser.add_argument("--experiment", help="Only sync one experiment")
-    poll_parser.add_argument("--date", help="Only sync one date")
+    poll_parser.add_argument("-l", "--list", action="store_true", help="List available experiments or dates")
+    poll_parser.add_argument("experiment", nargs="?", help="Only sync one experiment")
+    poll_parser.add_argument("date", nargs="?", help="Only sync one date")
     poll_parser.add_argument(
         "--overwrite-config",
         action="store_true",
@@ -512,11 +519,26 @@ def parse_args() -> argparse.Namespace:
     rerun_parser.add_argument("date")
 
     parser.add_argument("--once", action="store_true", help="Accepted for compatibility; runs one poll cycle.")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.command == "poll" and args.list and args.date:
+        parser.error("poll --list accepts an optional experiment but no date")
+    return args
 
 
 def main() -> None:
     args = parse_args()
+
+    if args.command == "poll" and args.list:
+        if args.experiment:
+            print(f"{args.experiment}:")
+            for date_name in list_raw_dates(args.experiment):
+                print(f"  {date_name}")
+        else:
+            print("Available experiments:")
+            for experiment in list_raw_experiments(log_missing=False):
+                print(f"  {experiment}")
+        return
+
     ensure_local_root()
 
     if args.command in (None, "poll"):

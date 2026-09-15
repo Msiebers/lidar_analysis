@@ -2134,15 +2134,16 @@ def process_scan(
     if split_source not in ("distance", "marks"):
         raise ValueError(f"Unknown split_source={split_source!r}; use 'distance' or 'marks'.")
 
-    if split_source == "marks":
+    marker_path = None
+    if split_source == "marks" or bool(getattr(cfg, "write_reference_points", False)):
         raw_dir = os.path.dirname(lidar_path)
-
         marker_path = find_marker_file_for_scan(
             raw_dir=raw_dir,
             scan_base=scan_base,
             markers_dirname=str(getattr(cfg, "markers_dirname", "markers")),
         )
 
+    if split_source == "marks":
         if marker_path is None:
             missing_mode = str(getattr(cfg, "missing_mark_file", "error")).strip().lower()
 
@@ -2157,6 +2158,8 @@ def process_scan(
                     f"No marker file found for {scan_base}. "
                     f"Expected markers/{scan_base}_markers.csv or similar."
                 )
+    elif bool(getattr(cfg, "write_reference_points", False)) and marker_path is None:
+        print(f"[MARKS][WARN] No marker file for {scan_base}; no reference points written.")
 
     if split_source == "marks":
         z_buffer_mm = marker_buffer_mm(
@@ -2253,7 +2256,7 @@ def process_scan(
     plots = _apply_additional_scan_side_split(plots, scan_base, cfg)
     plots = _filter_plots_for_analysis_side(plots, row_options, cfg)
 
-    if bool(getattr(cfg, "write_reference_points", False)) and split_source == "marks" and marker_path is not None:
+    if bool(getattr(cfg, "write_reference_points", False)) and marker_path is not None:
         write_marker_reference_points(
             scan_base=scan_base,
             marker_path=str(marker_path),

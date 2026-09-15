@@ -58,3 +58,20 @@ yaml_loader.py             YAML config loading
 - `docs/TROUBLESHOOTING.md`: common errors and fixes
 - `docs/cleanup/CLEANUP_AUDIT.md`: cleanup opportunities classified by risk
 - `docs/cleanup/CLEANUP_PLAN.md`: staged cleanup plan
+
+## Central Watcher Polling
+
+`central_watcher.py poll` syncs raw data only; it does not run analysis. Experiment and date filters are optional positional arguments:
+
+```bash
+python3 lidar_analysis/central_watcher.py poll --once
+python3 lidar_analysis/central_watcher.py poll --once al_lai
+python3 lidar_analysis/central_watcher.py poll --once al_lai standcount
+```
+
+Use `-l` (or `--list`) to inspect the mounted raw-data folders without syncing or changing local state:
+
+```bash
+python3 lidar_analysis/central_watcher.py poll --once -l
+python3 lidar_analysis/central_watcher.py poll --once -l al_lai
+```
