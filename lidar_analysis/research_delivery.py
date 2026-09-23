@@ -22,6 +22,7 @@ from lidar_analysis.research_delivery_layout import (
     DATE_INDEX_FILE,
     DATE_SUBDIRS,
     EXPERIMENT_SUMMARY_FILE,
+    GENOTYPE_MAP_SNAPSHOT_FILE,
     GRAPH_TYPE_SCOPES,
     GRAPH_TYPES,
     MANIFEST_DIR,
@@ -862,6 +863,22 @@ def _write_results_snapshot(destination: Path, inspection: DateInspection) -> No
         )
 
 
+def _write_genotype_map_snapshot(destination: Path, genotype_map: GenotypeMap) -> None:
+    """Freeze a byte-identical copy of the genotype map (intentional snapshot).
+
+    Same reasoning as _write_results_snapshot: the map's bytes directly
+    determine delivered genotype_id values, so this delivery must remain
+    self-contained even if the external map file changes or is deleted
+    later. Deliberately different from how analysis_config is handled
+    (hash+path only, never copied) -- analysis_config is a pure consistency
+    fingerprint, not itself published content.
+    """
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(genotype_map.path, destination)
+    if sha256_file(destination) != genotype_map.sha256:
+        raise RuntimeError(f"genotype map changed during the build: {genotype_map.path}")
+
+
 def _write_source_reference(path: Path, inspection: DateInspection) -> None:
     index_row = _date_index_row(inspection)
     usable = inspection.status == "usable"
@@ -956,9 +973,11 @@ def _write_readme(path: Path, config: DeliveryConfig) -> None:
             "- `summary/qc/unused_genotype_mappings.csv`: plots the genotype map assigns a genotype",
             "  to that had no observed results in the selected dates (commonly: not scanned yet).",
             "  This is an audit note, not an error.",
-            "- The genotype map file used for this build is recorded, with its SHA-256, in",
-            "  `manifest/delivery_manifest.json` under `genotype_map`. Source LiDAR results are",
-            "  never modified by genotype mapping.",
+            "- The genotype map used for this build is frozen as a byte-identical copy at",
+            "  `manifest/genotype_map.csv`, with its SHA-256 recorded in",
+            "  `manifest/delivery_manifest.json` under `genotype_map`. Editing the external",
+            "  map file later does not change this delivery. Source LiDAR results are never",
+            "  modified by genotype mapping.",
             "",
         ]
     lines += [
@@ -1283,6 +1302,9 @@ def build_delivery(
                 unused_genotype_mappings,
                 fieldnames=("experiment", "plot", "genotype_id", "notes", "reason"),
             )
+            _write_genotype_map_snapshot(
+                staging_dir / GENOTYPE_MAP_SNAPSHOT_FILE, genotype_map
+            )
         _write_experiment_summary(
             staging_dir / EXPERIMENT_SUMMARY_FILE,
             config,
@@ -1331,6 +1353,7 @@ def build_delivery(
                     "configured": True,
                     "path": str(genotype_map.path),
                     "sha256": genotype_map.sha256,
+                    "snapshot_path": GENOTYPE_MAP_SNAPSHOT_FILE,
                     "experiment_rows": genotype_map.experiment_rows,
                     "total_rows": genotype_map.total_rows,
                     "missing_mapping_rows": len(missing_genotype_mapping),

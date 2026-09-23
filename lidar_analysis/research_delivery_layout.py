@@ -33,6 +33,15 @@ GROWTH_DIR = "summary/growth"
 MANIFEST_DIR = "manifest"
 MANIFEST_FILE = "manifest/delivery_manifest.json"
 DATE_INDEX_FILE = "manifest/experiment_date_index.csv"
+# Research Delivery V3A: a frozen, byte-identical copy of the genotype map
+# used for this build -- same reasoning as date_results_file() freezing
+# results.csv (its bytes directly become delivered genotype_id values, so
+# unlike analysis_config -- a pure consistency fingerprint, never copied --
+# this delivery must be self-contained even if the external map changes
+# later). Lives in manifest/ rather than a new top-level directory: it's
+# technical provenance researchers rarely need directly, same category as
+# experiment_date_index.csv and delivery_manifest.json.
+GENOTYPE_MAP_SNAPSHOT_FILE = "manifest/genotype_map.csv"
 
 # Every date folder always contains exactly these subfolders (some may be empty).
 DATE_SUBDIRS = ("results", "graphs", "qc", "metadata")
@@ -119,6 +128,7 @@ _FIXED_ROLES = {
     # not a QC problem needing action the way a missing mapping is.
     UNUSED_GENOTYPE_MAPPINGS_FILE: "experiment_qc_audit",
     DATE_INDEX_FILE: "date_index",
+    GENOTYPE_MAP_SNAPSHOT_FILE: "genotype_map_snapshot",
 }
 _DATE_SUBDIR_ROLES = {"qc": "date_qc", "metadata": "date_metadata"}
 

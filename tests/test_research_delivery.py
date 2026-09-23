@@ -1260,3 +1260,111 @@ def test_genotype_map_artifacts_pass_manifest_artifact_inventory(genotype_experi
     artifact_paths = {entry["path"] for entry in manifest["artifacts"]}
     assert "summary/qc/missing_genotype_mapping.csv" in artifact_paths
     assert "summary/qc/unused_genotype_mappings.csv" in artifact_paths
+
+
+def test_genotype_map_is_frozen_byte_identical_in_the_delivery(genotype_experiment) -> None:
+    config, _raw_root, _analysis_root, _delivery_root, genotype_map_path = genotype_experiment
+    target = build_delivery(config, run_id="v3a_freeze", write=True).target_dir
+
+    snapshot_path = target / "manifest" / "genotype_map.csv"
+    assert snapshot_path.is_file()
+    assert snapshot_path.read_bytes() == genotype_map_path.read_bytes()
+
+    manifest = json.loads((target / "manifest" / "delivery_manifest.json").read_text())
+    assert manifest["genotype_map"]["snapshot_path"] == "manifest/genotype_map.csv"
+    artifact_paths = {entry["path"] for entry in manifest["artifacts"]}
+    assert "manifest/genotype_map.csv" in artifact_paths
+
+
+def test_editing_the_external_map_later_does_not_alter_an_existing_delivery(
+    genotype_experiment,
+) -> None:
+    """The exact reproducibility scenario this freeze exists for: build a
+    delivery, then change the external source file (as Matt might a month
+    later), and confirm the already-built delivery's frozen copy -- and
+    everything derived from it -- is completely unaffected."""
+    config, _raw_root, _analysis_root, _delivery_root, genotype_map_path = genotype_experiment
+    target = build_delivery(config, run_id="v3a_frozen_before_edit", write=True).target_dir
+
+    original_snapshot_bytes = (target / "manifest" / "genotype_map.csv").read_bytes()
+    original_combined = _combined_rows_by_scan(target)
+    assert original_combined["scan1"]["genotype_id"] == "MF001"
+
+    # Matt edits the external map: plot 1 now points at a different genotype.
+    genotype_map_path.write_text(
+        "experiment,plot,genotype_id,notes\n"
+        "MeadowFescue_2026,1,MF_CHANGED,edited after the fact\n",
+        encoding="utf-8",
+    )
+
+    # The existing, already-built delivery must not change at all.
+    assert (target / "manifest" / "genotype_map.csv").read_bytes() == original_snapshot_bytes
+    unchanged_combined = _combined_rows_by_scan(target)
+    assert unchanged_combined["scan1"]["genotype_id"] == "MF001"
+
+    # A NEW build against the now-edited external file correctly picks up
+    # the change -- proving the freeze isn't accidentally caching stale
+    # data forever, only protecting deliveries already built.
+    new_target = build_delivery(config, run_id="v3a_after_edit", write=True).target_dir
+    new_combined = _combined_rows_by_scan(new_target)
+    assert new_combined["scan1"]["genotype_id"] == "MF_CHANGED"
+
+
+def test_genotype_map_snapshot_in_layout_contract() -> None:
+    from lidar_analysis.research_delivery_layout import (
+        GENOTYPE_MAP_SNAPSHOT_FILE,
+        artifact_role,
+    )
+
+    assert GENOTYPE_MAP_SNAPSHOT_FILE == "manifest/genotype_map.csv"
+    assert artifact_role(GENOTYPE_MAP_SNAPSHOT_FILE) == "genotype_map_snapshot"
+
+
+def test_genotype_id_and_notes_with_commas_and_quotes_survive_into_combined_results(
+    tmp_path: Path,
+) -> None:
+    """End-to-end CSV-quoting check, not just at the loader: a genotype_id
+    and notes containing commas and embedded quotes must round-trip
+    correctly all the way through to combined_results.csv."""
+    raw_root = tmp_path / "raw"
+    analysis_root = tmp_path / "analysis"
+    delivery_root = tmp_path / "delivery"
+    source = raw_root / "2026_06_01" / "source"
+    add_source_pair(source, "scan1")
+    write_results(
+        analysis_root / "2026_06_01" / "results.csv",
+        [
+            {
+                "experiment": "MeadowFescue_2026",
+                "date": "2026_06_01",
+                "scan_name": "scan1",
+                "scan_number": "",
+                "plot": 1,
+                "side": "none",
+                "target_type": "plot",
+                "target_id": "plot_1",
+                "points": 100,
+                "point_density_m2": 10,
+                "stand_topo_per_m": 2,
+                "qc_status": "pass",
+            }
+        ],
+    )
+    genotype_map_path = tmp_path / "genotype_map.csv"
+    genotype_map_path.write_text(
+        'experiment,plot,genotype_id,notes\n'
+        'MeadowFescue_2026,1,"MF,001 ""tall""","a note, with a comma"\n',
+        encoding="utf-8",
+    )
+    config = DeliveryConfig(
+        experiment="MeadowFescue_2026",
+        raw_experiment_root=raw_root,
+        analysis_experiment_root=analysis_root,
+        delivery_root=delivery_root,
+        metrics=("points",),
+        generate_graphs=False,
+        genotype_map_path=genotype_map_path,
+    )
+    target = build_delivery(config, run_id="v3a_quoting", write=True).target_dir
+    rows = _combined_rows_by_scan(target)
+    assert rows["scan1"]["genotype_id"] == 'MF,001 "tall"'
