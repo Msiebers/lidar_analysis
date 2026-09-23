@@ -39,6 +39,31 @@ def test_bilateral_rssi_norm_columns_and_missing_scalar_error():
     assert 'Available columns' in str(e.value)
 
 
+def test_bilateral_scalar_filter_reports_diagnostics():
+    # One finite pair close enough to weight each other, one point with a
+    # non-finite scalar value that must be excluded from the neighbor pool
+    # rather than silently corrupting a neighbor's result.
+    df = pd.DataFrame({
+        "X": [0, 0.01, 0.02],
+        "Y": [0, 0, 0],
+        "Z": [0, 0, 0],
+        "RSSI": [5., 7., 9.],
+        "rssi_norm": [1.0, 2.0, float("nan")],
+    })
+    out = apply_pointcloud_ops(_target(df), [
+        {"op": "bilateral_scalar_filter", "field": "rssi_norm", "radius": 0.05},
+    ])
+    diag_list = out.diagnostics["pointcloud_ops"]["bilateral_scalar_filter"]
+    assert len(diag_list) == 1
+    diag = diag_list[0]
+    assert diag["field"] == "rssi_norm"
+    assert diag["points_total"] == 3
+    assert diag["points_excluded_nonfinite"] == 1
+    assert diag["points_processed"] == 2
+    assert diag["points_unchanged_too_few_neighbors"] == 0
+    assert diag["points_unchanged_zero_weight"] == 0
+
+
 def test_plot_write_uses_analysis_target_all_columns(tmp_path):
     df = pd.DataFrame({"X":[1000.0],"Y":[2000.0],"Z":[3000.0],"RSSI":[4.0],"rssi_norm":[1.2],"rssi_norm_bilateral":[1.1]})
     plot = Plot('R1','1',(0,1),str(tmp_path),'scan_a')

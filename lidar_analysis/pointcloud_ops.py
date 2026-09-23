@@ -552,6 +552,12 @@ def _sor_filter(df: pd.DataFrame, op_cfg) -> pd.DataFrame:
 
 
 def _bilateral_scalar_filter(df: pd.DataFrame, op_cfg):
+    """Bilateral-filter one scalar field.
+
+    Returns (df, used_scalar_name, diagnostics). diagnostics mirrors the
+    per-op diagnostics dict pattern already used elsewhere in this module
+    (e.g. _height_range_filter) rather than any prior branch's shape.
+    """
     field = _require_scalar(
         df,
         _resolve_scalar_name(op_cfg),
@@ -567,13 +573,23 @@ def _bilateral_scalar_filter(df: pd.DataFrame, op_cfg):
     if sigma_s <= 0 or sigma_r <= 0 or radius <= 0:
         raise ValueError("bilateral_scalar_filter sigmas and radius must be > 0")
 
+    diag: dict[str, Any] = {
+        "field": field,
+        "points_total": int(len(df)),
+        "points_excluded_nonfinite": 0,
+        "points_processed": 0,
+        "points_unchanged_too_few_neighbors": 0,
+        "points_unchanged_zero_weight": 0,
+    }
+
     if len(df) == 0:
-        return df.copy(), field
+        return df.copy(), field, diag
 
     xyz_m = df[["X", "Y", "Z"]].to_numpy(dtype=float, copy=False) / 1000.0
     vals = df[field].to_numpy(dtype=float, copy=False)
 
     finite = np.isfinite(xyz_m).all(axis=1) & np.isfinite(vals)
+    diag["points_excluded_nonfinite"] = int(len(df) - int(np.count_nonzero(finite)))
     if not finite.all():
         out = df.copy()
         used = str(op_cfg.get("output_scalar") or field)
@@ -586,7 +602,7 @@ def _bilateral_scalar_filter(df: pd.DataFrame, op_cfg):
 
         work_idx = np.where(finite)[0]
         if work_idx.size == 0:
-            return out, used
+            return out, used, diag
 
         xyz_work = xyz_m[work_idx]
         vals_work = vals[work_idx]
@@ -606,6 +622,7 @@ def _bilateral_scalar_filter(df: pd.DataFrame, op_cfg):
 
     for i, nbr_idx in enumerate(all_nbrs):
         if len(nbr_idx) < min_neighbors:
+            diag["points_unchanged_too_few_neighbors"] += 1
             continue
 
         nbr_idx = np.asarray(nbr_idx, dtype=int)
@@ -625,6 +642,9 @@ def _bilateral_scalar_filter(df: pd.DataFrame, op_cfg):
 
         if wsum > 0:
             out_vals_work[i] = float(np.sum(weights * vals_work[nbr_idx]) / wsum)
+            diag["points_processed"] += 1
+        else:
+            diag["points_unchanged_zero_weight"] += 1
 
     replace_scalar = bool(op_cfg.get("replace_scalar", True))
     output_scalar = op_cfg.get("output_scalar")
@@ -639,7 +659,7 @@ def _bilateral_scalar_filter(df: pd.DataFrame, op_cfg):
         used = field
         out[field] = full_out_vals
 
-    return out, used
+    return out, used, diag
 
 
 def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=None):
@@ -698,8 +718,9 @@ def apply_pointcloud_ops(target, ops_config, *, default_backend=None, context=No
                 pass
         elif op == "bilateral_scalar_filter":
             scalar = _resolve_scalar_name(op_cfg)
-            df, actual_scalar = _bilateral_scalar_filter(df, op_cfg)
+            df, actual_scalar, bilateral_diag = _bilateral_scalar_filter(df, op_cfg)
             diagnostics["scalar_fields_used"].append({"op": op, "scalar": scalar, "output_scalar": actual_scalar})
+            diagnostics.setdefault("bilateral_scalar_filter", []).append(bilateral_diag)
         elif op == "height_range_filter":
             df, hr_diag = _height_range_filter(df, op_cfg)
             diagnostics.setdefault("height_range_filters", []).append(hr_diag)
