@@ -28,6 +28,9 @@ outside the contract.
     |   |-- data/combined_results.csv      all usable rows from every date, with provenance columns
     |   |-- growth/<metric>_by_date.png    cross-date box plots
     |   `-- qc/missing_metrics.csv         metrics that could not be ranked, by date
+    |                                      (plus qc/missing_genotype_mapping.csv and
+    |                                       qc/unused_genotype_mappings.csv, only when a
+    |                                       genotype map is configured -- see below)
     |-- <YYYY_MM_DD>/                      same four subfolders for every date
     |   |-- results/results.csv            frozen snapshot of the canonical results (usable dates)
     |   |-- results/top_15_percent/<metric>.csv
@@ -150,6 +153,44 @@ The preview records detected historical configuration snapshots and SHA-256 fing
 Historical differences or missing snapshots are reported rather than silently ignored.
 Before a final dataset is produced, all dates must be rerun with one reviewed, versioned
 project configuration; per-date algorithm toggles are not acceptable.
+
+## Genotype mapping (V3A)
+
+Optional. Attaches a `genotype_id` to each result row, for researchers who want to see
+which genotype a plot's results belong to. Off by default; nothing below applies unless
+a genotype map is configured.
+
+**The biological rule:** every plot has exactly one genotype for the life of an
+experiment. A plot scanned as two sides (left/right) still has one genotype -- both
+sides' results get the same `genotype_id`. Side matters for result identity, QC, and
+provenance; it does not matter for genotype identity.
+
+**Editing the map:** it's a plain CSV, editable in Excel or Google Sheets --
+`lidar_analysis/example_configs/meadowfescue_genotype_map_example.csv` is a synthetic
+starting point to copy. Required columns: `experiment`, `plot`, `genotype_id`. Optional:
+`notes`. One row per plot. `plot` must match this experiment's plot identifiers in
+`results.csv` exactly (it is never reinterpreted as a number, so `"1"` and `"01"` are
+different plots if your data actually uses both).
+
+**Turning it on:** set `genotype_map_path` to the CSV's path in the delivery config.
+Configs that omit it behave exactly as before V3A -- no `genotype_id` column appears
+anywhere, not even an empty one.
+
+**What happens when a plot has no genotype mapping:** its result rows are kept in
+`summary/data/combined_results.csv` exactly as before, just with an empty `genotype_id`.
+They are never dropped. Every such row is also listed in
+`summary/qc/missing_genotype_mapping.csv` so it's easy to see what the map still needs.
+The reverse case -- a mapped plot with no matching results, usually because it hasn't
+been scanned yet -- is listed in `summary/qc/unused_genotype_mappings.csv` as an audit
+note, not an error.
+
+**Source data:** genotype mapping never touches canonical `results.csv` files or the
+frozen per-date snapshots this builder copies from them. It is applied only when
+building `summary/data/combined_results.csv`. Which map file was used, and its
+SHA-256, is recorded in `manifest/delivery_manifest.json`.
+
+**Out of scope for V3A:** genotype-level averaging, rankings, trend graphs, and any
+statistics. V3A only answers "which genotype does this plot belong to" -- nothing more.
 
 ## Running
 
