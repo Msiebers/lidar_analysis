@@ -22,6 +22,12 @@ SUMMARY_SUBDIRS = ("data", "growth", "qc")
 EXPERIMENT_SUMMARY_FILE = "summary/EXPERIMENT_SUMMARY.md"
 COMBINED_RESULTS_FILE = "summary/data/combined_results.csv"
 MISSING_METRICS_FILE = "summary/qc/missing_metrics.csv"
+# Research Delivery V3A: genotype identity QC artifacts. Placed alongside
+# missing_metrics.csv (not summary/data/) because both are the same kind of
+# artifact -- a per-experiment QC finding about the combined results, not
+# combined results data itself.
+MISSING_GENOTYPE_MAPPING_FILE = "summary/qc/missing_genotype_mapping.csv"
+UNUSED_GENOTYPE_MAPPINGS_FILE = "summary/qc/unused_genotype_mappings.csv"
 GROWTH_DIR = "summary/growth"
 
 MANIFEST_DIR = "manifest"
@@ -108,6 +114,10 @@ _FIXED_ROLES = {
     EXPERIMENT_SUMMARY_FILE: "experiment_summary",
     COMBINED_RESULTS_FILE: "experiment_results",
     MISSING_METRICS_FILE: "experiment_qc",
+    MISSING_GENOTYPE_MAPPING_FILE: "experiment_qc",
+    # Distinct role: an audit note ("this map entry was never observed"),
+    # not a QC problem needing action the way a missing mapping is.
+    UNUSED_GENOTYPE_MAPPINGS_FILE: "experiment_qc_audit",
     DATE_INDEX_FILE: "date_index",
 }
 _DATE_SUBDIR_ROLES = {"qc": "date_qc", "metadata": "date_metadata"}
