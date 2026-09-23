@@ -29,16 +29,27 @@ from __future__ import annotations
 
 import csv
 import hashlib
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 REQUIRED_GENOTYPE_MAP_COLUMNS = ("experiment", "plot", "genotype_id")
 OPTIONAL_GENOTYPE_MAP_COLUMNS = ("notes",)
 
-# Matches the SAFE_NAME_PATTERN convention already used elsewhere in
-# research_delivery.py for experiment names and run_ids.
-_SAFE_GENOTYPE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+# genotype_id is biological metadata, not a filename or path component --
+# nothing in this module or research_delivery.py ever uses it to construct
+# a path. It is treated as an opaque, non-empty string: leading/trailing
+# whitespace is stripped, but internal text (including spaces, commas,
+# slashes, parentheses, or anything else a researcher's real naming scheme
+# uses) is preserved exactly and never case-folded. No character-set
+# restriction is imposed -- an earlier version of this module borrowed the
+# SAFE_NAME_PATTERN convention used elsewhere in research_delivery.py for
+# experiment names and run_ids, but those values are validated that way
+# because they become actual directory names on disk; that justification
+# does not apply to genotype_id, and no real genotype-naming convention
+# exists anywhere in this repository to justify inventing one here. If a
+# future stage needs a filesystem-safe form of genotype_id (a chart
+# filename, say), that should be a separate derived slug, not a change to
+# the biological identity stored here.
 
 
 def sha256_file(path: Path) -> str:
@@ -123,11 +134,6 @@ def load_genotype_map(path: Path, experiment: str) -> GenotypeMap:
             raise ValueError(f"{resolved} line {line_no}: plot is blank")
         if not row_genotype_id:
             raise ValueError(f"{resolved} line {line_no}: genotype_id is blank")
-        if not _SAFE_GENOTYPE_ID_PATTERN.fullmatch(row_genotype_id):
-            raise ValueError(
-                f"{resolved} line {line_no}: genotype_id may contain only letters, "
-                f"numbers, '.', '_', and '-': {row_genotype_id!r}"
-            )
 
         key = (row_experiment, row_plot)
         if key in seen:

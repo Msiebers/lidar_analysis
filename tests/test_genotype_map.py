@@ -119,14 +119,57 @@ def test_blank_plot_raises(tmp_path):
         load_genotype_map(csv_path, "MeadowFescue")
 
 
-def test_malformed_genotype_id_raises(tmp_path):
+def test_genotype_id_is_opaque_and_permissive(tmp_path):
+    """genotype_id is biological metadata, not a filename -- spaces, slashes,
+    parentheses, colons and other characters a real naming scheme might use
+    must be accepted and preserved exactly, not rejected or normalized.
+    This replaces a previous version of this test that asserted the
+    opposite (a restrictive character allowlist); that restriction was a
+    filename-safety convention that never applied to genotype_id and was
+    removed as a deliberate design decision, not weakened to pass."""
+    csv_path = _write(
+        tmp_path / "map.csv",
+        'experiment,plot,genotype_id,notes\n'
+        'MeadowFescue,1,"MF 001 (tall fescue / early)",\n'
+        "MeadowFescue,2,MF:cultivar-42,\n",
+    )
+    result = load_genotype_map(csv_path, "MeadowFescue")
+    assert result.genotype_for("1") == "MF 001 (tall fescue / early)"
+    assert result.genotype_for("2") == "MF:cultivar-42"
+
+
+def test_genotype_id_whitespace_stripped_but_internal_text_preserved(tmp_path):
     csv_path = _write(
         tmp_path / "map.csv",
         "experiment,plot,genotype_id,notes\n"
-        "MeadowFescue,1,MF 001!,\n",
+        'MeadowFescue,1,"  MF 001  ",\n',  # leading/trailing spaces around, internal space kept
     )
-    with pytest.raises(ValueError, match="genotype_id may contain only"):
-        load_genotype_map(csv_path, "MeadowFescue")
+    result = load_genotype_map(csv_path, "MeadowFescue")
+    assert result.genotype_for("1") == "MF 001"  # outer whitespace gone, internal space kept
+
+
+def test_genotype_id_case_is_never_folded(tmp_path):
+    csv_path = _write(
+        tmp_path / "map.csv",
+        "experiment,plot,genotype_id,notes\n"
+        "MeadowFescue,1,Mf-Mixed-Case,\n",
+    )
+    result = load_genotype_map(csv_path, "MeadowFescue")
+    assert result.genotype_for("1") == "Mf-Mixed-Case"  # not upper()'d or lower()'d
+
+
+def test_csv_quoting_round_trips_commas_and_quotes_in_notes_and_genotype_id(tmp_path):
+    # A genotype_id and a notes field each containing a comma and an
+    # embedded double quote, written using standard CSV quoting rules
+    # (RFC 4180: wrap in quotes, double any embedded quote).
+    csv_path = _write(
+        tmp_path / "map.csv",
+        "experiment,plot,genotype_id,notes\n"
+        'MeadowFescue,1,"MF,001 ""tall""","note, with a comma and a ""quoted"" word"\n',
+    )
+    result = load_genotype_map(csv_path, "MeadowFescue")
+    assert result.genotype_for("1") == 'MF,001 "tall"'
+    assert result.notes_by_plot["1"] == 'note, with a comma and a "quoted" word'
 
 
 def test_missing_required_column_raises(tmp_path):
