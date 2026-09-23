@@ -170,7 +170,10 @@ provenance; it does not matter for genotype identity.
 starting point to copy. Required columns: `experiment`, `plot`, `genotype_id`. Optional:
 `notes`. One row per plot. `plot` must match this experiment's plot identifiers in
 `results.csv` exactly (it is never reinterpreted as a number, so `"1"` and `"01"` are
-different plots if your data actually uses both).
+different plots if your data actually uses both). `genotype_id` is treated as opaque
+text -- whatever your real naming scheme is (spaces, slashes, colons, parentheses)
+is accepted and preserved exactly; only leading/trailing whitespace is trimmed, and
+case is never changed.
 
 **Turning it on:** set `genotype_map_path` to the CSV's path in the delivery config.
 Configs that omit it behave exactly as before V3A -- no `genotype_id` column appears
@@ -186,8 +189,10 @@ note, not an error.
 
 **Source data:** genotype mapping never touches canonical `results.csv` files or the
 frozen per-date snapshots this builder copies from them. It is applied only when
-building `summary/data/combined_results.csv`. Which map file was used, and its
-SHA-256, is recorded in `manifest/delivery_manifest.json`.
+building `summary/data/combined_results.csv`. The genotype map itself is frozen as a
+byte-identical copy at `manifest/genotype_map.csv`, with its SHA-256 recorded in
+`manifest/delivery_manifest.json` -- editing the external map file later never
+changes an already-built delivery.
 
 **Out of scope for V3A:** genotype-level averaging, rankings, trend graphs, and any
 statistics. V3A only answers "which genotype does this plot belong to" -- nothing more.
