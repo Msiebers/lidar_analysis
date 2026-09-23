@@ -961,3 +961,302 @@ def test_result_identity_matches_central_runner() -> None:
 
     assert research_delivery.RESULT_IDENTITY_FIELDS == central_runner._RESULT_ID_FIELDS
     assert research_delivery.RESULT_UNIQUE_FIELDS == central_runner._RESULT_UNIQUE_FIELDS
+
+
+# --- V3A: genotype mapping -----------------------------------------------
+#
+# A dedicated, self-contained fixture rather than reusing `experiment`
+# above: genotype tests need a left/right pair for one plot (the existing
+# fixture has none) and a genotype_map_path, and keeping this separate
+# means these tests can't accidentally affect the 34 tests already built
+# on `experiment`.
+
+GENOTYPE_RESULT_ROWS = [
+    {
+        "experiment": "MeadowFescue_2026",
+        "date": "2026_06_01",
+        "scan_name": "scan1",
+        "scan_number": "",
+        "plot": 1,
+        "side": "none",
+        "target_type": "plot",
+        "target_id": "plot_1",
+        "points": 100,
+        "point_density_m2": 10,
+        "stand_topo_per_m": 2,
+        "qc_status": "pass",
+    },
+    {
+        "experiment": "MeadowFescue_2026",
+        "date": "2026_06_01",
+        "scan_name": "scan2_left",
+        "scan_number": "",
+        "plot": 2,
+        "side": "left",
+        "target_type": "plot",
+        "target_id": "2_plot_2",
+        "points": 90,
+        "point_density_m2": 9,
+        "stand_topo_per_m": 3,
+        "qc_status": "pass",
+    },
+    {
+        "experiment": "MeadowFescue_2026",
+        "date": "2026_06_01",
+        "scan_name": "scan2_right",
+        "scan_number": "",
+        "plot": 2,
+        "side": "right",
+        "target_type": "plot",
+        "target_id": "1_plot_2",
+        "points": 95,
+        "point_density_m2": 9.5,
+        "stand_topo_per_m": 3,
+        "qc_status": "pass",
+    },
+    {
+        "experiment": "MeadowFescue_2026",
+        "date": "2026_06_01",
+        "scan_name": "scan3",
+        "scan_number": "",
+        "plot": 3,
+        "side": "none",
+        "target_type": "plot",
+        "target_id": "plot_3",
+        "points": 80,
+        "point_density_m2": 8,
+        "stand_topo_per_m": 4,
+        "qc_status": "pass",
+    },
+    {
+        # Plot 99 is deliberately absent from the genotype map.
+        "experiment": "MeadowFescue_2026",
+        "date": "2026_06_01",
+        "scan_name": "scan99",
+        "scan_number": "",
+        "plot": 99,
+        "side": "none",
+        "target_type": "plot",
+        "target_id": "plot_99",
+        "points": 50,
+        "point_density_m2": 5,
+        "stand_topo_per_m": 1,
+        "qc_status": "pass",
+    },
+]
+
+GENOTYPE_MAP_CSV = (
+    "experiment,plot,genotype_id,notes\n"
+    "MeadowFescue_2026,1,MF001,\n"
+    "MeadowFescue_2026,2,MF017,\n"
+    "MeadowFescue_2026,3,MF042,\n"
+    "MeadowFescue_2026,42,MF999,not scanned yet\n"  # unused: no result row has plot 42
+)
+
+
+@pytest.fixture
+def genotype_experiment(tmp_path: Path):
+    raw_root = tmp_path / "raw"
+    analysis_root = tmp_path / "analysis"
+    delivery_root = tmp_path / "delivery"
+
+    source = raw_root / "2026_06_01" / "source"
+    for scan_name in ("scan1", "scan2_left", "scan2_right", "scan3", "scan99"):
+        add_source_pair(source, scan_name)
+
+    analysis_date_dir = analysis_root / "2026_06_01"
+    write_results(analysis_date_dir / "results.csv", GENOTYPE_RESULT_ROWS)
+
+    genotype_map_path = tmp_path / "genotype_map.csv"
+    genotype_map_path.write_text(GENOTYPE_MAP_CSV, encoding="utf-8")
+
+    config = DeliveryConfig(
+        experiment="MeadowFescue_2026",
+        raw_experiment_root=raw_root,
+        analysis_experiment_root=analysis_root,
+        delivery_root=delivery_root,
+        metrics=("points", "point_density_m2", "stand_topo_per_m"),
+        generate_graphs=False,
+        genotype_map_path=genotype_map_path,
+    )
+    return config, raw_root, analysis_root, delivery_root, genotype_map_path
+
+
+def _combined_rows_by_scan(target: Path) -> dict[str, dict[str, str]]:
+    rows = read_rows(target / "summary" / "data" / "combined_results.csv")
+    return {row["scan_name"]: row for row in rows}
+
+
+def test_whole_plot_mapping_propagates_to_combined_results(genotype_experiment) -> None:
+    config, *_ = genotype_experiment
+    target = build_delivery(config, run_id="v3a_join", write=True).target_dir
+    rows = _combined_rows_by_scan(target)
+    assert rows["scan1"]["genotype_id"] == "MF001"
+
+
+def test_left_and_right_rows_get_the_same_genotype(genotype_experiment) -> None:
+    config, *_ = genotype_experiment
+    target = build_delivery(config, run_id="v3a_side", write=True).target_dir
+    rows = _combined_rows_by_scan(target)
+    assert rows["scan2_left"]["plot"] == "2"
+    assert rows["scan2_right"]["plot"] == "2"
+    assert rows["scan2_left"]["side"] == "left"
+    assert rows["scan2_right"]["side"] == "right"
+    assert rows["scan2_left"]["genotype_id"] == "MF017"
+    assert rows["scan2_right"]["genotype_id"] == "MF017"
+
+
+def test_multiple_plots_get_different_genotypes(genotype_experiment) -> None:
+    config, *_ = genotype_experiment
+    target = build_delivery(config, run_id="v3a_multi", write=True).target_dir
+    rows = _combined_rows_by_scan(target)
+    assert rows["scan1"]["genotype_id"] == "MF001"
+    assert rows["scan2_left"]["genotype_id"] == "MF017"
+    assert rows["scan3"]["genotype_id"] == "MF042"
+
+
+def test_missing_mapping_keeps_row_with_empty_genotype_and_is_logged(genotype_experiment) -> None:
+    config, *_ = genotype_experiment
+    target = build_delivery(config, run_id="v3a_missing", write=True).target_dir
+
+    combined = _combined_rows_by_scan(target)
+    assert "scan99" in combined  # never dropped
+    assert combined["scan99"]["genotype_id"] == ""
+
+    missing = read_rows(target / "summary" / "qc" / "missing_genotype_mapping.csv")
+    assert len(missing) == 1
+    assert missing[0]["scan_name"] == "scan99"
+    assert missing[0]["plot"] == "99"
+    assert missing[0]["experiment"] == "MeadowFescue_2026"
+    assert missing[0]["date"] == "2026_06_01"
+
+
+def test_unused_mapping_is_audited_not_an_error(genotype_experiment) -> None:
+    config, *_ = genotype_experiment
+    target = build_delivery(config, run_id="v3a_unused", write=True).target_dir
+
+    unused = read_rows(target / "summary" / "qc" / "unused_genotype_mappings.csv")
+    assert len(unused) == 1
+    assert unused[0]["plot"] == "42"
+    assert unused[0]["genotype_id"] == "MF999"
+    assert unused[0]["notes"] == "not scanned yet"
+
+
+def test_genotype_map_not_configured_produces_no_genotype_column(experiment) -> None:
+    """Backward compatibility: a config with no genotype_map_path must produce
+    byte-for-byte the same combined_results.csv shape as before V3A -- no
+    genotype_id column appears at all, not an empty one."""
+    config, *_ = experiment
+    assert config.genotype_map_path is None
+    target = build_delivery(config, run_id="no_genotype", write=True).target_dir
+    rows = read_rows(target / "summary" / "data" / "combined_results.csv")
+    assert rows
+    assert "genotype_id" not in rows[0]
+    assert not (target / "summary" / "qc" / "missing_genotype_mapping.csv").exists()
+    assert not (target / "summary" / "qc" / "unused_genotype_mappings.csv").exists()
+
+
+def test_wrong_experiment_rows_in_map_do_not_leak_in(tmp_path: Path, genotype_experiment) -> None:
+    config, *_rest, genotype_map_path = genotype_experiment
+    # Add a row for a different experiment reusing plot 1 with a different
+    # genotype; it must never be considered for MeadowFescue_2026's plot 1.
+    genotype_map_path.write_text(
+        GENOTYPE_MAP_CSV + "OtherTrial,1,OT999,\n", encoding="utf-8"
+    )
+    target = build_delivery(config, run_id="v3a_isolation", write=True).target_dir
+    rows = _combined_rows_by_scan(target)
+    assert rows["scan1"]["genotype_id"] == "MF001"
+
+
+def test_invalid_genotype_map_fails_clearly(genotype_experiment) -> None:
+    config, *_rest, genotype_map_path = genotype_experiment
+    genotype_map_path.write_text(
+        "experiment,plot,genotype_id\nMeadowFescue_2026,1,,\n", encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="genotype_id is blank"):
+        build_delivery(config, run_id="v3a_invalid", write=True)
+
+
+def test_invalid_genotype_map_fails_even_in_dry_run(genotype_experiment) -> None:
+    config, *_rest, genotype_map_path = genotype_experiment
+    genotype_map_path.write_text(
+        "experiment,plot,genotype_id\nMeadowFescue_2026,1,,\n", encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="genotype_id is blank"):
+        build_delivery(config, run_id="v3a_invalid_dry", write=False)
+
+
+def test_missing_genotype_map_path_fails_at_validate(genotype_experiment) -> None:
+    config, *_rest, genotype_map_path = genotype_experiment
+    config = replace(config, genotype_map_path=genotype_map_path.parent / "nope.csv")
+    with pytest.raises(FileNotFoundError, match="genotype_map_path"):
+        config.validate()
+
+
+def test_canonical_results_and_frozen_snapshot_unchanged_by_genotype_join(
+    genotype_experiment,
+) -> None:
+    config, _raw_root, analysis_root, _delivery_root, _map_path = genotype_experiment
+    canonical_path = analysis_root / "2026_06_01" / "results.csv"
+    before = hashlib.sha256(canonical_path.read_bytes()).hexdigest()
+
+    target = build_delivery(config, run_id="v3a_untouched", write=True).target_dir
+
+    after = hashlib.sha256(canonical_path.read_bytes()).hexdigest()
+    assert before == after  # canonical source: untouched
+
+    snapshot_path = target / "2026_06_01" / "results" / "results.csv"
+    snapshot_hash = hashlib.sha256(snapshot_path.read_bytes()).hexdigest()
+    assert snapshot_hash == before  # frozen snapshot: identical to canonical, no genotype_id added
+
+
+def test_genotype_map_recorded_in_manifest_with_correct_hash(genotype_experiment) -> None:
+    config, _raw_root, _analysis_root, _delivery_root, genotype_map_path = genotype_experiment
+    target = build_delivery(config, run_id="v3a_provenance", write=True).target_dir
+
+    manifest = json.loads((target / "manifest" / "delivery_manifest.json").read_text())
+    genotype_manifest = manifest["genotype_map"]
+    assert genotype_manifest["configured"] is True
+    assert genotype_manifest["path"] == str(genotype_map_path.resolve())
+    assert genotype_manifest["sha256"] == hashlib.sha256(genotype_map_path.read_bytes()).hexdigest()
+    assert genotype_manifest["experiment_rows"] == 4  # plots 1, 2, 3, 42 (42 is unused, still counted)
+    assert genotype_manifest["missing_mapping_rows"] == 1  # plot 99
+    assert genotype_manifest["unused_mapping_entries"] == 1  # plot 42
+
+
+def test_genotype_map_not_configured_manifest_says_so(experiment) -> None:
+    config, *_ = experiment
+    target = build_delivery(config, run_id="v3a_no_map_manifest", write=True).target_dir
+    manifest = json.loads((target / "manifest" / "delivery_manifest.json").read_text())
+    assert manifest["genotype_map"] == {"configured": False}
+
+
+def test_overwrite_protection_still_works_with_genotype_configured(genotype_experiment) -> None:
+    config, *_ = genotype_experiment
+    build_delivery(config, run_id="v3a_overwrite", write=True)
+    with pytest.raises(FileExistsError):
+        build_delivery(config, run_id="v3a_overwrite", write=True)
+
+
+def test_genotype_qc_artifacts_are_in_the_layout_contract() -> None:
+    from lidar_analysis.research_delivery_layout import (
+        MISSING_GENOTYPE_MAPPING_FILE,
+        UNUSED_GENOTYPE_MAPPINGS_FILE,
+        artifact_role,
+    )
+
+    assert artifact_role(MISSING_GENOTYPE_MAPPING_FILE) == "experiment_qc"
+    assert artifact_role(UNUSED_GENOTYPE_MAPPINGS_FILE) == "experiment_qc_audit"
+
+
+def test_genotype_map_artifacts_pass_manifest_artifact_inventory(genotype_experiment) -> None:
+    """Every file actually written, including the two new genotype QC CSVs,
+    must resolve under the folder contract or build_delivery itself would
+    raise -- this just makes that explicit and asserts the two new files
+    are actually present and hashed in the manifest's artifact inventory."""
+    config, *_ = genotype_experiment
+    target = build_delivery(config, run_id="v3a_inventory", write=True).target_dir
+    manifest = json.loads((target / "manifest" / "delivery_manifest.json").read_text())
+    artifact_paths = {entry["path"] for entry in manifest["artifacts"]}
+    assert "summary/qc/missing_genotype_mapping.csv" in artifact_paths
+    assert "summary/qc/unused_genotype_mappings.csv" in artifact_paths
