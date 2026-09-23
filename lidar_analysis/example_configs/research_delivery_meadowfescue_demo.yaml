@@ -1,0 +1,37 @@
+# Demonstration configuration for the Research Delivery V2 demo build.
+# This does not run the LiDAR pipeline; it packages existing canonical results.
+experiment: MeadowFescue_2026
+raw_experiment_root: /media/slim/raw_mirror/MeadowFescue_2026
+analysis_experiment_root: /media/slim/analysis_results/MeadowFescue_2026
+delivery_root: /home/slim/Documents/lidar_delivery_tests
+
+# Restricted to the two dates already validated end-to-end for this demo.
+dates:
+  - "2026_05_14"
+  - "2026_05_28"
+
+# Only validated columns in the current canonical results.csv are permitted.
+metrics:
+  - points
+  - point_density_m2
+  - stand_topo_per_m
+
+top_fraction: 0.15
+include_ties: true
+outlier_iqr_multiplier: 1.5
+
+generate_graphs: true
+graph_dpi: 160
+
+# A small, representative selection for demonstration: one per-date
+# distribution, one per-date ranking, and one cross-date growth plot.
+graphs:
+  - type: histogram
+    metric: point_density_m2
+    scope: date
+  - type: ranking
+    metric: point_density_m2
+    scope: date
+  - type: boxplot
+    metric: point_density_m2
+    scope: summary
