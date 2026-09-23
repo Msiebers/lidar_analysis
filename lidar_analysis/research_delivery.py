@@ -15,6 +15,7 @@ from typing import Iterable
 
 import yaml
 
+from lidar_analysis.genotype_map import GenotypeMap, load_genotype_map
 from lidar_analysis.research_delivery_layout import (
     COMBINED_RESULTS_FILE,
     CONFIG_SNAPSHOT_FILE,
@@ -27,10 +28,12 @@ from lidar_analysis.research_delivery_layout import (
     MANIFEST_FILE,
     MANIFEST_SCHEMA_VERSION,
     MARKER_FILE,
+    MISSING_GENOTYPE_MAPPING_FILE,
     MISSING_METRICS_FILE,
     README_FILE,
     SUMMARY_DIR,
     SUMMARY_SUBDIRS,
+    UNUSED_GENOTYPE_MAPPINGS_FILE,
     GraphSpec,
     artifact_role,
     date_outliers_file,
@@ -90,6 +93,7 @@ class DeliveryConfig:
     graph_dpi: int = 160
     dates: tuple[str, ...] = ()
     graphs: tuple[GraphSpec, ...] | None = None
+    genotype_map_path: Path | None = None
 
     @classmethod
     def from_mapping(cls, data: dict[str, object]) -> "DeliveryConfig":
@@ -154,6 +158,15 @@ class DeliveryConfig:
                 )
             parsed_graphs = tuple(specs)
 
+        raw_genotype_map_path = data.get("genotype_map_path")
+        if raw_genotype_map_path is not None and not str(raw_genotype_map_path).strip():
+            raw_genotype_map_path = None
+        parsed_genotype_map_path = (
+            Path(str(raw_genotype_map_path)).expanduser()
+            if raw_genotype_map_path is not None
+            else None
+        )
+
         config = cls(
             experiment=str(data["experiment"]).strip(),
             raw_experiment_root=Path(str(data["raw_experiment_root"])).expanduser(),
@@ -167,6 +180,7 @@ class DeliveryConfig:
             graph_dpi=raw_graph_dpi,
             dates=parsed_dates,
             graphs=parsed_graphs,
+            genotype_map_path=parsed_genotype_map_path,
         )
         config.validate()
         return config
@@ -238,6 +252,11 @@ class DeliveryConfig:
             raise ValueError(
                 "delivery_root must not equal, contain, or be contained by either input root"
             )
+        if self.genotype_map_path is not None and not self.genotype_map_path.resolve().is_file():
+            raise FileNotFoundError(
+                f"genotype_map_path does not exist or is not a file: "
+                f"{self.genotype_map_path.resolve()}"
+            )
 
     def as_dict(self) -> dict[str, object]:
         data: dict[str, object] = {
@@ -257,6 +276,8 @@ class DeliveryConfig:
             data["dates"] = list(self.dates)
         if self.graphs is not None:
             data["graphs"] = [spec.as_dict() for spec in self.graphs]
+        if self.genotype_map_path is not None:
+            data["genotype_map_path"] = str(self.genotype_map_path.resolve())
         return data
 
 
@@ -919,6 +940,28 @@ def _write_readme(path: Path, config: DeliveryConfig) -> None:
         "- `qc/`: `qc_flags.csv` and `outliers.csv`, present only when results QC was performed.",
         "- `metadata/`: `source_reference.md` with date status, read-only input locations, and inspection findings.",
         "",
+    ]
+    if config.genotype_map_path is not None:
+        lines += [
+            "## Genotype identity",
+            "",
+            "This build has a genotype map configured. Every plot has exactly one genotype;",
+            "left/right-side results from the same plot share that plot's genotype (side is not",
+            "part of genotype identity, only of result identity/QC).",
+            "",
+            "- `summary/data/combined_results.csv` has a `genotype_id` column.",
+            "- `summary/qc/missing_genotype_mapping.csv`: result rows whose plot has no entry in",
+            "  the genotype map. These rows are kept in `combined_results.csv` with an empty",
+            "  `genotype_id`, never dropped.",
+            "- `summary/qc/unused_genotype_mappings.csv`: plots the genotype map assigns a genotype",
+            "  to that had no observed results in the selected dates (commonly: not scanned yet).",
+            "  This is an audit note, not an error.",
+            "- The genotype map file used for this build is recorded, with its SHA-256, in",
+            "  `manifest/delivery_manifest.json` under `genotype_map`. Source LiDAR results are",
+            "  never modified by genotype mapping.",
+            "",
+        ]
+    lines += [
         "## Tracing a value back to its source",
         "",
         "Every result row keeps its `scan_name`, `scan_number`, `plot`, and `side`. In `summary/data/combined_results.csv`,",
@@ -1113,6 +1156,13 @@ def build_delivery(
     latest_usable_date = max(usable_dates) if usable_dates else None
     config_sha256 = normalized_config_sha256(config)
 
+    # Loaded and validated even in dry-run mode, same as inspect_experiment
+    # above: a broken genotype map should surface in a preview, not only
+    # once someone actually writes a build.
+    genotype_map: GenotypeMap | None = None
+    if config.genotype_map_path is not None:
+        genotype_map = load_genotype_map(config.genotype_map_path, config.experiment)
+
     if not write:
         return BuildResult(
             target_dir=target_dir,
@@ -1147,6 +1197,8 @@ def build_delivery(
         date_metric_rows: dict[str, dict[str, list[dict[str, object]]]] = {}
         combined_rows: list[dict[str, object]] = []
         missing_metrics: list[dict[str, object]] = []
+        missing_genotype_mapping: list[dict[str, object]] = []
+        observed_plots: set[str] = set()
         for inspection in inspections:
             date_rankings[inspection.date] = _write_date_output(
                 staging_dir, inspection, config
@@ -1158,15 +1210,28 @@ def build_delivery(
                     )
                     for metric in config.metrics
                 }
-                combined_rows.extend(
-                    {
+                for row in inspection.rows:
+                    combined_row: dict[str, object] = {
                         **row,
                         "_delivery_date": inspection.date,
                         "_delivery_results_path": date_results_file(inspection.date),
                         "_source_results_path": str(inspection.results_path),
                     }
-                    for row in inspection.rows
-                )
+                    if genotype_map is not None:
+                        plot_value = row.get("plot", "")
+                        observed_plots.add(str(plot_value).strip())
+                        row_genotype_id = genotype_map.genotype_for(plot_value)
+                        if row_genotype_id is None:
+                            combined_row["genotype_id"] = ""
+                            missing_genotype_mapping.append(
+                                {
+                                    field_name: row.get(field_name, "")
+                                    for field_name in RESULT_UNIQUE_FIELDS
+                                }
+                            )
+                        else:
+                            combined_row["genotype_id"] = row_genotype_id
+                    combined_rows.append(combined_row)
             for metric in config.metrics:
                 if not date_rankings[inspection.date].get(metric):
                     missing_metrics.append(
@@ -1177,6 +1242,21 @@ def build_delivery(
                             "reason": "No finite QC-eligible values or no canonical results.",
                         }
                     )
+
+        unused_genotype_mappings: list[dict[str, object]] = []
+        if genotype_map is not None:
+            for plot_value in genotype_map.unused_plots(observed_plots):
+                unused_genotype_mappings.append(
+                    {
+                        "experiment": config.experiment,
+                        "plot": plot_value,
+                        "genotype_id": genotype_map.genotype_for(plot_value) or "",
+                        "notes": genotype_map.notes_by_plot.get(plot_value, ""),
+                        "reason": "This plot has a genotype mapping but no observed "
+                                  "result rows in the selected dates; it may not be "
+                                  "scanned yet.",
+                    }
+                )
 
         _write_csv(
             staging_dir / DATE_INDEX_FILE,
@@ -1192,6 +1272,17 @@ def build_delivery(
             missing_metrics,
             fieldnames=("date", "metric", "status", "reason"),
         )
+        if genotype_map is not None:
+            _write_csv(
+                staging_dir / MISSING_GENOTYPE_MAPPING_FILE,
+                missing_genotype_mapping,
+                fieldnames=("experiment", "date", "scan_name", "scan_number", "plot", "side"),
+            )
+            _write_csv(
+                staging_dir / UNUSED_GENOTYPE_MAPPINGS_FILE,
+                unused_genotype_mappings,
+                fieldnames=("experiment", "plot", "genotype_id", "notes", "reason"),
+            )
         _write_experiment_summary(
             staging_dir / EXPERIMENT_SUMMARY_FILE,
             config,
@@ -1235,6 +1326,19 @@ def build_delivery(
             "pointclouds_copied": False,
             "graphs_generated": bool(graph_files),
             "graph_files": graph_files,
+            "genotype_map": (
+                {
+                    "configured": True,
+                    "path": str(genotype_map.path),
+                    "sha256": genotype_map.sha256,
+                    "experiment_rows": genotype_map.experiment_rows,
+                    "total_rows": genotype_map.total_rows,
+                    "missing_mapping_rows": len(missing_genotype_mapping),
+                    "unused_mapping_entries": len(unused_genotype_mappings),
+                }
+                if genotype_map is not None
+                else {"configured": False}
+            ),
             "artifacts": _artifact_inventory(staging_dir),
         }
         (staging_dir / MANIFEST_FILE).write_text(
