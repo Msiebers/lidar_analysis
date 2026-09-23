@@ -20,7 +20,7 @@ Demo folder: `/home/slim/Documents/lidar_delivery_tests/MeadowFescue_2026/meadow
 4. Open the top-level demo folder. Say: every date gets the same four subfolders — results, graphs, QC, metadata.
 5. Open `summary/EXPERIMENT_SUMMARY.md`. Say: this is where a researcher starts — date status, ranking method, and any scientific caveats.
 6. Open `2026_05_28/graphs/point_density_m2_distribution.png`. Say: here's a per-date graph.
-7. Open `2026_05_28/graphs/point_density_m2_distribution.csv` next to it. Say: every plotted point has a companion CSV with scan ID, row, plot, and outlier status.
+7. Open `2026_05_28/graphs/point_density_m2_distribution.csv` next to it. Say: every plotted point has a companion CSV with the scan name, plot, side, and outlier status.
 8. Pick one row from that CSV and find the matching row in `2026_05_28/results/results.csv`. Say: any point traces straight back to the frozen results snapshot.
 9. Open `2026_05_28/qc/outliers.csv`. Say: outliers are flagged with the same QC logic used for the graphs.
 10. Close with: future validated metrics — height, area, volume — plug into this exact same structure; the folder contract doesn't change.

@@ -66,9 +66,19 @@ Old locations that moved: `delivery_manifest.json` -> `manifest/`,
 `summary/growth/`, and `<date>/results/{graphs,qc,outliers}` -> `<date>/graphs/` and
 `<date>/qc/`.
 
+### Result row identity
+
+A result row's unique key is `experiment`, `date`, `scan_name`, `scan_number`, `plot`,
+`side` — the same identity `central_runner` uses for `results.csv` itself
+(`RESULT_UNIQUE_FIELDS` in `research_delivery.py`, kept in sync with
+`central_runner._RESULT_UNIQUE_FIELDS` by a dedicated test). `target_type` and
+`target_id` are carried through for traceability but are not part of the key.
+There is no `row` or `scan_id` column in the current schema; a field scan's `row`
+concept is expressed today through `plot` plus `side` (`left`/`right`/`both`/`none`).
+
 ### Traceability
 
-experiment -> date -> `<date>/results/results.csv` -> `scan_id` / `row` / `plot` ->
+experiment -> date -> `<date>/results/results.csv` -> `scan_name` / `scan_number` / `plot` / `side` ->
 `results_path` + `results_sha256` -> `raw_date_dir`, `source_dir`, `pointcloud_dir`.
 In `combined_results.csv`, `_delivery_results_path` is relative to the delivery folder and
 `_source_results_path` is the absolute analysis input. Generated-to-generated references
