@@ -32,15 +32,18 @@ def _date_label(date: str) -> str:
     return date.replace("_", "-")
 
 
+_UNDIFFERENTIATED_SIDES = {"", "none", "both"}
+
+
 def _row_label(row: Mapping[str, object], rank: int) -> str:
-    row_number = str(row.get("row", "")).strip()
     plot_number = str(row.get("plot", "")).strip()
-    if row_number and plot_number:
-        return f"R{row_number} P{plot_number}"
+    side = str(row.get("side", "")).strip().lower()
+    if plot_number and side not in _UNDIFFERENTIATED_SIDES:
+        return f"Plot {plot_number} ({side})"
     if plot_number:
         return f"Plot {plot_number}"
-    scan_id = str(row.get("scan_id", "")).strip()
-    return scan_id or f"Rank {rank}"
+    scan_name = str(row.get("scan_name", "")).strip()
+    return scan_name or f"Rank {rank}"
 
 
 def _save_figure(figure: Any, path: Path, *, dpi: int, description: str) -> None:
@@ -56,9 +59,10 @@ def _save_figure(figure: Any, path: Path, *, dpi: int, description: str) -> None
 
 GRAPH_DATA_FIELDS = (
     "date",
-    "scan_id",
-    "row",
+    "scan_name",
+    "scan_number",
     "plot",
+    "side",
     "metric",
     "value",
     "qc_status",
@@ -71,7 +75,7 @@ def _write_graph_data_csv(path: Path, records: Sequence[Mapping[str, object]]) -
     """Write the canonical, row-identified data behind one graph.
 
     This is the single source researchers use to trace a plotted point (or an
-    outlier) back to its scan_id/row/plot. It is not a duplicate of any other
+    outlier) back to its scan_name/scan_number/plot/side. It is not a duplicate of any other
     file: the ranking chart reuses the existing per-date ranking CSV instead
     of getting one of these.
     """

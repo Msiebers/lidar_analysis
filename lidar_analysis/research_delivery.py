@@ -48,6 +48,28 @@ CANONICAL_RANKING_METRICS = (
     "point_density_m2",
     "stand_topo_per_m",
 )
+# Newer trait columns that main's pipeline can now produce (canopy_volume_2p5d_m3,
+# canopy_volume_2p5d_observed_area_m2, mta_deg, fad_*, pai_m2_m2, z_pai_m2_m2) are
+# deliberately NOT added here. Whether any of them are scientifically validated
+# for genotype ranking is a decision for the research team, not this builder.
+
+# Result-row identity, matching central_runner._RESULT_ID_FIELDS /
+# _RESULT_UNIQUE_FIELDS exactly. Declared independently here (rather than
+# importing those private names) so a future schema change is a loud, visible
+# diff in this file plus a failing test
+# (test_result_identity_matches_central_runner), not a silent mismatch
+# discovered downstream. This targets the schema central_runner produces
+# today; it does not attempt to auto-detect or support the older
+# experiment/date/scan_id/row/plot schema from research-delivery V2.
+RESULT_IDENTITY_FIELDS = (
+    "experiment", "date", "scan_name", "scan_number", "plot", "side",
+    "target_type", "target_id",
+)
+RESULT_UNIQUE_FIELDS = ("experiment", "date", "scan_name", "scan_number", "plot", "side")
+# Fields that distinguish rows within a single date's inspection, where
+# experiment/date are already constant. Used to match outlier rows back to
+# their graph records.
+_ROW_IDENTITY_FIELDS = ("scan_name", "scan_number", "plot", "side")
 DATE_PATTERN = re.compile(r"^\d{4}_\d{2}_\d{2}$")
 SAFE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 FAILED_QC_VALUES = {"0", "false", "fail", "failed", "error", "invalid", "no"}
@@ -526,12 +548,12 @@ def inspect_experiment(config: DeliveryConfig) -> list[DateInspection]:
                     inspection.results_sha256 = sha256_file(results_path)
                     inspection.reason = "Canonical results.csv is available."
 
-        if inspection.rows and "scan_id" in inspection.fieldnames:
+        if inspection.rows and "scan_name" in inspection.fieldnames:
             inspection.processed_scan_ids = len(
                 {
-                    str(row.get("scan_id", "")).strip()
+                    str(row.get("scan_name", "")).strip()
                     for row in inspection.rows
-                    if str(row.get("scan_id", "")).strip()
+                    if str(row.get("scan_name", "")).strip()
                 }
             )
             if inspection.scan_pairs and inspection.processed_scan_ids < inspection.scan_pairs:
@@ -545,7 +567,7 @@ def inspect_experiment(config: DeliveryConfig) -> list[DateInspection]:
 
         identity_fields = [
             field_name
-            for field_name in ("experiment", "date", "row", "plot")
+            for field_name in RESULT_UNIQUE_FIELDS
             if field_name in inspection.fieldnames
         ]
         if inspection.rows and identity_fields:
@@ -705,6 +727,15 @@ def find_outliers(
     return output
 
 
+def _row_identity_key(row: dict[str, object]) -> tuple[str, ...]:
+    """Identity for matching one row to its outlier flag within a single date.
+
+    Uses RESULT_UNIQUE_FIELDS minus experiment/date, since both are already
+    fixed by the one date these rows come from.
+    """
+    return tuple(str(row.get(field_name, "")).strip() for field_name in _ROW_IDENTITY_FIELDS)
+
+
 def metric_graph_rows(
     rows: list[dict[str, str]], date: str, metric: str, outlier_multiplier: float
 ) -> list[dict[str, object]]:
@@ -716,11 +747,7 @@ def metric_graph_rows(
     data can never diverge from the scientific QC and outlier calculations.
     """
     outlier_directions = {
-        (
-            str(row.get("scan_id", "")).strip(),
-            str(row.get("row", "")).strip(),
-            str(row.get("plot", "")).strip(),
-        ): row["_outlier_direction"]
+        _row_identity_key(row): row["_outlier_direction"]
         for row in find_outliers(rows, metric, outlier_multiplier)
     }
     records: list[dict[str, object]] = []
@@ -730,17 +757,14 @@ def metric_graph_rows(
         value = as_finite_float(row.get(metric))
         if value is None:
             continue
-        identity = (
-            str(row.get("scan_id", "")).strip(),
-            str(row.get("row", "")).strip(),
-            str(row.get("plot", "")).strip(),
-        )
+        identity = _row_identity_key(row)
         records.append(
             {
                 "date": date,
-                "scan_id": row.get("scan_id", ""),
-                "row": row.get("row", ""),
+                "scan_name": row.get("scan_name", ""),
+                "scan_number": row.get("scan_number", ""),
                 "plot": row.get("plot", ""),
+                "side": row.get("side", ""),
                 "metric": metric,
                 "value": value,
                 "qc_status": row.get("qc_status", row.get("qc_pass", "")),
@@ -897,7 +921,7 @@ def _write_readme(path: Path, config: DeliveryConfig) -> None:
         "",
         "## Tracing a value back to its source",
         "",
-        "Every result row keeps its `scan_id`, `row`, and `plot`. In `summary/data/combined_results.csv`,",
+        "Every result row keeps its `scan_name`, `scan_number`, `plot`, and `side`. In `summary/data/combined_results.csv`,",
         "`_delivery_results_path` points to the date snapshot inside this folder and `_source_results_path`",
         "points to the original analysis file. `manifest/experiment_date_index.csv` links each date to its",
         "raw scans, point clouds, results file, and SHA-256 fingerprints.",

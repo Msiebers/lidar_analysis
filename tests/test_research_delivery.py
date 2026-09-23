@@ -20,9 +20,12 @@ from lidar_analysis.research_delivery_layout import GraphSpec
 RESULT_FIELDS = [
     "experiment",
     "date",
-    "scan_id",
-    "row",
+    "scan_name",
+    "scan_number",
     "plot",
+    "side",
+    "target_type",
+    "target_id",
     "points",
     "point_density_m2",
     "stand_topo_per_m",
@@ -51,10 +54,10 @@ def file_hashes(root: Path) -> dict[str, str]:
     }
 
 
-def add_source_pair(source: Path, scan_id: str) -> None:
+def add_source_pair(source: Path, scan_name: str) -> None:
     source.mkdir(parents=True, exist_ok=True)
-    (source / f"{scan_id}_lidar.csv").write_text("time,distance\n0,1\n", encoding="utf-8")
-    (source / f"{scan_id}_pico.csv").write_text("time,encoder\n0,1\n", encoding="utf-8")
+    (source / f"{scan_name}_lidar.csv").write_text("time,distance\n0,1\n", encoding="utf-8")
+    (source / f"{scan_name}_pico.csv").write_text("time,encoder\n0,1\n", encoding="utf-8")
 
 
 @pytest.fixture
@@ -75,9 +78,12 @@ def experiment(tmp_path: Path) -> tuple[DeliveryConfig, Path, Path, Path]:
         {
             "experiment": "MeadowFescue_2026",
             "date": "2026_05_14",
-            "scan_id": "scan14a",
-            "row": 1,
+            "scan_name": "scan14a",
+            "scan_number": "",
             "plot": 1,
+            "side": "none",
+            "target_type": "plot",
+            "target_id": "plot_1",
             "points": 10,
             "point_density_m2": 100,
             "stand_topo_per_m": 2,
@@ -86,9 +92,12 @@ def experiment(tmp_path: Path) -> tuple[DeliveryConfig, Path, Path, Path]:
         {
             "experiment": "MeadowFescue_2026",
             "date": "2026_05_14",
-            "scan_id": "scan14b",
-            "row": 1,
+            "scan_name": "scan14b",
+            "scan_number": "",
             "plot": 2,
+            "side": "none",
+            "target_type": "plot",
+            "target_id": "plot_2",
             "points": 20,
             "point_density_m2": 90,
             "stand_topo_per_m": 3,
@@ -106,8 +115,8 @@ def experiment(tmp_path: Path) -> tuple[DeliveryConfig, Path, Path, Path]:
     add_source_pair(may27_source, "scan27a")
 
     may28_source = raw_root / "2026_05_28" / "source"
-    for scan_id in ("scan28a", "scan28b", "scan28c", "scan28d", "scan28e"):
-        add_source_pair(may28_source, scan_id)
+    for scan_name in ("scan28a", "scan28b", "scan28c", "scan28d", "scan28e"):
+        add_source_pair(may28_source, scan_name)
     (may28_source / "experiment_config.yaml").write_text(
         "analysis:\n  voxel_size: 0.02\n", encoding="utf-8"
     )
@@ -115,9 +124,12 @@ def experiment(tmp_path: Path) -> tuple[DeliveryConfig, Path, Path, Path]:
         {
             "experiment": "MeadowFescue_2026",
             "date": "2026_05_28",
-            "scan_id": "scan28a",
-            "row": 1,
+            "scan_name": "scan28a",
+            "scan_number": "",
             "plot": 1,
+            "side": "none",
+            "target_type": "plot",
+            "target_id": "plot_1",
             "points": 100,
             "point_density_m2": 10,
             "stand_topo_per_m": 2,
@@ -126,9 +138,12 @@ def experiment(tmp_path: Path) -> tuple[DeliveryConfig, Path, Path, Path]:
         {
             "experiment": "MeadowFescue_2026",
             "date": "2026_05_28",
-            "scan_id": "scan28b",
-            "row": 1,
+            "scan_name": "scan28b",
+            "scan_number": "",
             "plot": 2,
+            "side": "none",
+            "target_type": "plot",
+            "target_id": "plot_2",
             "points": 100,
             "point_density_m2": 20,
             "stand_topo_per_m": 3,
@@ -137,9 +152,12 @@ def experiment(tmp_path: Path) -> tuple[DeliveryConfig, Path, Path, Path]:
         {
             "experiment": "MeadowFescue_2026",
             "date": "2026_05_28",
-            "scan_id": "scan28c",
-            "row": 1,
+            "scan_name": "scan28c",
+            "scan_number": "",
             "plot": 3,
+            "side": "none",
+            "target_type": "plot",
+            "target_id": "plot_3",
             "points": 80,
             "point_density_m2": 500,
             "stand_topo_per_m": 4,
@@ -148,9 +166,12 @@ def experiment(tmp_path: Path) -> tuple[DeliveryConfig, Path, Path, Path]:
         {
             "experiment": "MeadowFescue_2026",
             "date": "2026_05_28",
-            "scan_id": "scan28d",
-            "row": 1,
+            "scan_name": "scan28d",
+            "scan_number": "",
             "plot": 4,
+            "side": "none",
+            "target_type": "plot",
+            "target_id": "plot_4",
             "points": 70,
             "point_density_m2": 40,
             "stand_topo_per_m": 10,
@@ -159,9 +180,12 @@ def experiment(tmp_path: Path) -> tuple[DeliveryConfig, Path, Path, Path]:
         {
             "experiment": "MeadowFescue_2026",
             "date": "2026_05_28",
-            "scan_id": "scan28e",
-            "row": 1,
+            "scan_name": "scan28e",
+            "scan_number": "",
             "plot": 5,
+            "side": "none",
+            "target_type": "plot",
+            "target_id": "plot_5",
             "points": 1000,
             "point_density_m2": 1000,
             "stand_topo_per_m": 1000,
@@ -664,7 +688,7 @@ def test_combined_results_trace_back_to_date_snapshot_and_source(
     combined = read_rows(target / "summary" / "data" / "combined_results.csv")
     assert len(combined) == 7
 
-    snapshot_ids: dict[str, set[tuple[str, str, str]]] = {}
+    snapshot_ids: dict[str, set[tuple[str, str, str, str]]] = {}
     for row in combined:
         relative = row["_delivery_results_path"]
         assert relative == f"{row['_delivery_date']}/results/results.csv"
@@ -672,9 +696,12 @@ def test_combined_results_trace_back_to_date_snapshot_and_source(
         assert snapshot.is_file()
         if relative not in snapshot_ids:
             snapshot_ids[relative] = {
-                (r["scan_id"], r["row"], r["plot"]) for r in read_rows(snapshot)
+                (r["scan_name"], r["scan_number"], r["plot"], r["side"])
+                for r in read_rows(snapshot)
             }
-        assert (row["scan_id"], row["row"], row["plot"]) in snapshot_ids[relative]
+        assert (
+            row["scan_name"], row["scan_number"], row["plot"], row["side"]
+        ) in snapshot_ids[relative]
         assert row["_source_results_path"] == index[row["_delivery_date"]]["results_path"]
         assert Path(row["_source_results_path"]).is_file()
 
@@ -858,15 +885,16 @@ def test_histogram_graph_data_traces_back_to_results(
     records = read_rows(target / "2026_05_28" / "graphs" / "points_distribution.csv")
     # scan28e fails QC and is excluded; the other four rows are eligible.
     assert len(records) == 4
-    assert {r["scan_id"] for r in records} == {"scan28a", "scan28b", "scan28c", "scan28d"}
+    assert {r["scan_name"] for r in records} == {"scan28a", "scan28b", "scan28c", "scan28d"}
     results_rows = {
-        row["scan_id"]: row
+        row["scan_name"]: row
         for row in read_rows(target / "2026_05_28" / "results" / "results.csv")
     }
     for record in records:
-        source = results_rows[record["scan_id"]]
-        assert record["row"] == source["row"]
+        source = results_rows[record["scan_name"]]
+        assert record["scan_number"] == source["scan_number"]
         assert record["plot"] == source["plot"]
+        assert record["side"] == source["side"]
         assert float(record["value"]) == float(source["points"])
         assert record["date"] == "2026_05_28"
         assert record["metric"] == "points"
@@ -895,7 +923,7 @@ def test_graph_data_outlier_flag_matches_find_outliers(
 
     inspections = {item.date: item for item in inspect_experiment(config)}
     expected_outliers = {
-        row["scan_id"]
+        row["scan_name"]
         for row in research_delivery.find_outliers(
             inspections["2026_05_28"].rows, "point_density_m2", config.outlier_iqr_multiplier
         )
@@ -905,7 +933,7 @@ def test_graph_data_outlier_flag_matches_find_outliers(
     )
     assert records  # sanity: the fixture actually produced rows to check
     for record in records:
-        assert (record["is_outlier"] == "True") == (record["scan_id"] in expected_outliers)
+        assert (record["is_outlier"] == "True") == (record["scan_name"] in expected_outliers)
 
 
 def test_ranking_graph_has_no_redundant_data_file(
@@ -920,4 +948,16 @@ def test_ranking_graph_has_no_redundant_data_file(
     ranking_csv = read_rows(
         target / "2026_05_28" / "results" / "top_15_percent" / "points.csv"
     )
-    assert {"scan_id", "row", "plot"} <= set(ranking_csv[0])
+    assert {"scan_name", "scan_number", "plot", "side"} <= set(ranking_csv[0])
+
+
+def test_result_identity_matches_central_runner() -> None:
+    """RESULT_IDENTITY_FIELDS/RESULT_UNIQUE_FIELDS are declared independently in
+    research_delivery.py (see the comment there for why). This test is the
+    trip-wire: if central_runner's identity fields ever change, this fails
+    loudly instead of the delivery builder silently misidentifying rows.
+    """
+    import lidar_analysis.central_runner as central_runner
+
+    assert research_delivery.RESULT_IDENTITY_FIELDS == central_runner._RESULT_ID_FIELDS
+    assert research_delivery.RESULT_UNIQUE_FIELDS == central_runner._RESULT_UNIQUE_FIELDS
