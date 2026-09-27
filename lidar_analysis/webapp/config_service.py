@@ -113,6 +113,77 @@ class ValidationError:
     message: str
 
 
+class LockedFieldViolation(ValueError):
+    """Raised by from_ui_representation()/export_yaml_text()/export_yaml_file()
+    when a caller attempts to set a LOCKED field to a value other than its
+    enforced locked_value.
+
+    Pre-merge audit finding: LOCKED metadata (P1A) was advisory only at
+    this service boundary -- validate() correctly rejected an
+    out-of-range mta_fit_angle_min_deg via build_config's own
+    validate_mta_config, but export still happily wrote the bad value to
+    YAML regardless, and pai_g_function/fad_g_function were not checked
+    anywhere in this service at all (their enforcement lives in pai.py's/
+    fad.py's own runtime code, never reached by build_config). Confirmed
+    concretely before fixing: from_ui_representation({"pai_g_function":
+    "something_else"}) exported that value unchanged, and validate() on
+    the same input returned valid=True.
+
+    Fixed by making LOCKED enforcement authoritative at this boundary,
+    derived from UI_METADATA (no second hardcoded locked-field table):
+    validate() reports a conflict as a structured, field-attributed
+    ValidationError without needing build_config to be the one that
+    happens to catch it; from_ui_representation() (and therefore both
+    export functions, which call it) raises this exception outright on a
+    conflicting value, rather than silently substituting the canonical
+    value -- an explicit conflicting value most likely reflects a real
+    misunderstanding worth surfacing, not something to paper over.
+    Import (to_ui_representation) deliberately does NOT raise: it must
+    still be possible to load and inspect an existing file that happens
+    to have a bad locked value, so a researcher can see and fix it via
+    validate()'s reported error, rather than the tool refusing to open
+    the file at all.
+    """
+
+
+def _locked_field_conflicts(flat_config: dict[str, Any]) -> tuple[ValidationError, ...]:
+    """Non-raising: LOCKED fields present in flat_config with a value other
+    than their UI_METADATA.locked_value, as structured errors. A LOCKED
+    field absent from flat_config is not a conflict -- AnalysisConfig's own
+    default (already correct for all four current LOCKED fields) applies."""
+    errors = []
+    for name, meta in UI_METADATA.items():
+        if meta.tier is not Tier.LOCKED:
+            continue
+        if name in flat_config and flat_config[name] != meta.locked_value:
+            errors.append(
+                ValidationError(
+                    field=name,
+                    message=(
+                        f"{name} is locked to {meta.locked_value!r} and cannot be "
+                        f"overridden (got {flat_config[name]!r}). {meta.description}"
+                    ),
+                )
+            )
+    return tuple(errors)
+
+
+def _with_locked_fields_enforced(flat_config: dict[str, Any]) -> dict[str, Any]:
+    """Raises LockedFieldViolation on any conflict (see class docstring);
+    otherwise returns a copy with every LOCKED field explicitly present at
+    its canonical value -- inserted if it was absent, so exported YAML is
+    self-documenting about the constraint rather than silently relying on
+    AnalysisConfig's own default to happen to be correct elsewhere."""
+    conflicts = _locked_field_conflicts(flat_config)
+    if conflicts:
+        raise LockedFieldViolation("; ".join(e.message for e in conflicts))
+    out = dict(flat_config)
+    for name, meta in UI_METADATA.items():
+        if meta.tier is Tier.LOCKED:
+            out[name] = meta.locked_value
+    return out
+
+
 @dataclass(frozen=True)
 class ValidationResult:
     valid: bool
@@ -196,6 +267,17 @@ def validate(experiment_config: dict[str, Any]) -> ValidationResult:
     """
     analysis_cfg = extract_analysis_cfg(dict(experiment_config))
     analysis_cfg = _canonicalize_for_build_config(analysis_cfg)
+
+    locked_conflicts = _locked_field_conflicts(analysis_cfg)
+    if locked_conflicts:
+        # Checked before build_config is even called: a LOCKED-field
+        # conflict is rejected by this service's own contract, not left
+        # dependent on whether the downstream pipeline module happens to
+        # catch it (pai_g_function/fad_g_function currently are not
+        # checked by build_config at all -- only by pai.py/fad.py at
+        # runtime, far past where this service could report it cleanly).
+        return ValidationResult(valid=False, errors=locked_conflicts, config=None, exception=None)
+
     try:
         config = build_config(
             dict(analysis_cfg),
@@ -321,7 +403,13 @@ def from_ui_representation(flat_config: dict[str, Any]) -> dict[str, Any]:
     Phase 1 audit confirmed the pipeline's own YAML handling never
     preserves comments or formatting either, so canonicalizing here loses
     nothing the pipeline itself cares about.
+
+    Raises LockedFieldViolation if flat_config sets a LOCKED field
+    (mta_fit_angle_min/max_deg, pai_g_function, fad_g_function) to a value
+    other than its enforced constant -- see that exception's docstring for
+    why this is checked here, not left to validate()/build_config alone.
     """
+    flat_config = _with_locked_fields_enforced(flat_config)
     out = {k: v for k, v in flat_config.items() if k not in HIDDEN_SYSTEM_FIELDS}
 
     marks_cfg: dict[str, Any] = {}

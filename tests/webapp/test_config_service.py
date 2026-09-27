@@ -99,8 +99,17 @@ def test_invalid_mta_range_rejected_with_structured_error():
     result = svc.validate(config)
     assert result.valid is False
     assert len(result.errors) == 1
-    assert result.errors[0].field == "mta_fit_angle_min_deg" or "25" in result.errors[0].message
-    assert result.exception is not None
+    assert result.errors[0].field == "mta_fit_angle_min_deg"
+    assert "25" in result.errors[0].message
+    # Caught by this service's own locked-field check (see the pre-merge
+    # audit fix), before build_config is even called -- no underlying
+    # exception object exists for this case, unlike a failure that only
+    # build_config itself catches (see
+    # test_analyze_one_side_without_side_rejected below, which does
+    # preserve one). Both are legitimate: this service now has two
+    # sources of validation failure, and only one of them wraps a real
+    # exception.
+    assert result.exception is None
 
 
 def test_analyze_one_side_without_side_rejected():
@@ -351,15 +360,104 @@ def test_locked_mta_range_still_enforced_through_service():
     assert result.valid is False
 
 
-def test_locked_pai_g_function_only_spherical_accepted():
+def test_locked_pai_g_function_rejected_at_service_boundary():
+    """Pre-merge audit finding and fix: this test previously asserted the
+    OPPOSITE of what's below -- that an unsupported pai_g_function was
+    "accepted at the config-structure level" because build_config never
+    checks it (enforcement lived only in pai.py's own runtime code, far
+    downstream). That was a real gap: LOCKED metadata (P1A) was advisory
+    only, not authoritative, at this service boundary. Confirmed
+    concretely (from_ui_representation({"pai_g_function": "x"}) exported
+    the bad value unchanged) before fixing. Now rejected here directly,
+    independent of whether pai.py would also eventually catch it -- this
+    is a deliberate behavior change, not a weakened test hiding a bug."""
     config = dict(svc.default_config_dict())
     config["run_pai"] = True
     config["pai_g_function"] = "not_spherical"
     result = svc.validate(config)
-    # pai_g_function's enforcement lives in pai.py's own runtime code, not
-    # build_config -- confirms which layer actually owns this, rather than
-    # assuming build_config itself checks it.
-    assert result.valid is True  # accepted at the config-structure level
+    assert result.valid is False
+    assert result.errors[0].field == "pai_g_function"
+    assert "spherical" in result.errors[0].message
+
+    with pytest.raises(svc.LockedFieldViolation):
+        svc.from_ui_representation(config)
+
+
+def test_locked_fad_g_function_rejected_at_service_boundary():
+    config = dict(svc.default_config_dict())
+    config["run_fad"] = True
+    config["fad_g_function"] = "not_spherical"
+    result = svc.validate(config)
+    assert result.valid is False
+    assert result.errors[0].field == "fad_g_function"
+
+    with pytest.raises(svc.LockedFieldViolation):
+        svc.from_ui_representation(config)
+
+
+def test_locked_mta_max_deg_rejected_at_service_boundary():
+    config = dict(svc.default_config_dict())
+    config["mta_fit_angle_max_deg"] = 64.0
+    result = svc.validate(config)
+    assert result.valid is False
+    assert result.errors[0].field == "mta_fit_angle_max_deg"
+
+    with pytest.raises(svc.LockedFieldViolation):
+        svc.from_ui_representation(config)
+
+
+def test_export_raises_even_when_validate_was_never_called():
+    """The service-level guarantee must not depend on a caller having
+    called validate() first -- export itself must refuse."""
+    config = {"mta_fit_angle_min_deg": 10.0, "run_mta": True}
+    with pytest.raises(svc.LockedFieldViolation):
+        svc.export_yaml_text(config)
+    with pytest.raises(svc.LockedFieldViolation):
+        svc.export_yaml_file(config, Path("/tmp/should_never_be_written.yaml"))
+    import os
+    assert not os.path.exists("/tmp/should_never_be_written.yaml")
+
+
+def test_valid_locked_values_round_trip_normally():
+    config = dict(svc.default_config_dict())
+    config["run_mta"] = True
+    config["mta_fit_angle_min_deg"] = 25.0
+    config["mta_fit_angle_max_deg"] = 65.0
+    config["run_pai"] = True
+    config["pai_g_function"] = "spherical"
+    config["run_fad"] = True
+    config["fad_g_function"] = "spherical"
+    result = svc.validate(config)
+    assert result.valid, result.errors
+
+    exported = svc.from_ui_representation(config)
+    assert exported["mta_fit_angle_min_deg"] == 25.0
+    assert exported["mta_fit_angle_max_deg"] == 65.0
+    assert exported["pai_g_function"] == "spherical"
+    assert exported["fad_g_function"] == "spherical"
+
+
+def test_locked_fields_inserted_explicitly_even_when_absent_from_input():
+    """Normal default creation/export should simply emit the correct
+    locked value -- explicitly present in the output, not silently
+    relying on AnalysisConfig's own default to happen to agree."""
+    exported = svc.from_ui_representation({"run_height": True})
+    assert exported["mta_fit_angle_min_deg"] == 25.0
+    assert exported["mta_fit_angle_max_deg"] == 65.0
+    assert exported["pai_g_function"] == "spherical"
+    assert exported["fad_g_function"] == "spherical"
+
+
+def test_import_does_not_raise_on_a_file_with_a_bad_locked_value():
+    """A researcher must still be able to open and inspect an existing
+    file with a bad locked value (to see validate()'s reported error and
+    fix it) -- to_ui_representation must not refuse to load it. Only
+    export refuses to produce new YAML carrying the conflict forward."""
+    raw = {"mta_fit_angle_min_deg": 10.0, "run_mta": True}
+    flat = svc.to_ui_representation(raw)  # must not raise
+    assert flat["mta_fit_angle_min_deg"] == 10.0
+    result = svc.validate(flat)
+    assert result.valid is False  # but validate() still catches it
 
 
 # --- Pointcloud-op list, canonical names, aliases ---------------------------
