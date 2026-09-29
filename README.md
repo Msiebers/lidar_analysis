@@ -1,77 +1,181 @@
 # LiDAR Analysis Pipeline
 
-This repository contains the central analysis pipeline for the field LiDAR phenotyping cart system.
+**A configurable Python pipeline that fuses field LiDAR, encoder, IMU, marker, and calibration data into reconstructed crop point clouds and per-target phenotype tables.**
 
-The pipeline processes synchronized:
+The system supports researchers running field experiments and developers extending the reconstruction workflow. It can process one experiment/date locally or participate in higher-level staging, packaging, and publishing workflows.
 
-- SICK multi-beam LiDAR CSV data
-- Pico encoder / IMU CSV data
-- Optional marker CSV files
-- Cart calibration files
-- Experiment configuration files
+## Why It Exists
 
-The goal is to reconstruct field point clouds, split them into plots or plants, apply optional filtering / voxelization operations, and produce downstream analysis outputs.
+Raw cart data arrives as multiple synchronized streams rather than an analysis-ready point cloud. This pipeline owns the transformation from those sensor files to spatially reconstructed, target-level outputs while keeping calibration, fusion, filtering, splitting, and trait settings explicit in experiment configuration.
+
+That separation makes it possible to compare controlled configuration variants without modifying raw project data.
+
+## Key Capabilities
+
+- Pair synchronized SICK multi-beam LiDAR and Pico encoder/IMU scans
+- Select time-, IMU-interpolated-, or PPS-based fusion
+- Reconstruct world coordinates from cart motion and calibration
+- Apply configurable spatial, RSSI, local-ground, outlier, and voxel operations
+- Split scans into targets by distance or field markers
+- Handle scan-side conventions and two-sided scan names
+- Generate per-target point-cloud CSVs and experiment-level trait tables
+- Compute configurable geometry, topology, PAI, and MTA outputs
+- Run scans in parallel while preserving per-target result identities
+- Poll and stage mounted research data through separate watcher/orchestrator paths
+
+## Pipeline Architecture
+
+```mermaid
+flowchart TD
+    Inputs[LiDAR, Pico, markers, calibration, experiment config] --> Discovery[Scan discovery and pairing]
+    Discovery --> Fusion[Sensor fusion]
+    Fusion --> Reconstruction[World-coordinate reconstruction]
+    Reconstruction --> Filtering[Global filters and RSSI normalization]
+    Filtering --> Splitting[Distance or marker splitting]
+    Splitting --> Analysis[Per-target trait analysis]
+    Analysis --> Outputs[Point clouds, results table, and QC fields]
+```
+
+The active local entry point is `lidar_analysis.central_runner`. It builds an `AnalysisConfig`, pairs scan files, and calls the staged processing path into `pipeline_core.process_scan`.
+
+See [Overview](docs/OVERVIEW.md) and [Code Walkthrough](docs/CODE_WALKTHROUGH.md) for the full call path and module boundaries.
+
+## Inputs and Outputs
+
+### Inputs
+
+| Input | Purpose |
+| --- | --- |
+| `*_lidar.csv` | LiDAR timestamps, angles, distance, RSSI, and PPS values |
+| `*_pico.csv` | Encoder counts, IMU orientation, timestamps, and PPS values |
+| Marker CSVs | Optional field reference points for plot/plant splitting |
+| `cart_config.yaml` | Cart identity and calibration |
+| Experiment YAML | Fusion, filtering, splitting, trait, and output settings |
+
+### Outputs
+
+| Output | Purpose |
+| --- | --- |
+| `OUTPUT_DIR/results.csv` | Canonical per-target trait and QC rows |
+| `OUTPUT_DIR/pointclouds/*.csv` | Reconstructed point clouds with `X`, `Y`, `Z`, `RSSI`, and optional scalar fields |
+| Marker reference CSV | Optional exported field markers |
+| Topology object CSVs | Optional per-target topology outputs |
 
 ## Coordinate System
 
-The reconstructed point cloud uses the following coordinate convention:
+The repository-wide convention is:
 
-- `X` = left / right across the row
-- `Y` = vertical height
-- `Z` = travel direction along the row
+| Axis | Meaning |
+| --- | --- |
+| `X` | Left/right across the crop row |
+| `Y` | Vertical height |
+| `Z` | Travel direction along the row |
 
-Encoder counts are converted into travel distance using cart calibration.
+Point-cloud coordinates are written in meters. Some internal calculations use millimeters.
 
-See [Scan Naming](docs/SCAN_NAMING.md) for field scan naming, two-sided `&` names, and side conventions.
-See [Plot-Bounded MTA](docs/PLOT_BOUNDED_MTA.md) for the bounded path-length MTA method and QC semantics.
-See [Result CSV schema](docs/RESULT_SCHEMA.md) for canonical target identities and compact PAI/MTA output.
+## Tech Stack
 
-## Important Files
+- Python
+- NumPy, pandas, and SciPy
+- PyYAML experiment and cart configuration
+- pytest
+- CSV point-cloud and trait outputs
+- Optional matplotlib helpers and CloudCompare validation
 
-Unless otherwise noted, these source files live under `lidar_analysis/`.
+## Getting Started
+
+Install the current dependencies:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
+Run one experiment/date:
+
+```bash
+python3 -m lidar_analysis.central_runner \
+  --experiment EXPERIMENT_NAME \
+  --date DATE_NAME \
+  --input INPUT_DIR \
+  --working WORKING_DIR \
+  --output OUTPUT_DIR \
+  --config CONFIG_YAML
+```
+
+Expected input layout:
 
 ```text
-central_runner.py          Main central runner / entry point for local processing
-central_watcher.py         Watches staged data and handles processing / publishing workflow
-config.py                  AnalysisConfig dataclass and configuration options
-fusion.py                  Time-based LiDAR/Pico fusion
-fusion_imu_interp.py       IMU-interpolated LiDAR/Pico fusion
-fusion_pps.py              PPS-based LiDAR/Pico fusion
-local_run.py               Local processing helper
-mark_splitting.py          Marker-aware splitting utilities
-orchestrator.py            High-level pipeline orchestration
-pipeline_core.py           Core reconstruction, filtering, splitting, and output logic
-run_experiment_date.py     Run one experiment/date bundle
-run_manifest.py            Manifest-based run helper
-scaffold_experiments.py    Experiment scaffolding utilities
-topology/                  Optional topology / trait helper code
-yaml_loader.py             YAML config loading
+INPUT_DIR/
+├── cart_config.yaml
+├── experiment_config.yaml
+├── <scan_id>_lidar.csv
+├── <scan_id>_pico.csv
+└── markers/
+    └── <scan_id>_markers.csv
 ```
+
+The experiment config may live outside the data directory and be supplied with `--config`. This is useful for controlled experiment variants because it keeps raw project data unchanged.
+
+See [Running the Pipeline](docs/RUNNING_THE_PIPELINE.md) for path resolution, success criteria, watcher/orchestrator workflows, and troubleshooting.
+
+## Example Data Limitation
+
+The small fixture in `lidar_analysis/example_data/2026_04_28_1/` includes LiDAR, Pico, and marker CSVs, but not the required `cart_config.yaml` or an experiment config. Do not treat it as a standalone end-to-end demo until those inputs are supplied.
+
+## Testing and Validation
+
+Run the automated suite without writing bytecode or pytest cache artifacts:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider tests
+```
+
+Run the repository-required syntax check:
+
+```bash
+python3 -m py_compile lidar_analysis/*.py
+```
+
+Validation is deliberately both automated and visual:
+
+1. Use a unique output directory for each configuration variant.
+2. Compare `results.csv` fields and point counts.
+3. Inspect the corresponding point clouds in CloudCompare.
+4. Record the command, config, output path, result fields, and visual observations.
+
+See [Testing and Validation](docs/TESTING_AND_VALIDATION.md) for the controlled experiment matrix.
+
+## Important Modules
+
+| Module | Responsibility |
+| --- | --- |
+| `central_runner.py` | Local command-line entry point and experiment/date execution |
+| `pipeline_stages.py` | Staged processing boundary |
+| `pipeline_core.py` | Reconstruction, filtering, splitting, analysis, and output |
+| `fusion.py` | Time-based sensor fusion |
+| `fusion_imu_interp.py` | IMU-timestamp interpolation |
+| `fusion_pps.py` | PPS-aligned fusion |
+| `mark_splitting.py` | Marker-aware target boundaries |
+| `config.py` | Analysis configuration contract |
+| `central_watcher.py` | Mounted-data polling and rerun workflow |
+| `orchestrator.py` | Staging, execution, packaging, and optional publishing |
+| `topology/` | Optional topology and trait helpers |
 
 ## Documentation
 
-- `docs/OVERVIEW.md`: practical repository and data-flow overview
-- `docs/RUNNING_THE_PIPELINE.md`: local run instructions and known prerequisites
-- `docs/CONFIGURATION.md`: config keys, defaults, aliases, and examples
-- `docs/CODE_WALKTHROUGH.md`: source-code walkthrough and call graph
-- `docs/CLOUDCOMPARE.md`: point-cloud CSV visualization workflow
-- `docs/TROUBLESHOOTING.md`: common errors and fixes
-- `docs/cleanup/CLEANUP_AUDIT.md`: cleanup opportunities classified by risk
-- `docs/cleanup/CLEANUP_PLAN.md`: staged cleanup plan
+- [Overview](docs/OVERVIEW.md)
+- [Running the Pipeline](docs/RUNNING_THE_PIPELINE.md)
+- [Configuration](docs/CONFIGURATION.md)
+- [Testing and Validation](docs/TESTING_AND_VALIDATION.md)
+- [Code Walkthrough](docs/CODE_WALKTHROUGH.md)
+- [Scan Naming](docs/SCAN_NAMING.md)
+- [Result Schema](docs/RESULT_SCHEMA.md)
+- [Plot-Bounded MTA](docs/PLOT_BOUNDED_MTA.md)
+- [CloudCompare Workflow](docs/CLOUDCOMPARE.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
 
-## Central Watcher Polling
+## Project Status
 
-`central_watcher.py poll` syncs raw data only; it does not run analysis. Experiment and date filters are optional positional arguments:
+The central runner, watcher, sensor-fusion paths, reconstruction, filtering, target splitting, result schemas, bounded PAI/MTA analysis, and automated tests are present in the repository.
 
-```bash
-python3 lidar_analysis/central_watcher.py poll --once
-python3 lidar_analysis/central_watcher.py poll --once al_lai
-python3 lidar_analysis/central_watcher.py poll --once al_lai standcount
-```
-
-Use `-l` (or `--list`) to inspect the mounted raw-data folders without syncing or changing local state:
-
-```bash
-python3 lidar_analysis/central_watcher.py poll --once -l
-python3 lidar_analysis/central_watcher.py poll --once -l al_lai
-```
+Dependencies are intentionally unpinned because the research team has not yet approved a locked environment. A validated lockfile or environment definition remains an important reproducibility improvement.
