@@ -50,17 +50,47 @@
   <div class="actions"><button type="submit">Apply changes</button></div>
 </form>
 
-{% if document.analysis.pointcloud_ops %}
-<section class="card">
+<section class="card" id="pipeline">
   <h2>Point-cloud processing pipeline</h2>
-  <p class="hint">Shown for reference; editing the pipeline is not part of this form.</p>
-  <ol>
-    {% for op in document.analysis.pointcloud_ops %}
-    <li><code>{{ op.get("op", op.get("name", "")) }}</code>{% if op.get("enabled", True) is false %} (disabled){% endif %}</li>
-    {% endfor %}
-  </ol>
+  <p class="hint">Operations run in this order, each on the output of the one before. Each operation is applied separately with its own button.</p>
+  {% if not pipeline %}<p class="muted">No operations in this file.</p>{% endif %}
+  {% for op in pipeline %}
+  <div class="op" id="op{{ op.index }}">
+    <h3>{{ op.index + 1 }}. {{ op.label }} <code>{{ op.name }}</code>
+      {% if not op.enabled %}<span class="badge">Disabled</span>{% endif %}</h3>
+    {% if op.warning %}<div class="note" role="note">{{ op.warning }}</div>{% endif %}
+    {% if op.position_note %}<div class="note">{{ op.position_note }}</div>{% endif %}
+    {% if op.description %}<p class="hint">{{ op.description }}</p>{% endif %}
+    {% if op.recognized %}
+    <form method="post" action="/editor/ops/{{ op.index }}/update" novalidate>
+      <input type="hidden" name="revision" value="{{ revision }}">
+      {% for f in op.fields %}{{ field(f) }}{% endfor %}
+      <button type="submit">Apply to operation {{ op.index + 1 }}</button>
+    </form>
+    {% endif %}
+    {% if op.read_only %}
+    <dl>
+      {% for item in op.read_only %}
+      <dt><code>{{ item.label }}</code></dt>
+      <dd><code>{{ item.value }}</code> <span class="hint">{{ item.note }}</span></dd>
+      {% endfor %}
+    </dl>
+    {% endif %}
+    <form method="post" action="/editor/ops/{{ op.index }}/remove">
+      <input type="hidden" name="revision" value="{{ revision }}">
+      <button type="submit" class="secondary">Remove operation {{ op.index + 1 }}</button>
+    </form>
+  </div>
+  {% endfor %}
+  <form method="get" action="/editor/ops/new" class="add-op">
+    <label for="add-op">Add an operation</label>
+    <select id="add-op" name="op">
+      {% for name, label in addable_ops %}<option value="{{ name }}">{{ label }} ({{ name }})</option>{% endfor %}
+    </select>
+    <button type="submit" class="secondary">Continue</button>
+    <p class="hint">It is placed according to the standard pipeline order; existing operations are not moved.</p>
+  </form>
 </section>
-{% endif %}
 
 {% if read_only_items %}
 <section class="card">

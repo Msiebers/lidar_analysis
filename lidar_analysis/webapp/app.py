@@ -41,10 +41,10 @@ from fastapi.templating import Jinja2Templates
 from starlette.datastructures import FormData
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from lidar_analysis.webapp import editor_view, form_handling
+from lidar_analysis.webapp import editor_view, form_handling, pointcloud_ops_form
 from lidar_analysis.webapp import experiment_document as documents
 from lidar_analysis.webapp.config_service import ValidationError
-from lidar_analysis.webapp.config_ui_metadata import Tier, UI_METADATA
+from lidar_analysis.webapp.config_ui_metadata import POINTCLOUD_OP_METADATA, Tier, UI_METADATA
 from lidar_analysis.webapp.sessions import SESSION_COOKIE_NAME, EditorSession, SessionStore
 
 logger = logging.getLogger(__name__)
@@ -216,18 +216,31 @@ def create_app() -> FastAPI:
         errors: tuple[ValidationError, ...] = (),
         notice: str | None = None,
         problem: str | None = None,
+        op_index: int | None = None,
         status_code: int = 200,
     ) -> Response:
+        """Re-renders the editor. `submitted`/`errors` belong to the field
+        form, or -- when op_index is given -- to that pipeline entry's form."""
         document = session.document
         submitted = submitted or {}
         by_field = {e.field: e.message for e in errors if e.field}
+        if op_index is None:
+            field_submitted, field_errors = submitted, by_field
+            error_links = [(e.message, editor_view.error_anchor(e.field)) for e in errors]
+        else:
+            field_submitted, field_errors = {}, {}
+            error_links = [(e.message, f"op{op_index}-{e.field}" if e.field else None) for e in errors]
         return render(request, "editor.html", {
             "document": document,
             "revision": session.revision,
-            "outer_fields": editor_view.build_outer_fields(document, submitted, by_field),
-            "sections": editor_view.build_sections(document, submitted, by_field),
+            "outer_fields": editor_view.build_outer_fields(document, field_submitted, field_errors),
+            "sections": editor_view.build_sections(document, field_submitted, field_errors),
+            "pipeline": editor_view.build_pipeline(
+                document, edit_index=op_index, submitted=submitted, errors=by_field,
+            ),
+            "addable_ops": editor_view.addable_ops(),
             "read_only_items": editor_view.build_read_only_items(document),
-            "error_links": [(e.message, editor_view.error_anchor(e.field)) for e in errors],
+            "error_links": error_links,
             "notice": notice,
             "problem": problem,
         }, status_code)
@@ -290,5 +303,113 @@ def create_app() -> FastAPI:
             form_handling.reset_locked_field(session.document, name)
             session.mark_changed()
         return RedirectResponse("/editor?changed=1", status_code=303)
+
+    # --- Pointcloud-ops pipeline ---------------------------------------------
+
+    def recognized_op_name(name: str) -> str:
+        if name not in POINTCLOUD_OP_METADATA:
+            raise StarletteHTTPException(status_code=404)
+        return name
+
+    def render_new_op(
+        request: Request,
+        session: EditorSession,
+        name: str,
+        *,
+        submitted: Mapping[str, str] | None = None,
+        errors: tuple[ValidationError, ...] = (),
+        problem: str | None = None,
+        status_code: int = 200,
+    ) -> Response:
+        ops = session.document.analysis.get("pointcloud_ops")
+        ops = ops if isinstance(ops, list) else []
+        return render(request, "new_op.html", {
+            "document": session.document,
+            "revision": session.revision,
+            "op_name": name,
+            "op_meta": POINTCLOUD_OP_METADATA[name],
+            "position": pointcloud_ops_form.insert_position(ops, name) + 1,
+            "position_note": pointcloud_ops_form.position_note(name),
+            "fields": editor_view.build_new_op_fields(name, submitted, {e.field: e.message for e in errors if e.field}),
+            "problem": problem,
+        }, status_code)
+
+    @app.get("/editor/ops/new")
+    async def new_op_page(request: Request) -> Response:
+        session: EditorSession = request.state.session
+        if session.document is None:
+            return RedirectResponse("/", status_code=303)
+        name = recognized_op_name(request.query_params.get("op", ""))
+        return render_new_op(request, session, name)
+
+    @app.post("/editor/ops/add")
+    async def add_op(request: Request) -> Response:
+        form = await request.form()
+        session: EditorSession = request.state.session
+        with session.lock:
+            if session.document is None:
+                return RedirectResponse("/", status_code=303)
+            name = recognized_op_name(_form_text(form, "op"))
+            if not revision_matches(form, session):
+                return render_new_op(request, session, name, problem=stale_message, status_code=409)
+            submitted = {k: v for k, v in form.multi_items() if isinstance(v, str)}
+            op, errors = pointcloud_ops_form.build_new_op(name, submitted)
+            if op is None:
+                return render_new_op(
+                    request, session, name, submitted=submitted, errors=errors,
+                    problem="Some values need attention. The operation was not added.", status_code=422,
+                )
+            try:
+                pointcloud_ops_form.add_op(session.document, op)
+            except ValueError as exc:
+                return render_editor(request, session, problem=str(exc), status_code=422)
+            session.mark_changed()
+        return RedirectResponse("/editor?changed=1#pipeline", status_code=303)
+
+    def existing_op(session: EditorSession, index: int) -> Any:
+        try:
+            return pointcloud_ops_form.get_op(session.document, index)
+        except (IndexError, ValueError):
+            raise StarletteHTTPException(status_code=404) from None
+
+    @app.post("/editor/ops/{index}/update")
+    async def update_op(request: Request, index: int) -> Response:
+        form = await request.form()
+        session: EditorSession = request.state.session
+        with session.lock:
+            if session.document is None:
+                return RedirectResponse("/", status_code=303)
+            op = existing_op(session, index)
+            if not pointcloud_ops_form.is_recognized(op):
+                raise StarletteHTTPException(status_code=404)
+            if not revision_matches(form, session):
+                return render_editor(request, session, problem=stale_message, status_code=409)
+            submitted = {k: v for k, v in form.multi_items() if isinstance(v, str)}
+            updated, errors = pointcloud_ops_form.apply_op_form(op, submitted)
+            if updated is None:
+                return render_editor(
+                    request, session, submitted=submitted, errors=errors, op_index=index,
+                    problem=f"Operation {index + 1}: some values need attention. Nothing was applied.",
+                    status_code=422,
+                )
+            changed = sum(1 for k in updated if k not in op or updated[k] != op[k] or type(updated[k]) is not type(op[k]))
+            if changed:
+                pointcloud_ops_form.replace_op(session.document, index, updated)
+                session.mark_changed()
+        return RedirectResponse(f"/editor?changed={changed}#op{index}", status_code=303)
+
+    @app.post("/editor/ops/{index}/remove")
+    async def remove_op(request: Request, index: int) -> Response:
+        form = await request.form()
+        session: EditorSession = request.state.session
+        with session.lock:
+            if session.document is None:
+                return RedirectResponse("/", status_code=303)
+            existing_op(session, index)
+            if not revision_matches(form, session):
+                return render_editor(request, session, problem=stale_message, status_code=409)
+            pointcloud_ops_form.remove_op(session.document, index)
+            session.mark_changed()
+        return RedirectResponse("/editor?changed=1#pipeline", status_code=303)
 
     return app

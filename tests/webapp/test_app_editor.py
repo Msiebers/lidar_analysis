@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import copy
-from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
@@ -15,6 +14,8 @@ from lidar_analysis.webapp import experiment_document as doc
 from lidar_analysis.webapp import form_handling as fh
 from lidar_analysis.webapp.config_ui_metadata import Tier, UI_METADATA
 
+from .html_forms import form_posting_to
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REAL_CONFIG_PATHS = (
     REPO_ROOT / "experiment_config.yaml",
@@ -24,51 +25,8 @@ REAL_CONFIG_PATHS = (
 FIELDS_ACTION = "/editor/fields"
 
 
-class _FormReader(HTMLParser):
-    """Collects what a browser would submit for each <form>: text/hidden
-    input values and the selected option of each <select>."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.forms: list[dict] = []
-        self._form: dict | None = None
-        self._select: str | None = None
-        self._first_option: str | None = None
-        self._selected: str | None = None
-
-    def handle_starttag(self, tag, attrs):
-        a = dict(attrs)
-        if tag == "form":
-            self._form = {"action": a.get("action"), "fields": {}}
-            self.forms.append(self._form)
-        elif self._form is None:
-            return
-        elif tag == "input" and a.get("name") and a.get("type", "text") in ("text", "hidden"):
-            self._form["fields"][a["name"]] = a.get("value", "")
-        elif tag == "select":
-            self._select, self._first_option, self._selected = a.get("name"), None, None
-        elif tag == "option" and self._select is not None:
-            value = a.get("value", "")
-            if self._first_option is None:
-                self._first_option = value
-            if "selected" in a:
-                self._selected = value
-
-    def handle_endtag(self, tag):
-        if tag == "select" and self._form is not None and self._select:
-            chosen = self._selected if self._selected is not None else self._first_option
-            self._form["fields"][self._select] = chosen or ""
-            self._select = None
-        elif tag == "form":
-            self._form = None
-
-
 def _form(page: str, action: str = FIELDS_ACTION) -> dict[str, str]:
-    reader = _FormReader()
-    reader.feed(page)
-    matches = [f["fields"] for f in reader.forms if f["action"] == action]
-    assert len(matches) == 1, f"expected one form posting to {action}"
-    return dict(matches[0])
+    return form_posting_to(page, action)
 
 
 def _client(app=None) -> TestClient:

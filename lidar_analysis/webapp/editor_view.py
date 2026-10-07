@@ -15,13 +15,14 @@ an unchanged submission leaves it absent (see form_handling).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
 import yaml
 
 from lidar_analysis.webapp import form_handling as fh
-from lidar_analysis.webapp.config_ui_metadata import Tier
+from lidar_analysis.webapp import pointcloud_ops_form as ops_form
+from lidar_analysis.webapp.config_ui_metadata import POINTCLOUD_OP_METADATA, POINTCLOUD_OP_ORDER, Tier
 from lidar_analysis.webapp.experiment_document import KNOWN_OUTER_FIELDS, ExperimentConfigDocument
 
 _OUTER_EDITED = {"experiment_name", "config_note", "config_reviewed"}
@@ -213,3 +214,102 @@ def build_read_only_items(document: ExperimentConfigDocument) -> list[ReadOnlyIt
     if document.analysis.get("pcl_backend") is not None:
         items.append(ReadOnlyItem("pcl_backend", _yaml_text(document.analysis["pcl_backend"]), "Kept as is."))
     return items
+
+
+# --- Pointcloud-ops pipeline ----------------------------------------------------
+
+@dataclass(frozen=True)
+class OpView:
+    index: int
+    name: str
+    label: str
+    recognized: bool
+    enabled: bool
+    description: str = ""
+    position_note: str | None = None
+    warning: str | None = None
+    fields: tuple[FieldView, ...] = ()
+    read_only: tuple[ReadOnlyItem, ...] = ()
+
+
+def _op_field_views(index: int, op: Mapping[str, Any], submitted: Mapping[str, str], errors: Mapping[str, str]) -> tuple[FieldView, ...]:
+    views = []
+    for spec in ops_form.editable_specs(op):
+        view = _field_view(spec, ops_form.op_param_state(op, spec), submitted, errors.get(spec.name))
+        views.append(replace(view, dom_id=f"op{index}-{spec.name}"))
+    return tuple(views)
+
+
+def _op_read_only(op: Mapping[str, Any]) -> tuple[ReadOnlyItem, ...]:
+    items = []
+    if ops_form.is_recognized(op):
+        for spec in ops_form.param_specs(ops_form.op_name(op)):
+            note = ops_form.shadowing_note(op, spec.name)
+            if note is not None:
+                items.append(ReadOnlyItem(spec.name, _yaml_text(op.get(spec.name)), note))
+    for key, value in ops_form.extra_keys(op).items():
+        items.append(ReadOnlyItem(key, _yaml_text(value), "Not edited here; kept as is."))
+    return tuple(items)
+
+
+def build_pipeline(
+    document: ExperimentConfigDocument,
+    *,
+    edit_index: int | None = None,
+    submitted: Mapping[str, str] | None = None,
+    errors: Mapping[str, str] | None = None,
+) -> list[OpView]:
+    ops = document.analysis.get("pointcloud_ops")
+    if not isinstance(ops, list):
+        return []
+    views = []
+    for index, op in enumerate(ops):
+        if not isinstance(op, dict):
+            views.append(OpView(
+                index=index, name=_yaml_text(op), label="Unreadable entry", recognized=False, enabled=False,
+                warning="This entry is not a set of key: value settings; it is kept as is.",
+            ))
+            continue
+        name = ops_form.op_name(op)
+        enabled = op.get("enabled", True) is not False
+        if not ops_form.is_recognized(op):
+            views.append(OpView(
+                index=index, name=name, label=name or "(no op name)", recognized=False, enabled=enabled,
+                warning=(
+                    "This is not a recognized operation. It is kept as is; if it is enabled, "
+                    "the pipeline will stop with an 'Unsupported pointcloud op' error."
+                ),
+                read_only=_op_read_only(op),
+            ))
+            continue
+        meta = POINTCLOUD_OP_METADATA[name]
+        is_edited = index == edit_index
+        views.append(OpView(
+            index=index, name=name, label=meta.label, recognized=True, enabled=enabled,
+            description=meta.description, position_note=ops_form.position_note(name),
+            fields=_op_field_views(index, op, (submitted or {}) if is_edited else {}, (errors or {}) if is_edited else {}),
+            read_only=_op_read_only(op),
+        ))
+    return views
+
+
+def addable_ops() -> list[tuple[str, str]]:
+    return [(name, POINTCLOUD_OP_METADATA[name].label) for name in POINTCLOUD_OP_ORDER]
+
+
+def build_new_op_fields(name: str, submitted: Mapping[str, str] | None, errors: Mapping[str, str]) -> list[FieldView]:
+    """Fields for adding `name`: prefilled from metadata, every value
+    explicit. Blank is offered only for parameters that accept null."""
+    rows = []
+    for spec, prefill in ops_form.new_op_prefill(name):
+        shown = submitted.get(spec.form_key, "") if submitted is not None else prefill
+        common = dict(spec=spec, dom_id=f"new-{spec.name}", error=errors.get(spec.name), note=spec.note)
+        if spec.kind is fh.ValueKind.BOOL or spec.choices:
+            pairs = [("true", "Yes"), ("false", "No")] if spec.kind is fh.ValueKind.BOOL else [(c, c) for c in spec.choices]
+            if not spec.required:
+                pairs.insert(0, ("", "No value (null)"))
+            rows.append(FieldView(control="select", options=tuple(Option(v, l, v == shown) for v, l in pairs), **common))
+        else:
+            placeholder = "Leave blank for no value (null)" if not spec.required else ""
+            rows.append(FieldView(control="text", value=shown, placeholder=placeholder, **common))
+    return rows

@@ -273,8 +273,10 @@ def _required_message(spec: FormFieldSpec) -> str:
     return message
 
 
-def _resolve(spec: FormFieldSpec, state: FieldState, raw: str) -> tuple[bool, Any, str | None]:
-    """(changed, new_value, error) for one submitted field."""
+def resolve_submitted(spec: FormFieldSpec, state: FieldState, raw: str) -> tuple[bool, Any, str | None]:
+    """(changed, new_value, error) for one submitted field: blank on an
+    absent or null value is no change; blank on a set required value is an
+    error; otherwise the parsed value, if it differs from the current one."""
     if not raw.strip():
         if not state.present or state.value is None:
             return False, None, None
@@ -301,7 +303,7 @@ def apply_field_form(document: ExperimentConfigDocument, form: Mapping[str, str]
     for spec in analysis_field_specs():
         if spec.read_only or spec.form_key not in form:
             continue
-        changed, value, error = _resolve(spec, analysis_field_state(document.analysis, spec), form[spec.form_key])
+        changed, value, error = resolve_submitted(spec, analysis_field_state(document.analysis, spec), form[spec.form_key])
         if error is not None:
             errors.append(ValidationError(field=spec.name, message=error))
         elif changed:
@@ -310,7 +312,7 @@ def apply_field_form(document: ExperimentConfigDocument, form: Mapping[str, str]
     for spec in outer_field_specs():
         if spec.form_key not in form:
             continue
-        changed, value, error = _resolve(spec, outer_field_state(document, spec), form[spec.form_key])
+        changed, value, error = resolve_submitted(spec, outer_field_state(document, spec), form[spec.form_key])
         if error is not None:
             errors.append(ValidationError(field=spec.name, message=error))
         elif changed:
