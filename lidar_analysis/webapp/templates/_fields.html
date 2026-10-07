@@ -1,0 +1,38 @@
+{% macro field(f) -%}
+<div class="field{% if f.error %} has-error{% endif %}">
+  <label for="{{ f.dom_id }}">{{ f.spec.label }}</label>
+  {%- set described = [] %}
+  {%- if f.spec.description %}{% set _ = described.append(f.dom_id ~ '-desc') %}{% endif %}
+  {%- if f.note %}{% set _ = described.append(f.dom_id ~ '-note') %}{% endif %}
+  {%- if f.error %}{% set _ = described.append(f.dom_id ~ '-error') %}{% endif %}
+  {% if f.control == "select" %}
+  <select id="{{ f.dom_id }}" name="{{ f.spec.form_key }}"
+          {% if described %}aria-describedby="{{ described | join(' ') }}"{% endif %}
+          {% if f.error %}aria-invalid="true"{% endif %}>
+    {% for o in f.options %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}
+  </select>
+  {% else %}
+  <input type="text" id="{{ f.dom_id }}" name="{{ f.spec.form_key }}" value="{{ f.value }}"
+         {% if f.placeholder %}placeholder="{{ f.placeholder }}"{% endif %}
+         {% if f.spec.kind.value in ("int", "float") %}inputmode="decimal"{% endif %}
+         {% if described %}aria-describedby="{{ described | join(' ') }}"{% endif %}
+         {% if f.error %}aria-invalid="true"{% endif %}>
+  {% endif %}
+  {% if f.error %}<div class="field-error" id="{{ f.dom_id }}-error">{{ f.error }}</div>{% endif %}
+  {% if f.note %}<div class="note" id="{{ f.dom_id }}-note">{{ f.note }}</div>{% endif %}
+  {% if f.spec.description %}<div class="hint" id="{{ f.dom_id }}-desc">{{ f.spec.description }}</div>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro locked(f, revision) -%}
+<div class="field locked{% if f.locked_conflict %} has-error{% endif %}" id="{{ f.dom_id }}">
+  <div class="locked-label">{{ f.spec.label }} <span class="badge">Locked</span></div>
+  <div><code>{{ f.locked_display }}</code></div>
+  {% if f.error %}
+  <div class="field-error" role="alert">{{ f.error }}</div>
+  <button type="submit" class="secondary" formaction="/editor/locked/{{ f.spec.name }}/reset" formmethod="post"
+          formnovalidate>Reset {{ f.spec.label }} to {{ f.spec.metadata.locked_value }}</button>
+  {% endif %}
+  <div class="hint">{{ f.spec.description }}</div>
+</div>
+{%- endmacro %}

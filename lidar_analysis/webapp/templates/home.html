@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Experiment configuration editor</h1>
+<p class="muted">Create or open an <code>experiment_config.yaml</code>. Nothing is written to disk until you choose to save.</p>
+
+{% if current_document is not none %}
+<section class="card">
+  <h2>Open document</h2>
+  <p>{{ current_document.experiment_name or "(unnamed)" }}
+    {% if current_document.source_path %}— <span class="path">{{ current_document.source_path }}</span>{% else %}— not saved yet{% endif %}</p>
+  <p><a href="/editor">Continue editing</a></p>
+  <p class="hint">Creating or opening another document replaces this one in the editor. Unsaved changes to it are discarded.</p>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>New experiment configuration</h2>
+  <form method="post" action="/documents/new">
+    <label for="experiment_name">Experiment name</label>
+    <input type="text" id="experiment_name" name="experiment_name" value="{{ new_value or '' }}"
+           {% if new_error %}aria-invalid="true" aria-describedby="new_error"{% endif %} required>
+    {% if new_error %}<div class="field-error" id="new_error">{{ new_error }}</div>{% endif %}
+    <button type="submit">Create</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Open an existing configuration</h2>
+  <form method="post" action="/documents/open">
+    <label for="path">Path to the YAML file on this computer</label>
+    <input type="text" id="path" name="path" value="{{ open_value or '' }}" placeholder="/home/…/experiment_config.yaml"
+           {% if open_error %}aria-invalid="true" aria-describedby="open_error"{% endif %} required>
+    {% if open_error %}<div class="field-error" id="open_error">{{ open_error }}</div>{% endif %}
+    <p class="hint">Opening only reads the file. It is never changed unless you save over it explicitly.</p>
+    <button type="submit">Open</button>
+  </form>
+</section>
+{% endblock %}

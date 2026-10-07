@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% from "_fields.html" import field %}
+{% block title %}Add {{ op_meta.label }} — Experiment configuration editor{% endblock %}
+{% block content %}
+<h1>Add: {{ op_meta.label }} <code>{{ op_name }}</code></h1>
+<p class="hint">{{ op_meta.description }}</p>
+<p>It will be inserted as operation {{ position }}, following the standard pipeline order. Existing operations are not moved.</p>
+{% if position_note %}<div class="note">{{ position_note }}</div>{% endif %}
+{% if problem %}<div class="message error" role="alert">{{ problem }}</div>{% endif %}
+
+<form method="post" action="/editor/ops/add" novalidate>
+  <input type="hidden" name="revision" value="{{ revision }}">
+  <input type="hidden" name="op" value="{{ op_name }}">
+  {% for f in fields %}{{ field(f) }}{% endfor %}
+  <p class="hint">Every setting is written to the file explicitly.</p>
+  <button type="submit">Add operation</button>
+  <a href="/editor#pipeline">Cancel</a>
+</form>
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Replace existing file? — Experiment configuration editor{% endblock %}
+{% block content %}
+<h1>Replace the existing file?</h1>
+<div class="message error" role="alert">
+  <span class="path">{{ path }}</span> already exists{% if is_source %} (it is the file this document was opened from){% endif %}.
+  Nothing has been written yet.
+</div>
+<p>Replacing it writes the text shown on the <a href="/preview">preview</a> page. The previous contents, including any comments, are not kept.</p>
+<form method="post" action="/save/confirm-overwrite">
+  <input type="hidden" name="path" value="{{ path }}">
+  <input type="hidden" name="token" value="{{ token }}">
+  <button type="submit">Replace {{ path.name }}</button>
+  <a href="/editor#save">Cancel</a>
+</form>
+<p class="hint">This confirmation works once, for this file, and only while the document stays as it is now.</p>
+{% endblock %}

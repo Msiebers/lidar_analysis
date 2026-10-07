@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% from "_fields.html" import field, locked %}
+{% block title %}{{ document.experiment_name or "(unnamed)" }} — Experiment configuration editor{% endblock %}
+{% block content %}
+<h1>{{ document.experiment_name or "(unnamed)" }}</h1>
+<p class="muted">
+  {% if document.source_path %}Opened from <span class="path">{{ document.source_path }}</span>{% else %}New document, not saved yet{% endif %}
+  · Changes stay in this editor until you save.
+</p>
+<p class="actions-row"><a href="/validate">Validate</a> · <a href="/preview">Preview YAML</a></p>
+
+<section class="card" id="save">
+  <h2>Save</h2>
+  <form method="post" action="/save" novalidate>
+    <input type="hidden" name="revision" value="{{ revision }}">
+    <label for="save-path">File path on this computer</label>
+    <input type="text" id="save-path" name="path" value="{{ save_value }}" placeholder="/home/…/experiment_config.yaml"
+           {% if save_error %}aria-invalid="true" aria-describedby="save-error"{% endif %}>
+    {% if save_error %}<div class="field-error" id="save-error">{{ save_error }}</div>{% endif %}
+    <p class="hint">Saves the document as last applied (use “Apply changes” first). An existing file is only replaced after you confirm.</p>
+    <button type="submit">Save to file</button>
+  </form>
+</section>
+
+{% if notice %}<div class="message ok" role="status">{{ notice }}</div>{% endif %}
+{% if problem %}
+<div class="message error" role="alert">
+  {{ problem }}
+  {% if error_links %}
+  <ul>{% for message, anchor in error_links %}<li>{% if anchor %}<a href="#{{ anchor }}">{{ message }}</a>{% else %}{{ message }}{% endif %}</li>{% endfor %}</ul>
+  {% endif %}
+</div>
+{% endif %}
+
+<form method="post" action="/editor/fields" novalidate>
+  <input type="hidden" name="revision" value="{{ revision }}">
+  <div class="actions"><button type="submit">Apply changes</button></div>
+
+  <section class="card">
+    <h2>Document</h2>
+    {% for f in outer_fields %}{{ field(f) }}{% endfor %}
+  </section>
+
+  {% for s in sections %}
+  <section class="card">
+    <h2>{{ s.title }}</h2>
+    {% for f in s.basic %}{{ field(f) }}{% endfor %}
+    {% for f in s.locked %}{{ locked(f, revision) }}{% endfor %}
+    {% if s.advanced %}
+    <details{% if s.advanced_has_error %} open{% endif %}>
+      <summary>Advanced settings ({{ s.advanced | length }})</summary>
+      {% for f in s.advanced %}{{ field(f) }}{% endfor %}
+    </details>
+    {% endif %}
+    {% if s.expert %}
+    <details{% if s.expert_has_error %} open{% endif %}>
+      <summary>Expert settings ({{ s.expert | length }})</summary>
+      {% for f in s.expert %}{{ field(f) }}{% endfor %}
+    </details>
+    {% endif %}
+  </section>
+  {% endfor %}
+
+  <div class="actions"><button type="submit">Apply changes</button></div>
+</form>
+
+<section class="card" id="pipeline">
+  <h2>Point-cloud processing pipeline</h2>
+  <p class="hint">Operations run in this order, each on the output of the one before. Each operation is applied separately with its own button.</p>
+  {% if not pipeline %}<p class="muted">No operations in this file.</p>{% endif %}
+  {% for op in pipeline %}
+  <div class="op" id="op{{ op.index }}">
+    <h3>{{ op.index + 1 }}. {{ op.label }} <code>{{ op.name }}</code>
+      {% if not op.enabled %}<span class="badge">Disabled</span>{% endif %}</h3>
+    {% if op.warning %}<div class="note" role="note">{{ op.warning }}</div>{% endif %}
+    {% if op.position_note %}<div class="note">{{ op.position_note }}</div>{% endif %}
+    {% if op.description %}<p class="hint">{{ op.description }}</p>{% endif %}
+    {% if op.recognized %}
+    <form method="post" action="/editor/ops/{{ op.index }}/update" novalidate>
+      <input type="hidden" name="revision" value="{{ revision }}">
+      {% for f in op.fields %}{{ field(f) }}{% endfor %}
+      <button type="submit">Apply to operation {{ op.index + 1 }}</button>
+    </form>
+    {% endif %}
+    {% if op.read_only %}
+    <dl>
+      {% for item in op.read_only %}
+      <dt><code>{{ item.label }}</code></dt>
+      <dd><code>{{ item.value }}</code> <span class="hint">{{ item.note }}</span></dd>
+      {% endfor %}
+    </dl>
+    {% endif %}
+    <form method="post" action="/editor/ops/{{ op.index }}/remove">
+      <input type="hidden" name="revision" value="{{ revision }}">
+      <button type="submit" class="secondary">Remove operation {{ op.index + 1 }}</button>
+    </form>
+  </div>
+  {% endfor %}
+  <form method="get" action="/editor/ops/new" class="add-op">
+    <label for="add-op">Add an operation</label>
+    <select id="add-op" name="op">
+      {% for name, label in addable_ops %}<option value="{{ name }}">{{ label }} ({{ name }})</option>{% endfor %}
+    </select>
+    <button type="submit" class="secondary">Continue</button>
+    <p class="hint">It is placed according to the standard pipeline order; existing operations are not moved.</p>
+  </form>
+</section>
+
+{% if read_only_items %}
+<section class="card">
+  <h2>Other settings in this file</h2>
+  <p class="hint">Not edited here. Saved back exactly as they are.</p>
+  <dl>
+    {% for item in read_only_items %}
+    <dt><code>{{ item.label }}</code></dt>
+    <dd><code>{{ item.value }}</code> <span class="hint">{{ item.note }}</span></dd>
+    {% endfor %}
+  </dl>
+</section>
+{% endif %}
+{% endblock %}
