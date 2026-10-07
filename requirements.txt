@@ -15,5 +15,6 @@ python-multipart
 
 # Test runner used by tests/.
 pytest
-# Required by FastAPI/Starlette TestClient in tests/webapp/.
-httpx
+# Required by Starlette's TestClient in tests/webapp/ (Starlette 1.x uses httpx2;
+# plain httpx is deprecated there).
+httpx2

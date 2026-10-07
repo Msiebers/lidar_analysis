@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}{{ document.experiment_name or "(unnamed)" }} — Experiment configuration editor{% endblock %}
+{% block content %}
+<h1>{{ document.experiment_name or "(unnamed)" }}</h1>
+<p class="muted">
+  {% if document.source_path %}Opened from <span class="path">{{ document.source_path }}</span>{% else %}New document, not saved yet{% endif %}
+</p>
+{% endblock %}
