@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import urlsplit
 
 import yaml
@@ -41,7 +41,10 @@ from fastapi.templating import Jinja2Templates
 from starlette.datastructures import FormData
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from lidar_analysis.webapp import editor_view, form_handling
 from lidar_analysis.webapp import experiment_document as documents
+from lidar_analysis.webapp.config_service import ValidationError
+from lidar_analysis.webapp.config_ui_metadata import Tier, UI_METADATA
 from lidar_analysis.webapp.sessions import SESSION_COOKIE_NAME, EditorSession, SessionStore
 
 logger = logging.getLogger(__name__)
@@ -205,11 +208,87 @@ def create_app() -> FastAPI:
             session.replace_document(document)
         return RedirectResponse("/editor", status_code=303)
 
+    def render_editor(
+        request: Request,
+        session: EditorSession,
+        *,
+        submitted: Mapping[str, str] | None = None,
+        errors: tuple[ValidationError, ...] = (),
+        notice: str | None = None,
+        problem: str | None = None,
+        status_code: int = 200,
+    ) -> Response:
+        document = session.document
+        submitted = submitted or {}
+        by_field = {e.field: e.message for e in errors if e.field}
+        return render(request, "editor.html", {
+            "document": document,
+            "revision": session.revision,
+            "outer_fields": editor_view.build_outer_fields(document, submitted, by_field),
+            "sections": editor_view.build_sections(document, submitted, by_field),
+            "read_only_items": editor_view.build_read_only_items(document),
+            "error_links": [(e.message, editor_view.error_anchor(e.field)) for e in errors],
+            "notice": notice,
+            "problem": problem,
+        }, status_code)
+
+    def revision_matches(form: FormData, session: EditorSession) -> bool:
+        return _form_text(form, "revision") == str(session.revision)
+
+    stale_message = (
+        "This page was out of date -- the document changed after it was loaded "
+        "(perhaps in another tab). Nothing was applied; the current values are shown below."
+    )
+
     @app.get("/editor")
     async def editor(request: Request) -> Response:
         session: EditorSession = request.state.session
         if session.document is None:
             return RedirectResponse("/", status_code=303)
-        return render(request, "editor.html", {"document": session.document})
+        changed = request.query_params.get("changed", "")
+        notice = None
+        if changed.isdigit():
+            count = int(changed)
+            notice = "No changes to apply." if count == 0 else (
+                f"{count} change{'s' if count != 1 else ''} applied to the open document. "
+                "Nothing has been written to disk."
+            )
+        return render_editor(request, session, notice=notice)
+
+    @app.post("/editor/fields")
+    async def update_fields(request: Request) -> Response:
+        form = await request.form()
+        session: EditorSession = request.state.session
+        with session.lock:
+            if session.document is None:
+                return RedirectResponse("/", status_code=303)
+            if not revision_matches(form, session):
+                return render_editor(request, session, problem=stale_message, status_code=409)
+            submitted = {k: v for k, v in form.multi_items() if isinstance(v, str)}
+            result = form_handling.apply_field_form(session.document, submitted)
+            if not result.applied:
+                return render_editor(
+                    request, session, submitted=submitted, errors=result.errors,
+                    problem="Some values need attention. Nothing was applied.", status_code=422,
+                )
+            if result.changed_fields:
+                session.mark_changed()
+        return RedirectResponse(f"/editor?changed={len(result.changed_fields)}", status_code=303)
+
+    @app.post("/editor/locked/{name}/reset")
+    async def reset_locked(request: Request, name: str) -> Response:
+        meta = UI_METADATA.get(name)
+        if meta is None or meta.tier is not Tier.LOCKED:
+            raise StarletteHTTPException(status_code=404)
+        form = await request.form()
+        session: EditorSession = request.state.session
+        with session.lock:
+            if session.document is None:
+                return RedirectResponse("/", status_code=303)
+            if not revision_matches(form, session):
+                return render_editor(request, session, problem=stale_message, status_code=409)
+            form_handling.reset_locked_field(session.document, name)
+            session.mark_changed()
+        return RedirectResponse("/editor?changed=1", status_code=303)
 
     return app

@@ -336,3 +336,14 @@ def apply_field_form(document: ExperimentConfigDocument, form: Mapping[str, str]
         errors=(),
         changed_fields=tuple(analysis_changes) + tuple(outer_changes),
     )
+
+
+def reset_locked_field(document: ExperimentConfigDocument, name: str) -> None:
+    """Explicit researcher action: set a LOCKED field to its enforced value.
+    A conflicting value loaded from a file is never corrected implicitly
+    (config_service surfaces it as an error instead); this is the one way
+    the editor changes it. Raises KeyError for a field that is not LOCKED."""
+    meta = UI_METADATA.get(name)
+    if meta is None or meta.tier is not Tier.LOCKED:
+        raise KeyError(name)
+    document.analysis[name] = meta.locked_value

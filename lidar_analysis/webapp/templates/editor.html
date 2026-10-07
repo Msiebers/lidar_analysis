@@ -1,8 +1,77 @@
 {% extends "base.html" %}
+{% from "_fields.html" import field, locked %}
 {% block title %}{{ document.experiment_name or "(unnamed)" }} — Experiment configuration editor{% endblock %}
 {% block content %}
 <h1>{{ document.experiment_name or "(unnamed)" }}</h1>
 <p class="muted">
   {% if document.source_path %}Opened from <span class="path">{{ document.source_path }}</span>{% else %}New document, not saved yet{% endif %}
+  · Changes stay in this editor until you save.
 </p>
+
+{% if notice %}<div class="message ok" role="status">{{ notice }}</div>{% endif %}
+{% if problem %}
+<div class="message error" role="alert">
+  {{ problem }}
+  {% if error_links %}
+  <ul>{% for message, anchor in error_links %}<li>{% if anchor %}<a href="#{{ anchor }}">{{ message }}</a>{% else %}{{ message }}{% endif %}</li>{% endfor %}</ul>
+  {% endif %}
+</div>
+{% endif %}
+
+<form method="post" action="/editor/fields" novalidate>
+  <input type="hidden" name="revision" value="{{ revision }}">
+  <div class="actions"><button type="submit">Apply changes</button></div>
+
+  <section class="card">
+    <h2>Document</h2>
+    {% for f in outer_fields %}{{ field(f) }}{% endfor %}
+  </section>
+
+  {% for s in sections %}
+  <section class="card">
+    <h2>{{ s.title }}</h2>
+    {% for f in s.basic %}{{ field(f) }}{% endfor %}
+    {% for f in s.locked %}{{ locked(f, revision) }}{% endfor %}
+    {% if s.advanced %}
+    <details{% if s.advanced_has_error %} open{% endif %}>
+      <summary>Advanced settings ({{ s.advanced | length }})</summary>
+      {% for f in s.advanced %}{{ field(f) }}{% endfor %}
+    </details>
+    {% endif %}
+    {% if s.expert %}
+    <details{% if s.expert_has_error %} open{% endif %}>
+      <summary>Expert settings ({{ s.expert | length }})</summary>
+      {% for f in s.expert %}{{ field(f) }}{% endfor %}
+    </details>
+    {% endif %}
+  </section>
+  {% endfor %}
+
+  <div class="actions"><button type="submit">Apply changes</button></div>
+</form>
+
+{% if document.analysis.pointcloud_ops %}
+<section class="card">
+  <h2>Point-cloud processing pipeline</h2>
+  <p class="hint">Shown for reference; editing the pipeline is not part of this form.</p>
+  <ol>
+    {% for op in document.analysis.pointcloud_ops %}
+    <li><code>{{ op.get("op", op.get("name", "")) }}</code>{% if op.get("enabled", True) is false %} (disabled){% endif %}</li>
+    {% endfor %}
+  </ol>
+</section>
+{% endif %}
+
+{% if read_only_items %}
+<section class="card">
+  <h2>Other settings in this file</h2>
+  <p class="hint">Not edited here. Saved back exactly as they are.</p>
+  <dl>
+    {% for item in read_only_items %}
+    <dt><code>{{ item.label }}</code></dt>
+    <dd><code>{{ item.value }}</code> <span class="hint">{{ item.note }}</span></dd>
+    {% endfor %}
+  </dl>
+</section>
+{% endif %}
 {% endblock %}
