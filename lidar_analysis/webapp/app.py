@@ -255,7 +255,7 @@ def create_app() -> FastAPI:
         return _form_text(form, "revision") == str(session.revision)
 
     stale_message = (
-        "This page was out of date -- the document changed after it was loaded "
+        "This page was out of date — the document changed after it was loaded "
         "(perhaps in another tab). Nothing was applied; the current values are shown below."
     )
 
@@ -272,7 +272,7 @@ def create_app() -> FastAPI:
             if problems:
                 notice += (
                     f" {problems} validation problem{'s remain' if problems != 1 else ' remains'}"
-                    " -- see Validate."
+                    " — see Validate."
                 )
         elif changed.isdigit():
             count = int(changed)
@@ -442,7 +442,7 @@ def create_app() -> FastAPI:
                 return render_editor(
                     request, session, status_code=409,
                     problem=(
-                        "That overwrite confirmation is no longer valid -- it was already used, "
+                        "That overwrite confirmation is no longer valid — it was already used, "
                         "is for a different file, or the document changed since. Nothing was "
                         "written. Save again to confirm afresh."
                     ),
