@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% from "_validation.html" import summary %}
+{% block title %}Validate — Experiment configuration editor{% endblock %}
+{% block content %}
+<h1>Validate: {{ document.experiment_name or "(unnamed)" }}</h1>
+<p class="muted">Checks the open document with the same build_config() the pipeline uses. Nothing is written.</p>
+{{ summary(validation) }}
+<p><a href="/editor">Back to the editor</a> · <a href="/preview">Preview YAML</a></p>
+{% endblock %}

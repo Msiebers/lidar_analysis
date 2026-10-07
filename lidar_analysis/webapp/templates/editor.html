@@ -7,6 +7,7 @@
   {% if document.source_path %}Opened from <span class="path">{{ document.source_path }}</span>{% else %}New document, not saved yet{% endif %}
   · Changes stay in this editor until you save.
 </p>
+<p class="actions-row"><a href="/validate">Validate</a> · <a href="/preview">Preview YAML</a></p>
 
 {% if notice %}<div class="message ok" role="status">{{ notice }}</div>{% endif %}
 {% if problem %}

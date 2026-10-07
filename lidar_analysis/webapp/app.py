@@ -43,7 +43,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from lidar_analysis.webapp import editor_view, form_handling, pointcloud_ops_form
 from lidar_analysis.webapp import experiment_document as documents
-from lidar_analysis.webapp.config_service import ValidationError
+from lidar_analysis.webapp.config_service import LockedFieldViolation, ValidationError
 from lidar_analysis.webapp.config_ui_metadata import POINTCLOUD_OP_METADATA, Tier, UI_METADATA
 from lidar_analysis.webapp.sessions import SESSION_COOKIE_NAME, EditorSession, SessionStore
 
@@ -303,6 +303,45 @@ def create_app() -> FastAPI:
             form_handling.reset_locked_field(session.document, name)
             session.mark_changed()
         return RedirectResponse("/editor?changed=1", status_code=303)
+
+    # --- Validate and preview (read-only: nothing here writes anything) ------
+
+    @app.get("/validate")
+    async def validate(request: Request) -> Response:
+        session: EditorSession = request.state.session
+        with session.lock:
+            if session.document is None:
+                return RedirectResponse("/", status_code=303)
+            return render(request, "validate.html", {
+                "document": session.document,
+                "validation": editor_view.build_validation(session.document),
+            })
+
+    @app.get("/preview")
+    async def preview(request: Request) -> Response:
+        session: EditorSession = request.state.session
+        with session.lock:
+            if session.document is None:
+                return RedirectResponse("/", status_code=303)
+            document = session.document
+            validation = editor_view.build_validation(document)
+            try:
+                yaml_text = documents.render_document_yaml(document)
+            except LockedFieldViolation:
+                conflicts = [
+                    (spec.label, f"/editor#{editor_view.error_anchor(spec.name)}")
+                    for spec in form_handling.analysis_field_specs()
+                    if spec.read_only and spec.name in document.analysis
+                    and document.analysis[spec.name] != spec.metadata.locked_value
+                ]
+                return render(request, "preview.html", {
+                    "document": document, "validation": validation, "yaml_text": None,
+                    "locked_conflicts": conflicts,
+                }, status_code=409)
+            return render(request, "preview.html", {
+                "document": document, "validation": validation, "yaml_text": yaml_text,
+                "locked_conflicts": [],
+            })
 
     # --- Pointcloud-ops pipeline ---------------------------------------------
 

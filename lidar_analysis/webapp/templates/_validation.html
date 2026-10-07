@@ -1,0 +1,11 @@
+{% macro summary(v) -%}
+{% if v.valid %}
+<div class="message ok" role="status">Valid: the pipeline's own build_config() accepted this configuration.</div>
+{% else %}
+<div class="message error" role="alert">
+  {{ v.problems | length }} problem{{ "s" if v.problems | length != 1 }} to fix:
+  <ul>{% for message, link in v.problems %}<li>{% if link %}<a href="{{ link }}">{{ message }}</a>{% else %}{{ message }}{% endif %}</li>{% endfor %}</ul>
+  {% if v.pending_build_config %}<p>The pipeline's own build_config() check runs once these are fixed.</p>{% endif %}
+</div>
+{% endif %}
+{%- endmacro %}

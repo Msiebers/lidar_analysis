@@ -349,3 +349,23 @@ def reset_locked_field(document: ExperimentConfigDocument, name: str) -> None:
     if meta is None or meta.tier is not Tier.LOCKED:
         raise KeyError(name)
     document.analysis[name] = meta.locked_value
+
+
+def required_value_problems(document: ExperimentConfigDocument) -> tuple[ValidationError, ...]:
+    """Required fields set to null in the document itself (e.g. a file
+    with `start_u: null`). The form never produces these, but an opened
+    file can contain them, and build_config() would then either fail with
+    an unattributable "float() ... 'NoneType'" or, for fields it does not
+    cast, pass None through. Reported by name with the same rule the form
+    applies to a cleared field."""
+    problems = []
+    for spec in analysis_field_specs():
+        if spec.read_only or not spec.required:
+            continue
+        state = analysis_field_state(document.analysis, spec)
+        if state.present and state.value is None:
+            problems.append(ValidationError(
+                field=spec.name,
+                message=f"{spec.label} is empty (null) in this file, but it requires a value. Enter one in the editor.",
+            ))
+    return tuple(problems)

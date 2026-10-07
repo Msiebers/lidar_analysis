@@ -23,7 +23,7 @@ import yaml
 from lidar_analysis.webapp import form_handling as fh
 from lidar_analysis.webapp import pointcloud_ops_form as ops_form
 from lidar_analysis.webapp.config_ui_metadata import POINTCLOUD_OP_METADATA, POINTCLOUD_OP_ORDER, Tier
-from lidar_analysis.webapp.experiment_document import KNOWN_OUTER_FIELDS, ExperimentConfigDocument
+from lidar_analysis.webapp.experiment_document import KNOWN_OUTER_FIELDS, ExperimentConfigDocument, validate_document
 
 _OUTER_EDITED = {"experiment_name", "config_note", "config_reviewed"}
 
@@ -313,3 +313,36 @@ def build_new_op_fields(name: str, submitted: Mapping[str, str] | None, errors: 
             placeholder = "Leave blank for no value (null)" if not spec.required else ""
             rows.append(FieldView(control="text", value=shown, placeholder=placeholder, **common))
     return rows
+
+
+# --- Validation ------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ValidationView:
+    valid: bool
+    problems: tuple[tuple[str, str | None], ...]  # (message, editor link or None)
+    pending_build_config: bool  # True when build_config() was not consulted yet
+
+
+def _editor_link(field_name: str | None) -> str | None:
+    anchor = error_anchor(field_name)
+    return f"/editor#{anchor}" if anchor else None
+
+
+def build_validation(document: ExperimentConfigDocument) -> ValidationView:
+    """validate_document() (document checks + build_config()), preceded by
+    the form layer's required-value check. When that check finds problems,
+    build_config()'s own result is not shown: it would only repeat them as
+    an unattributable type error."""
+    result = validate_document(document)
+    pre = fh.required_value_problems(document)
+    errors = list(result.document_errors)
+    if pre:
+        errors = list(pre) + errors
+    else:
+        errors += list(result.analysis_result.errors)
+    return ValidationView(
+        valid=not errors,
+        problems=tuple((e.message, _editor_link(e.field)) for e in errors),
+        pending_build_config=bool(pre),
+    )

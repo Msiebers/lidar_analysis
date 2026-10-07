@@ -25,7 +25,7 @@
 {%- endmacro %}
 
 {% macro locked(f, revision) -%}
-<div class="field locked{% if f.locked_conflict %} has-error{% endif %}">
+<div class="field locked{% if f.locked_conflict %} has-error{% endif %}" id="{{ f.dom_id }}">
   <div class="locked-label">{{ f.spec.label }} <span class="badge">Locked</span></div>
   <div><code>{{ f.locked_display }}</code></div>
   {% if f.error %}

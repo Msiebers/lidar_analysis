@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% from "_validation.html" import summary %}
+{% block title %}Preview — Experiment configuration editor{% endblock %}
+{% block content %}
+<h1>Preview: {{ document.experiment_name or "(unnamed)" }}</h1>
+<p class="muted">This is exactly the text that saving would write. Nothing has been written.</p>
+{{ summary(validation) }}
+{% if yaml_text is none %}
+<div class="message error" role="alert">
+  This document cannot be previewed or saved while a locked setting has a different value:
+  <ul>{% for label, link in locked_conflicts %}<li><a href="{{ link }}">{{ label }}</a></li>{% endfor %}</ul>
+  Reset it in the editor first.
+</div>
+{% else %}
+<pre id="yaml">{{ yaml_text }}</pre>
+{% endif %}
+<p><a href="/editor">Back to the editor</a> · <a href="/validate">Validate</a></p>
+{% endblock %}
