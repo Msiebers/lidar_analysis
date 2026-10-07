@@ -7,5 +7,13 @@ PyYAML
 scipy
 matplotlib
 
+# Local browser-based configuration editor (lidar_analysis/webapp/, Web-P1D).
+fastapi
+uvicorn
+jinja2
+python-multipart
+
 # Test runner used by tests/.
 pytest
+# Required by FastAPI/Starlette TestClient in tests/webapp/.
+httpx
