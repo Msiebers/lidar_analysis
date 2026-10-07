@@ -217,6 +217,8 @@ def create_app() -> FastAPI:
         notice: str | None = None,
         problem: str | None = None,
         op_index: int | None = None,
+        save_value: str | None = None,
+        save_error: str | None = None,
         status_code: int = 200,
     ) -> Response:
         """Re-renders the editor. `submitted`/`errors` belong to the field
@@ -243,6 +245,10 @@ def create_app() -> FastAPI:
             "error_links": error_links,
             "notice": notice,
             "problem": problem,
+            "save_value": save_value if save_value is not None else (
+                str(document.source_path) if document.source_path else ""
+            ),
+            "save_error": save_error,
         }, status_code)
 
     def revision_matches(form: FormData, session: EditorSession) -> bool:
@@ -260,7 +266,15 @@ def create_app() -> FastAPI:
             return RedirectResponse("/", status_code=303)
         changed = request.query_params.get("changed", "")
         notice = None
-        if changed.isdigit():
+        if request.query_params.get("saved") == "1" and session.document.source_path:
+            notice = f"Saved to {session.document.source_path}."
+            problems = len(editor_view.build_validation(session.document).problems)
+            if problems:
+                notice += (
+                    f" {problems} validation problem{'s remain' if problems != 1 else ' remains'}"
+                    " -- see Validate."
+                )
+        elif changed.isdigit():
             count = int(changed)
             notice = "No changes to apply." if count == 0 else (
                 f"{count} change{'s' if count != 1 else ''} applied to the open document. "
@@ -342,6 +356,101 @@ def create_app() -> FastAPI:
                 "document": document, "validation": validation, "yaml_text": yaml_text,
                 "locked_conflicts": [],
             })
+
+    # --- Save (the only routes that write a file) ----------------------------
+
+    def save_target_problem(path: Path) -> str | None:
+        if path.is_dir():
+            return f"{path} is a folder. Enter a file path, such as {path / 'experiment_config.yaml'}."
+        if not path.parent.exists():
+            return f"The folder {path.parent} does not exist. Create it first, or choose another location."
+        if not path.parent.is_dir():
+            return f"{path.parent} is not a folder."
+        return None
+
+    def save_refused(request: Request, session: EditorSession, raw: str, message: str, status_code: int = 422) -> Response:
+        return render_editor(
+            request, session, problem=f"Not saved. {message}", save_value=raw, save_error=message,
+            status_code=status_code,
+        )
+
+    def locked_conflict_message() -> str:
+        return (
+            "A locked setting in this document has a different value, so it cannot be "
+            "saved. Reset it in the editor first (see Validate)."
+        )
+
+    def confirm_overwrite(request: Request, session: EditorSession, path: Path) -> Response:
+        token = session.issue_overwrite_token(path)
+        return render(request, "confirm_overwrite.html", {
+            "document": session.document,
+            "path": path,
+            "token": token,
+            "is_source": session.document.source_path is not None
+            and Path(session.document.source_path).resolve() == path,
+        })
+
+    def write(request: Request, session: EditorSession, path: Path, raw: str, *, overwrite: bool) -> Response:
+        try:
+            documents.save_document(session.document, path, overwrite=overwrite)
+        except FileExistsError:
+            # Created by something else after the existence check above.
+            return confirm_overwrite(request, session, path)
+        except LockedFieldViolation:
+            return save_refused(request, session, raw, locked_conflict_message(), 409)
+        except PermissionError:
+            return save_refused(request, session, raw, f"Permission denied when writing {path}. Nothing was written.")
+        except OSError as exc:
+            reason = exc.strerror or "the operating system refused the write"
+            return save_refused(request, session, raw, f"{path} could not be written ({reason}). Nothing was written.")
+        return RedirectResponse("/editor?saved=1", status_code=303)
+
+    @app.post("/save")
+    async def save(request: Request) -> Response:
+        form = await request.form()
+        session: EditorSession = request.state.session
+        with session.lock:
+            if session.document is None:
+                return RedirectResponse("/", status_code=303)
+            if not revision_matches(form, session):
+                return render_editor(request, session, problem=stale_message, status_code=409)
+            raw = _form_text(form, "path").strip()
+            if not raw:
+                return save_refused(request, session, raw, "Enter the path of the file to save to.")
+            path = Path(raw).expanduser().resolve()
+            problem = save_target_problem(path)
+            if problem:
+                return save_refused(request, session, raw, problem)
+            try:
+                documents.render_document_yaml(session.document)
+            except LockedFieldViolation:
+                return save_refused(request, session, raw, locked_conflict_message(), 409)
+            if path.exists():
+                return confirm_overwrite(request, session, path)
+            return write(request, session, path, raw, overwrite=False)
+
+    @app.post("/save/confirm-overwrite")
+    async def save_confirm_overwrite(request: Request) -> Response:
+        form = await request.form()
+        session: EditorSession = request.state.session
+        with session.lock:
+            if session.document is None:
+                return RedirectResponse("/", status_code=303)
+            raw = _form_text(form, "path").strip()
+            path = Path(raw).expanduser().resolve() if raw else None
+            if path is None or not session.consume_overwrite_token(_form_text(form, "token"), path):
+                return render_editor(
+                    request, session, status_code=409,
+                    problem=(
+                        "That overwrite confirmation is no longer valid -- it was already used, "
+                        "is for a different file, or the document changed since. Nothing was "
+                        "written. Save again to confirm afresh."
+                    ),
+                )
+            problem = save_target_problem(path)
+            if problem:
+                return save_refused(request, session, raw, problem)
+            return write(request, session, path, raw, overwrite=True)
 
     # --- Pointcloud-ops pipeline ---------------------------------------------
 

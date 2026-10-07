@@ -9,6 +9,19 @@
 </p>
 <p class="actions-row"><a href="/validate">Validate</a> · <a href="/preview">Preview YAML</a></p>
 
+<section class="card" id="save">
+  <h2>Save</h2>
+  <form method="post" action="/save" novalidate>
+    <input type="hidden" name="revision" value="{{ revision }}">
+    <label for="save-path">File path on this computer</label>
+    <input type="text" id="save-path" name="path" value="{{ save_value }}" placeholder="/home/…/experiment_config.yaml"
+           {% if save_error %}aria-invalid="true" aria-describedby="save-error"{% endif %}>
+    {% if save_error %}<div class="field-error" id="save-error">{{ save_error }}</div>{% endif %}
+    <p class="hint">Saves the document as last applied (use “Apply changes” first). An existing file is only replaced after you confirm.</p>
+    <button type="submit">Save to file</button>
+  </form>
+</section>
+
 {% if notice %}<div class="message ok" role="status">{{ notice }}</div>{% endif %}
 {% if problem %}
 <div class="message error" role="alert">
