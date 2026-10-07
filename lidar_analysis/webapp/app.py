@@ -63,7 +63,11 @@ _SECURITY_HEADERS = {
         "form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
     ),
     "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer",
+    # Not "no-referrer": under that policy browsers send `Origin: null` on the
+    # editor's own form POSTs, which the Origin check below must reject.
+    # "same-origin" keeps the real Origin for our own forms (and still sends
+    # none to other sites).
+    "Referrer-Policy": "same-origin",
 }
 
 _HTTP_ERROR_MESSAGES = {

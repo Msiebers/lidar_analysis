@@ -65,3 +65,20 @@ def test_post_with_foreign_origin_is_rejected_without_side_effects(client, origi
 def test_get_with_foreign_origin_is_not_blocked(client):
     """Reads are side-effect free; only state-changing methods are checked."""
     assert client.get("/", headers={"origin": "http://evil.example"}).status_code == 200
+
+
+def test_referrer_policy_keeps_the_real_origin_on_our_own_forms(client):
+    """Regression (found in a real browser): with Referrer-Policy:
+    no-referrer, Firefox and Chrome send `Origin: null` on same-site form
+    POSTs, so every form submission was refused as cross-site. The test
+    client does not emulate that, hence this explicit check."""
+    policy = client.get("/").headers["referrer-policy"]
+    assert policy == "same-origin"
+
+
+def test_null_origin_is_still_refused(client):
+    response = client.post(
+        "/documents/new", data={"experiment_name": "A"},
+        headers={"origin": "null"}, follow_redirects=False,
+    )
+    assert response.status_code == 403
