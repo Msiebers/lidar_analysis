@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>LiDAR | Within-day analysis</title>
+<style>
+:root{--bg:#f5f7f8;--surface:#fff;--ink:#202e37;--muted:#60727c;--blue:#14617a;--sky:#dff1f5;--border:#dce4e8;--warning:#9a5714;--alert-bg:#fff2dd;--good:#2b6c51;--ring:#c8dde5;--mono:ui-monospace,SFMono-Regular,Consolas,monospace}
+*{box-sizing:border-box}body{background:var(--bg);color:var(--ink);font:15px/1.48 system-ui,-apple-system,"Segoe UI",sans-serif;margin:0}
+header{background:#113847;color:#f3fcff;padding:22px clamp(18px,4vw,58px) 20px}header .eyebrow{color:#b6e4f1;font-size:12px;letter-spacing:.15em;text-transform:uppercase;font-weight:750}h1{font-size:clamp(24px,3vw,36px);margin:2px 0 5px;line-height:1.18}header p{color:#cfdee4;margin:0;font-size:14px}
+.top{background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:5;box-shadow:0 2px 10px #233c4410}.top-inner{max-width:1450px;margin:auto;display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:10px 24px}.top-inner .control{min-width:210px}.top .tabs{margin-left:auto;display:flex;gap:5px;flex-wrap:wrap}.tab{border:0;background:transparent;color:var(--muted);padding:11px 16px;font:inherit;font-weight:700;border-radius:7px;cursor:pointer}.tab[aria-selected=true]{background:var(--sky);color:var(--blue)}
+main{max-width:1450px;margin:0 auto;padding:26px 24px 70px}.panel[hidden]{display:none!important}h2{font-size:24px;line-height:1.2;margin:0 0 7px}h3{font-size:17px;margin:0 0 12px}.lede{margin:0 0 20px;color:var(--muted)}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:13px;margin:20px 0}.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;box-shadow:0 3px 12px #26384405}.kpi .label{font-size:12px;color:var(--muted);text-transform:uppercase;font-weight:750;letter-spacing:.045em}.kpi strong{display:block;font-size:29px;line-height:1.2;margin-top:7px;font-variant-numeric:tabular-nums}.kpi small{display:block;color:var(--muted);margin-top:5px}
+.grid-2{display:grid;grid-template-columns:minmax(280px,1fr) minmax(320px,1.25fr);gap:17px}.settings{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:13px;align-items:end}.control label{display:block;color:#3d5361;font-size:12px;font-weight:800;letter-spacing:.025em;margin:0 0 5px}.control select,.control input,.control textarea{width:100%;border:1px solid #bacbd3;border-radius:7px;min-height:38px;padding:8px 10px;background:white;color:var(--ink);font:inherit}.control textarea{min-height:78px;resize:vertical}.control select:focus,.control input:focus,.control textarea:focus{outline:2px solid var(--ring);outline-offset:1px}.subtle{color:var(--muted);font-size:13px}.small{font-size:13px}.mono{font-family:var(--mono);font-size:12px}.section{margin:0 0 18px}.section-title{display:flex;align-items:center;gap:16px;justify-content:space-between;flex-wrap:wrap;margin-bottom:12px}.section-title h3{margin:0}
+.badge{display:inline-block;font-size:12px;font-weight:750;padding:4px 8px;border-radius:99px;background:var(--sky);color:var(--blue)}.alert{background:var(--alert-bg);border:1px solid #ecd1a2;color:#74410c;border-radius:8px;padding:12px 14px;margin:12px 0}.notice{padding:12px 14px;border-radius:8px;background:#eaf5ee;border:1px solid #c7dfd0;color:var(--good);margin:12px 0}.mutedbox{padding:20px;background:#f7fafb;border:1px dashed #bcced6;border-radius:8px;color:var(--muted)}
+.btn{border:1px solid #b0c9d3;background:#f2fafc;color:#145973;border-radius:7px;padding:8px 12px;font-weight:750;font:inherit;cursor:pointer}.btn:hover{background:#dff0f7}.btn.primary{background:var(--blue);border-color:var(--blue);color:white}.btn:disabled{opacity:.45;cursor:not-allowed}.btnrow{display:flex;gap:8px;flex-wrap:wrap}.plotwrap{overflow:hidden;min-height:250px}.plotwrap svg{display:block;width:100%;height:auto;max-height:525px}.plot-label{font-weight:700;fill:var(--ink);font-size:13px}.plot-small{fill:var(--muted);font-size:11px}.plot-grid{stroke:#e6edef;stroke-width:1}.plot-axis{stroke:#859ba6;stroke-width:1}.dot{cursor:pointer}.dot:hover{stroke:#052e41;stroke-width:2.5}
+table{border-collapse:collapse;width:100%;font-size:13px}th{background:#eef4f6;color:#415761;text-align:left;white-space:nowrap}th,td{padding:8px 10px;border-bottom:1px solid #e3e9ec}tbody tr:hover{background:#f7fbfc}.scrolltable{overflow:auto;max-height:320px} .foot{color:var(--muted);margin-top:9px;font-size:12px}.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin:8px 0 0}.legend span:before{content:"";display:inline-block;background:#398da2;width:9px;height:9px;border-radius:50%;margin-right:5px}.legend .fit:before{height:3px;border-radius:0;background:#c07b37;vertical-align:middle}
+.controls-inline{display:flex;gap:14px;align-items:center;flex-wrap:wrap}.check{display:inline-flex;gap:6px;align-items:center;white-space:nowrap}.check input{accent-color:var(--blue)}code{background:#edf2f4;padding:1px 4px;border-radius:4px}footer{text-align:center;color:var(--muted);font-size:12px;padding:20px}
+/* Within-day interactive tables and collapsible diagnostics */
+.missing-intro{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:12px 0}.missing-intro>div{background:#f0f6f8;padding:9px;border-radius:6px;font-size:13px}
+@media(max-width:600px){.missing-intro{grid-template-columns:1fr}}
+.qc-triple{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(300px,0.93fr);gap:14px;align-items:stretch}
+.qc-triple .card{margin:0;min-width:0}.qc-triple .plotwrap{min-height:245px}
+.qc-triple .scrolltable{max-height:310px;border:1px solid var(--border);border-radius:7px}
+.scrolltable thead th{position:sticky;top:0;z-index:1}.sortbtn{font:inherit;font-weight:700;background:transparent;border:0;color:inherit;text-align:left;cursor:pointer;padding:0}.sortbtn:hover{color:var(--blue)}
+.fold{background:var(--surface);border:1px solid var(--border);border-radius:10px;margin:14px 0;overflow:hidden}
+.fold>summary{cursor:pointer;font-weight:750;font-size:16px;padding:15px 18px;background:#fafdfe;display:list-item;list-style-position:inside}
+.fold>summary::marker{color:var(--blue)}.fold[open]>summary{border-bottom:1px solid var(--border)}.fold-body{padding:15px 18px}
+.matrix-scroll{overflow:auto;max-height:75vh;border:1px solid var(--border);border-radius:8px;background:#fff}
+.matrix-scroll canvas{display:block;max-width:none}.trait-legend{line-height:1.8;word-break:break-word}
+@media(max-width:1120px){.qc-triple{grid-template-columns:repeat(2,minmax(0,1fr))}.qc-triple>.card:last-child{grid-column:span 2}}
+@media(max-width:900px){.grid-2,.qc-triple{grid-template-columns:1fr}.qc-triple>.card:last-child{grid-column:auto}.top .tabs{margin-left:0}main{padding:17px 14px}.top-inner{padding:10px 14px}}
+@media print{.top{position:static}.btn{display:none}header{background:#fff;color:#222}.card{box-shadow:none}.panel[hidden]{display:none}}
+</style>
+</head>
+<body>
+<header>
+<div class="eyebrow">LiDAR Results • Research dashboard</div>
+<h1 id="reportTitle">Within-day analysis</h1>
+<p id="subtitle">Data quality, trait distributions, and ground-truth associations</p>
+</header>
+<div class="top"><div class="top-inner">
+  <div class="control"><label for="dateSelect">LiDAR measurement date</label><select id="dateSelect"></select></div>
+  <div><span id="dateBadge" class="badge"></span></div>
+  <div class="tabs" role="tablist" aria-label="Report sections">
+    <button class="tab" role="tab" aria-selected="true" data-tab="summary">Summary</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="qc">Within-day QC</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="groundtruth">Ground truth</button>
+  </div>
+</div></div>
+<main>
+<section id="summary" class="panel">
+  <h2>Measurement summary</h2><p class="lede">Counts refer to recorded cart passes and measured targets, not individual LiDAR sweeps.</p>
+  <div id="summaryCards" class="cards"></div>
+  <div class="grid-2">
+    <div class="card"><h3>Paired-pass coverage</h3><p class="subtle">Each cart pass is evaluated separately. Point counts are compared between the two neighboring field rows measured in that pass, rather than pooled across the entire field.</p><div id="coverageTable"></div></div>
+    <div class="card"><h3>Quality checks</h3><div id="summaryNotices"></div><div id="summaryDetails"></div></div>
+  </div>
+  <details class="fold section" id="missingFold"><summary>Expected vs observed study positions · <span id="missingCount">checking…</span></summary>
+    <div class="fold-body"><p class="subtle">Expected positions come from <code>plot_key.csv</code>; observed positions come from this date's LiDAR measurements. Extra windows outside the plot key do not count as study plants. Missing positions are listed below.</p>
+      <div class="btnrow" style="margin:0 0 12px"><button class="btn" id="exportMissing">Export missing positions CSV</button></div>
+      <div id="missingTable"></div><div id="duplicatesTable"></div>
+    </div>
+  </details>
+</section>
+<section id="qc" class="panel" hidden>
+  <h2>Within-day quality control</h2><p class="lede">Explore LiDAR trait distributions, descriptive statistics, and outliers. Unmapped positions are excluded from biological distributions when a plot key exists.</p>
+  <div class="card section"><div class="settings"><div class="control"><label for="qcTrait">LiDAR trait</label><select id="qcTrait"></select></div><div class="control"><label for="qcRange">Show</label><select id="qcRange"><option value="mapped">Mapped study positions</option><option value="all">All recorded positions (QC)</option></select></div></div></div>
+  <div id="qcStats" class="cards"></div>
+  <div class="qc-triple section">
+    <div class="card"><h3>Distribution</h3><div id="histPlot" class="plotwrap"></div></div>
+    <div class="card"><h3>Boxplot and Tukey outliers</h3><div id="boxPlot" class="plotwrap"></div></div>
+    <div class="card"><div class="section-title"><h3>Measured values</h3><span id="valueCount" class="badge"></span></div>
+      <p class="subtle">Every measured position for this trait. Click a column heading to sort.</p>
+      <div id="valuesTable"></div>
+    </div>
+  </div>
+  <details class="fold section" id="outliersFold"><summary>Outlier observations · <span id="outlierCount">0 points</span></summary>
+    <div class="fold-body"><div id="outlierTable"></div></div>
+  </details>
+  <details class="fold section" id="balanceFold"><summary>Paired-pass point-count balance</summary>
+    <div class="fold-body"><div class="section-title"><h3>Paired-pass diagnostics</h3><button class="btn" id="downloadPassQC">Export pass QC CSV</button></div>
+    <p class="subtle">Per cart pass: ratio = min(left points, right points) / max(left points, right points), on a 0–1 scale. Calculations use mapped planted positions where a plot key exists. The two field rows may contain different plants; a low ratio is a review flag, not automatically a scanning problem.</p>
+    <div id="balanceSummary"></div><div id="balancePass"></div>
+    <details style="margin-top:14px"><summary style="cursor:pointer;font-weight:700">Shared-position diagnostics (lowest first)</summary><p class="subtle">Only position numbers present on both sides within the same pass. This controls for asymmetric field layouts such as a pass with 4 planted positions in one row but 1 in the other.</p><div id="balancePosition"></div></details></div>
+  </details>
+  <details class="fold section" id="matrixFold"><summary>LiDAR trait correlation matrix · all available traits</summary>
+    <div class="fold-body"><p class="subtle">Scatterplots below the diagonal, distributions on the diagonal, and labeled Pearson correlations (r and paired n) above it. Each correlation uses observations with valid values for both traits. The matrix follows the selected date and mapped/all-positions setting.</p>
+      <div class="btnrow" style="margin:0 0 10px"><button class="btn" id="exportMatrix">Export matrix PNG</button></div>
+      <div id="matrixLegend" class="subtle trait-legend"></div>
+      <div class="matrix-scroll"><canvas id="matrixCanvas" aria-label="LiDAR trait scatterplot and correlation matrix"></canvas></div>
+      <p class="foot">Upper triangle: r and paired sample size. A dash indicates a constant trait or insufficient paired observations. These correlations describe associations, not agreement or causation.</p>
+    </div>
+  </details>
+</section>
+<section id="groundtruth" class="panel" hidden>
+  <h2>Ground-truth comparisons</h2><p class="lede">Reference method on X; LiDAR method on Y. Matching uses the experiment's plot key when needed. Comparisons are exploratory; export paired observations for publication analyses.</p>
+  <div id="gtEmpty" class="mutedbox" hidden>No ground-truth CSVs were found when this report was generated. Add dated CSVs to the analysis <code>groundtruth/</code> folder and rerun the R script.</div>
+  <div id="gtApp">
+  <div class="card section"><div class="settings">
+    <div class="control"><label for="gtDataset">Ground-truth dataset</label><select id="gtDataset"></select></div>
+    <div class="control"><label for="gtDate">Ground-truth collection date</label><select id="gtDate"></select></div>
+    <div class="control"><label for="gtX">Ground-truth trait (X)</label><select id="gtX"></select></div>
+    <div class="control"><label for="gtY">LiDAR trait (Y)</label><select id="gtY"></select></div>
+    <div class="control"><label for="matchMode">Associate using</label><select id="matchMode"><option value="breeder">Breeder ID (plot key)</option><option value="breeder_coords">Breeder row + column (plot key)</option><option value="lidar_coords">LiDAR row + position</option></select></div>
+    <div class="control"><label for="gtId">Ground-truth ID column</label><select id="gtId"></select></div>
+    <div class="control" id="coordsRowWrap" hidden><label for="gtRow">Ground-truth row column</label><select id="gtRow"></select></div>
+    <div class="control" id="coordsColWrap" hidden><label for="gtCol">Ground-truth position/column</label><select id="gtCol"></select></div>
+  </div><p id="matchModeSummary" class="subtle"></p><div id="gtDateMessage"></div><label class="check" style="margin-top:7px"><input id="allowDateMismatch" type="checkbox"/>Allow different collection dates for exploratory comparison</label></div>
+  <div class="card section"><h3>Subset</h3><div class="settings">
+    <div class="control"><label for="rowMin">LiDAR row ≥</label><input id="rowMin" type="number" step="1" min="1" placeholder="All rows"/></div>
+    <div class="control"><label for="rowMax">LiDAR row ≤</label><input id="rowMax" type="number" step="1" min="1" placeholder="All rows"/></div>
+    <div class="control" style="grid-column:span 2"><label for="idFilter">Only these breeder or LiDAR IDs (comma, space or newline separated)</label><textarea id="idFilter" placeholder="Leave blank for all positions"></textarea></div>
+  </div><div class="controls-inline" style="margin-top:12px"><label class="check"><input id="showFit" type="checkbox" checked/>Linear regression</label><button class="btn" id="clearFilters">Clear subset</button></div></div>
+  <div id="gtStats" class="cards"></div><div id="gtWarnings"></div>
+  <div class="card section"><div class="section-title"><h3 id="scatterTitle">Ground truth vs LiDAR</h3><div class="btnrow"><button class="btn" id="downloadPairs">Export paired CSV</button><button class="btn" id="downloadSVG">Export plot SVG</button></div></div><div id="scatterPlot" class="plotwrap"></div><div class="legend"><span>Matched observations</span><span class="fit">Fitted linear relationship</span></div><div id="pointDetails" class="subtle"></div></div>
+  <div class="card"><div class="section-title"><h3>Matched observations (first 50)</h3><span id="matchCount" class="badge"></span></div><div id="pairsTable" class="scrolltable"></div></div>
+  </div>
+</section>
+</main>
+<footer>This standalone report is generated from recorded measurements. Original LiDAR, plot-key, and ground-truth files are not altered.</footer>
+<script>window.REPORT = __EMBEDDED_REPORT_DATA__;</script>
+<script>
+(function(){
+"use strict";
+const R=window.REPORT, $=(id)=>document.getElementById(id);
+const svgns="http://www.w3.org/2000/svg";
+const enc=(v)=>String(v??"").replace(/[&<>"']/g,s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
+const val=(v)=>{if(v===null||v===undefined||v===""||String(v).toLowerCase()==="na")return NaN; const n=Number(v);return Number.isFinite(n)?n:NaN};
+const number=(n,d=2)=>Number.isFinite(n)?new Intl.NumberFormat('en-US',{maximumFractionDigits:d}).format(n):"—";
+const uniq=(a)=>[...new Set(a.map(String))];
+const option=(s,v,label)=>{const o=document.createElement('option');o.value=String(v);o.textContent=String(label??v);s.append(o)};
+const setOptions=(el,items,preferred)=>{const old=preferred??el.value;el.replaceChildren();items.forEach(x=>option(el,Array.isArray(x)?x[0]:x,Array.isArray(x)?x[1]:x));if([...el.options].some(o=>o.value===old))el.value=old};
+const findHeader=(headers,cands)=>cands.map(x=>headers.find(h=>h.trim().toLowerCase()===x.toLowerCase())).find(Boolean)||headers[0]||"";
+const pick=(o,keys)=>{for(const k of keys)if(o[k]!==undefined)return o[k];return undefined};
+const groups=(rows,key)=>{const m=new Map(); for(const d of rows){const k=String(key(d));if(!m.has(k))m.set(k,[]);m.get(k).push(d)}return m};
+const make=(tag,attrs={},text)=>{const e=document.createElementNS(svgns,tag);for(const [k,v] of Object.entries(attrs))e.setAttribute(k,String(v));if(text!==undefined)e.textContent=String(text);return e};
+const makeSvg=(width,height)=>make('svg',{xmlns:svgns,viewBox:`0 0 ${width} ${height}`,width,height,role:'img'});
+const svgText=(svg,x,y,t,attrs={})=>svg.append(make('text',{x,y,'font-family':'system-ui,-apple-system,sans-serif',...attrs},t));
+const svgLine=(svg,x1,y1,x2,y2,attrs={})=>svg.append(make('line',{x1,y1,x2,y2,...attrs}));
+const range=(values)=>{let lo=Math.min(...values),hi=Math.max(...values);if(!Number.isFinite(lo)||!Number.isFinite(hi))return [0,1];if(lo===hi){const d=Math.max(.1,Math.abs(lo)*.05);lo-=d;hi+=d;}else{const d=(hi-lo)*.06;lo-=d;hi+=d;}return [lo,hi]};
+const quantile=(sorted,p)=>{if(!sorted.length)return NaN;const i=(sorted.length-1)*p,l=Math.floor(i),h=Math.ceil(i);return sorted[l]+(sorted[h]-sorted[l])*(i-l)};
+function calc(values){const a=values.filter(Number.isFinite).sort((a,b)=>a-b),n=a.length;if(!n)return {n:0,mean:NaN,median:NaN,sd:NaN,min:NaN,max:NaN,q1:NaN,q3:NaN,cv:NaN,low:NaN,high:NaN};const mean=a.reduce((x,y)=>x+y,0)/n;const sd=n>1?Math.sqrt(a.reduce((t,x)=>t+(x-mean)**2,0)/(n-1)):NaN;const q1=quantile(a,.25),q3=quantile(a,.75);return {n,mean,median:quantile(a,.5),sd,min:a[0],max:a[n-1],q1,q3,cv:mean?100*sd/Math.abs(mean):NaN,low:q1-1.5*(q3-q1),high:q3+1.5*(q3-q1)};}
+const shortId=(id)=>String(id).replace(/^(\d+)_(?:plant|plot)_(\d+)$/,'$1-$2');
+const rowOf=(d)=>{const match=String(d.target_id??'').match(/^(\d+)_(?:plant|plot)_(\d+)$/);return match?Number(match[1]):val(d.lidar_row)};
+const positionOf=(d)=>{const match=String(d.target_id??'').match(/^(\d+)_(?:plant|plot)_(\d+)$/);return match?Number(match[2]):val(d.lidar_position)};
+const dateRows=()=>R.lidar.filter(d=>String(d.date).replaceAll('_','-')===$('dateSelect').value);
+const isMapped=(d)=>!R.key?.length||d.mapped===true||d.mapped==="TRUE"||d.mapped===1;
+const download=(name,content,mime)=>{const a=document.createElement('a'),url=URL.createObjectURL(new Blob([content],{type:mime}));a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500)};
+const csv=(rows,columns)=>{const q=(x)=>'"'+String(x??'').replaceAll('"','""')+'"';return [columns.map(q).join(','),...rows.map(r=>columns.map(k=>q(r[k])).join(','))].join('\r\n')+'\r\n'};
+const card=(label,value,foot)=>`<div class="card kpi"><span class="label">${enc(label)}</span><strong>${enc(value)}</strong><small>${enc(foot??'')}</small></div>`;
+const tbody=(head,rows)=>`<div class="scrolltable"><table><thead><tr>${head.map(h=>`<th>${enc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(c=>`<tr>${c.map(d=>`<td>${enc(d)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+function init(){
+$('reportTitle').textContent=R.analysis;
+$('subtitle').textContent=`Source experiment: ${R.experiment} · Select a measurement date to explore results`;
+setOptions($('dateSelect'),R.dates.map(d=>[d,d]),R.dates[R.dates.length-1]);
+setOptions($('qcTrait'),R.traits,R.traits.includes('height_m')?'height_m':R.traits[0]);
+setOptions($('gtY'),R.traits,R.traits.includes('height_m')?'height_m':R.traits[0]);
+for(const btn of document.querySelectorAll('.tab')) btn.addEventListener('click',()=>activate(btn.dataset.tab));
+$('dateSelect').addEventListener('change',renderAll);
+$('qcTrait').addEventListener('change',renderQC);
+$('qcRange').addEventListener('change',renderQC);
+$('matrixFold').addEventListener('toggle',()=>{if($('matrixFold').open)renderMatrix()});
+$('exportMatrix').addEventListener('click',()=>{const c=$('matrixCanvas');if(c.width)downloadCanvas(c,`${R.analysis}_${$('dateSelect').value}_trait_matrix.png`)});
+$('gtDataset').addEventListener('change',()=>{initGroundtruthDataset();renderGT()});
+$('gtDate').addEventListener('change',renderGT);
+$('allowDateMismatch').addEventListener('change',renderGT);
+$('gtX').addEventListener('change',renderGT);
+$('gtY').addEventListener('change',renderGT);
+$('matchMode').addEventListener('change',()=>{savedMatchModes.set($('gtDataset').value,$('matchMode').value);toggleMode();renderGT()});
+for(const id of ['gtId','gtRow','gtCol','rowMin','rowMax','idFilter','showFit'])$(id).addEventListener(id==='idFilter'?'input':'change',renderGT);
+$('clearFilters').addEventListener('click',()=>{$('rowMin').value='';$('rowMax').value='';$('idFilter').value='';renderGT()});
+$('downloadPairs').addEventListener('click',exportPairs);
+$('downloadSVG').addEventListener('click',exportSvg);
+if(!R.groundtruth.length){$('gtEmpty').hidden=false;$('gtApp').hidden=true;}else{
+ setOptions($('gtDataset'),R.groundtruth.map((g,i)=>[i,g.filename]),'0');initGroundtruthDataset();
+}
+renderAll();
+}
+function activate(id){document.querySelectorAll('.panel').forEach(p=>p.hidden=(p.id!==id));document.querySelectorAll('.tab').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.tab===id)));}
+function renderAll(){const d=$('dateSelect').value;const dt=new Date(d+'T12:00:00Z');const year=new Date(Date.UTC(dt.getUTCFullYear(),0,1));const doy=Math.floor((dt-year)/86400000)+1;$('dateBadge').textContent=`Day of year ${doy}`;renderSummary();renderQC();renderGT();}
+// Study coverage: compare unique target_ids to the permanent experiment plot key.
+// A missing LiDAR record is NOT the same as a ground-truth NA trait value.
+let exportedMissing=[];
+function expectedCoverage(data){
+ const hasKey=Array.isArray(R.key)&&R.key.length>0;
+ const keyRows=hasKey?R.key:[];
+ const expectedMap=new Map(keyRows.filter(k=>k.target_id).map(k=>[String(k.target_id),k]));
+ const actual=new Map();for(const d of data){const key=String(d.target_id??'');if(key)actual.set(key,(actual.get(key)||0)+1)}
+ const missing=[...expectedMap].filter(([key])=>!actual.has(key)).map(([target,k])=>({target_id:target,breeder_id:k.breeder_id??'',breeder_row:k.breeder_row??'',breeder_range:k.breeder_range??''})).sort((a,b)=>rowFromTarget(a.target_id)-rowFromTarget(b.target_id)||positionFromTarget(a.target_id)-positionFromTarget(b.target_id));
+ const duplicates=[...actual].filter(([key,n])=>n>1&&(!hasKey||expectedMap.has(key))).map(([target_id,n])=>({target_id,n}));
+ const observed=hasKey?[...actual.keys()].filter(x=>expectedMap.has(x)).length:actual.size;
+ return {hasKey,expected:expectedMap.size,observed,missing,duplicates,extra:hasKey?[...actual.keys()].filter(x=>!expectedMap.has(x)):[]};
+}
+function rowFromTarget(target){const m=String(target).match(/^(\d+)_(?:plant|plot)_(\d+)$/);return m?Number(m[1]):Infinity}
+function positionFromTarget(target){const m=String(target).match(/^(\d+)_(?:plant|plot)_(\d+)$/);return m?Number(m[2]):Infinity}
+function renderExpectedCoverage(study){
+ exportedMissing=study.missing;
+ $('missingCount').textContent=study.hasKey?`${study.observed} / ${study.expected} observed · ${study.missing.length} missing`:'No plot key available';
+ $('exportMissing').disabled=!study.hasKey||!study.missing.length;
+ if(!study.hasKey){$('missingTable').innerHTML='<p class="alert">Cannot determine the expected number of observations without plot_key.csv. No expected count has been guessed.</p>';$('duplicatesTable').innerHTML='';return}
+ const summary=`<div class="missing-intro"><div><b>Expected:</b> ${study.expected}</div><div><b>Recorded:</b> ${study.observed}</div><div><b>Missing:</b> ${study.missing.length}</div></div>`;
+ const table=study.missing.length?tbody(['LiDAR ID','Breeder ID','Breeder row','Breeder range'],study.missing.map(d=>[shortId(d.target_id),d.breeder_id,d.breeder_row,d.breeder_range])):'<div class="notice">All expected study positions were recorded on this measurement date.</div>';
+ $('missingTable').innerHTML=summary+table;
+ $('duplicatesTable').innerHTML=study.duplicates.length?'<h3 style="margin:16px 0 8px">Duplicate study records</h3>'+tbody(['LiDAR ID','Number of records'],study.duplicates.map(d=>[shortId(d.target_id),d.n])):'';
+}
+function exportMissingCSV(){
+ if(!exportedMissing.length)return;
+ download(`${R.analysis}_${$('dateSelect').value}_missing_study_positions.csv`,csv(exportedMissing,['target_id','breeder_id','breeder_row','breeder_range']),'text/csv');
+}
+function renderSummary(){
+ const data=dateRows(),mapped=data.filter(isMapped);const passes=uniq(data.map(d=>d.scan_name??'').filter(Boolean));const ids=uniq(mapped.map(d=>d.target_id));const fieldrows=uniq(mapped.map(d=>rowOf(d)).filter(Number.isFinite));const nout=data.length-mapped.length;
+ const coverage=pairedPassCoverage(data),s=coverage.stats,shared=coverage.sharedStats;
+ const study=expectedCoverage(data);const available=study.hasKey;
+ $('summaryCards').innerHTML=[card('Expected study positions',available?number(study.expected,0):'—','From plot_key.csv'),card('Observed study positions',number(study.observed,0),'Unique mapped LiDAR IDs'),card('Missing study positions',available?number(study.missing.length,0):'—','Expected but not observed'),card('Cart passes',number(passes.length,0),'Distinct recording sessions'),card('Field rows',number(fieldrows.length,0),'With mapped observations'),card('Unmapped scan windows',number(nout,0),'Kept for QC'),card('Duplicate study records',number(study.duplicates.length,0),'Same target measured > once'),card('Mean pass balance',number(s.mean,3),`${s.n} of ${passes.length} paired passes`)].join('');
+ renderExpectedCoverage(study);
+ const summaryRows=[['Comparable passes',`${s.n} / ${passes.length}`],['Mean balance',number(s.mean,3)],['Standard deviation',number(s.sd,3)],['Minimum',number(s.min,3)],['Maximum',number(s.max,3)],['Shared-position mean',number(shared.mean,3)]];
+ $('coverageTable').innerHTML=tbody(['Per-pass statistic','Value'],summaryRows)+(s.n?'<p class="foot">Ratios are calculated separately for each pass and then summarized (unweighted). Shared-position mean compares only overlapping planted positions on the two rows.</p>':'<p class="foot">No passes contain points on both sides for this date, so a paired balance cannot be calculated.</p>');
+ const notices=[];
+ if(!R.key?.length)notices.push('<div class="alert">No plot_key.csv was found. Study-position coverage and biological summaries are provisional.</div>');
+ if(nout)notices.push(`<div class="alert">${nout} recorded positions are not in the plot key. They are excluded from mapped-trait summaries but remain in QC.</div>`);
+ // Check that the same target's configured plot width does not change
+ // between measurement dates. A 1 mm tolerance avoids false precision alarms.
+ const targetWidths=groups(R.lidar.filter(d=>isMapped(d)&&Number.isFinite(val(d.plot_width_m))),d=>String(d.target_id));
+ let inconsistentWidths=0;
+ for(const rows of targetWidths.values()){
+   const byDate=groups(rows,d=>String(d.date));
+   if(byDate.size<2)continue;
+   const medians=[...byDate.values()].map(rr=>calc(rr.map(d=>val(d.plot_width_m))).median).filter(Number.isFinite);
+   if(medians.length>1&&Math.max(...medians)-Math.min(...medians)>0.001)inconsistentWidths++;
+ }
+ if(inconsistentWidths)notices.push(`<div class="alert">Plot width differs by more than 1 mm across dates for ${inconsistentWidths} study position(s). Check processing settings before comparing dates.</div>`);
+ if(!R.groundtruth.length)notices.push('<div class="mutedbox">No ground-truth CSVs available. This is optional.</div>');
+ if(!notices.length)notices.push('<div class="notice">Plot key loaded; recorded positions identified.</div>');
+ $('summaryNotices').innerHTML=notices.join('');
+ const gtinfo=R.groundtruth.map(g=>`${g.filename} [${g.date_origin}]`).join('; ');
+ $('summaryDetails').innerHTML=`<p class="small"><strong>LiDAR collection:</strong> ${enc($('dateSelect').value)}<br><strong>Plot key:</strong> ${enc(R.key_file?R.key_file.split('/').pop():'not found')}<br><strong>Ground-truth files:</strong> ${enc(gtinfo||'none')}</p>`;
+}
+let valueSort={field:'row',ascending:true};
+function renderQC(){
+ const trait=$('qcTrait').value;if(!trait){$('qcStats').innerHTML='';return;}
+ const data=dateRows().filter(d=>$('qcRange').value==='all'||isMapped(d)), pairs=data.map(d=>({d,n:val(d[trait])})).filter(x=>Number.isFinite(x.n));
+ const stats=calc(pairs.map(x=>x.n)),out=pairs.filter(x=>x.n<stats.low||x.n>stats.high).sort((a,b)=>Math.abs(b.n-stats.median)-Math.abs(a.n-stats.median));
+ $('qcStats').innerHTML=[card('Valid values',number(stats.n,0),`${number(data.length-stats.n,0)} missing`),card('Mean',number(stats.mean,3),trait),card('Median',number(stats.median,3),trait),card('SD',number(stats.sd,3),'Sample SD'),card('Coefficient of variation',Number.isFinite(stats.cv)?`${number(stats.cv,1)}%`:'—','SD / |mean|'),card('Outliers',number(out.length,0),'1.5 × IQR')].join('');
+ renderHistogram(pairs.map(x=>x.n),trait);renderBox(stats,out,trait);
+ $('outlierCount').textContent=`${out.length} points`;
+ renderValuesTable(data,trait);
+ if($('matrixFold').open)renderMatrix();
+ $('outlierTable').innerHTML=out.length?tbody(['Target','Breeder ID',trait,'Direction'],out.slice(0,150).map(x=>[shortId(x.d.target_id),x.d.breeder_id??'',number(x.n,4),x.n>stats.high?'High':'Low'])):'<p class="subtle">No Tukey 1.5 × IQR outliers for this selection.</p>';
+ renderBalance();
+}
+// Research-facing all-values table, including non-outliers. Sort on any header.
+function renderValuesTable(data,trait){
+ const rows=data.map(d=>({
+  id: String(d.breeder_id??'').trim()||shortId(d.target_id),
+  row: Number.isFinite(val(d.breeder_row))?val(d.breeder_row):rowOf(d),
+  range: Number.isFinite(val(d.breeder_range))?val(d.breeder_range):positionOf(d),
+  value:val(d[trait]),
+  target:shortId(d.target_id)
+ }));
+ $('valueCount').textContent=`${rows.length} positions`;
+ const cols=[['id','Breeder ID'],['row','Row'],['range','Range'],['value',trait]];
+ const sorted=rows.slice().sort((a,b)=>{
+  const k=valueSort.field,x=a[k],y=b[k];
+  if(!Number.isFinite(x)&&k!=='id'&&Number.isFinite(y))return 1;
+  if(!Number.isFinite(y)&&k!=='id'&&Number.isFinite(x))return -1;
+  const cmp=k==='id'?String(x).localeCompare(String(y),undefined,{numeric:true}):(x-y);
+  return valueSort.ascending?cmp:-cmp;
+ });
+ const arrows=cols.map(([k,h])=>`<th><button type="button" class="sortbtn" data-sort="${k}" title="Sort by ${enc(h)}">${enc(h)} ${valueSort.field===k?(valueSort.ascending?'▲':'▼'):''}</button></th>`).join('');
+ $('valuesTable').innerHTML=`<div class="scrolltable"><table><thead><tr>${arrows}</tr></thead><tbody>${sorted.map(r=>`<tr title="LiDAR ${enc(r.target)}"><td>${enc(r.id)}</td><td>${number(r.row,0)}</td><td>${number(r.range,0)}</td><td>${number(r.value,5)}</td></tr>`).join('')}</tbody></table></div>`;
+ $('valuesTable').querySelectorAll('[data-sort]').forEach(btn=>btn.addEventListener('click',()=>{
+  const field=btn.dataset.sort;
+  valueSort=field===valueSort.field?{field,ascending:!valueSort.ascending}:{field,ascending:field!=='value'};
+  renderValuesTable(data,trait);
+ }));
+}
+function downloadCanvas(c,name){c.toBlob(b=>{if(!b)return;const a=document.createElement('a'),u=URL.createObjectURL(b);a.href=u;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),2000)},'image/png');}
+function pairCorrelation(rows,x,y){
+ let n=0,sx=0,sy=0,sxx=0,syy=0,sxy=0;
+ const pairs=[];
+ for(const r of rows){const a=val(r[x]),b=val(r[y]);if(!Number.isFinite(a)||!Number.isFinite(b))continue;
+  n++;sx+=a;sy+=b;sxx+=a*a;syy+=b*b;sxy+=a*b;pairs.push([a,b]);
+ }
+ const vx=sxx-sx*sx/n,vy=syy-sy*sy/n;
+ const rr=n>=3&&vx>1e-14&&vy>1e-14?(sxy-sx*sy/n)/Math.sqrt(vx*vy):NaN;
+ return {r:Number.isFinite(rr)?Math.max(-1,Math.min(1,rr)):NaN,n,pairs};
+}
+// Canvas keeps the 12x12 scatterplot matrix responsive and self-contained.
+function renderMatrix(){
+ const canvas=$('matrixCanvas'),legend=$('matrixLegend');if(!$('matrixFold').open)return;
+ const rows=dateRows().filter(r=>$('qcRange').value==='all'||isMapped(r));
+ const names=R.traits.filter(t=>rows.some(r=>Number.isFinite(val(r[t])))),n=names.length;
+ if(!n){legend.textContent='No numeric LiDAR traits for this date.';canvas.width=1;canvas.height=1;return}
+ // Full trait names are printed INSIDE the figure, on both axes. Correlation cells
+ // explicitly show "Pearson r", the coefficient, and paired n, not unexplained digits.
+ const cell=188,left=238,top=214,width=left+n*cell+20,height=top+n*cell+24;
+ const pixelRatio=Math.min(2,window.devicePixelRatio||1.5);
+ canvas.width=Math.round(width*pixelRatio);canvas.height=Math.round(height*pixelRatio);
+ canvas.style.width=`${width}px`;canvas.style.height=`${height}px`;
+ const ctx=canvas.getContext('2d');ctx.setTransform(pixelRatio,0,0,pixelRatio,0,0);
+ ctx.fillStyle='#fff';ctx.fillRect(0,0,width,height);ctx.textBaseline='middle';
+ legend.textContent=`${n} traits. Scroll the matrix horizontally and vertically to inspect it. Each row and column is labeled with the complete LiDAR trait name; every correlation cell shows Pearson r and paired n.`;
+ const cached=new Map();const getStats=(i,j)=>{const k=`${i}:${j}`;if(!cached.has(k))cached.set(k,pairCorrelation(rows,names[j],names[i]));return cached.get(k)};
+ // Axis names remain legible even when the trait uses a long unit-bearing name.
+ ctx.fillStyle='#1d4b5c';ctx.font='bold 14px system-ui';
+ for(let i=0;i<n;i++){
+  const x=left+i*cell+cell/2, y=top+i*cell+cell/2;
+  ctx.save();ctx.translate(x,top-16);ctx.rotate(-Math.PI/3);ctx.textAlign='left';ctx.fillText(names[i],0,0);ctx.restore();
+  ctx.textAlign='right';ctx.fillText(names[i],left-12,y);
+ }
+ for(let i=0;i<n;i++)for(let j=0;j<n;j++){
+  const x=left+j*cell,y=top+i*cell,stat=getStats(i,j);
+  ctx.fillStyle=(i+j)%2?'#f8fbfd':'#fff';ctx.fillRect(x,y,cell,cell);
+  ctx.strokeStyle='#d4e4e9';ctx.strokeRect(x+.5,y+.5,cell,cell);
+  if(i<j){
+   ctx.textAlign='center';ctx.fillStyle='#536975';ctx.font='bold 13px system-ui';ctx.fillText('Pearson r',x+cell/2,y+cell/2-39);
+   ctx.font='bold 34px system-ui';ctx.fillStyle=Number.isFinite(stat.r)?stat.r>=0?'#165f79':'#a65225':'#637580';
+   ctx.fillText(Number.isFinite(stat.r)?stat.r.toFixed(2):'—',x+cell/2,y+cell/2+2);
+   ctx.font='13px system-ui';ctx.fillStyle='#566d79';ctx.fillText(`paired n = ${stat.n}`,x+cell/2,y+cell/2+33);
+  }else if(i===j){
+   const words=names[i].split('_'),middle=Math.ceil(words.length/2),t1=words.slice(0,middle).join('_'),t2=words.slice(middle).join('_');
+   ctx.textAlign='left';ctx.fillStyle='#173f52';ctx.font='bold 14px system-ui';
+   ctx.fillText(t1,x+8,y+20);if(t2)ctx.fillText(t2,x+8,y+39);
+   const v=rows.map(r=>val(r[names[i]])).filter(Number.isFinite);
+   if(v.length){const lo=Math.min(...v),hi=Math.max(...v),bins=16,cnt=Array(bins).fill(0);
+    v.forEach(z=>{let k=lo===hi?Math.floor(bins/2):Math.min(bins-1,Math.floor((z-lo)/(hi-lo)*bins));cnt[Math.max(k,0)]++});
+    const mx=Math.max(...cnt),w=(cell-18)/bins;
+    cnt.forEach((value,k)=>{const hh=(cell-78)*value/mx;ctx.fillStyle='#6aa8b6';ctx.fillRect(x+9+k*w,y+cell-15-hh,Math.max(1,w-1),hh)});
+   }
+  }else if(stat.pairs.length){
+   const xs=stat.pairs.map(p=>p[0]),ys=stat.pairs.map(p=>p[1]);
+   let xlo=Math.min(...xs),xhi=Math.max(...xs),ylo=Math.min(...ys),yhi=Math.max(...ys);
+   if(xlo===xhi){xlo-=1;xhi+=1}if(ylo===yhi){ylo-=1;yhi+=1}
+   ctx.save();ctx.beginPath();ctx.rect(x+7,y+7,cell-14,cell-14);ctx.clip();ctx.fillStyle='rgba(40,119,151,.32)';
+   stat.pairs.forEach(([a,b])=>{const px=x+10+(a-xlo)/(xhi-xlo)*(cell-20),py=y+cell-10-(b-ylo)/(yhi-ylo)*(cell-20);ctx.fillRect(px-1.3,py-1.3,2.6,2.6)});ctx.restore();
+  }
+ }
+}
+
+function renderHistogram(nums,trait){
+ const parent=$('histPlot');parent.replaceChildren();if(!nums.length){parent.innerHTML='<div class="mutedbox">No numeric observations for this trait and date.</div>';return;}
+ const width=600,height=340,L=62,R=24,T=28,B=62,pl=width-L-R,ph=height-T-B,svg=makeSvg(width,height),s=calc(nums);
+ const bins=Math.max(5,Math.min(32,Math.ceil(Math.sqrt(nums.length))));let lo=s.min,hi=s.max,constant=lo===hi;if(constant){lo-=.5;hi+=.5;}const counts=Array(bins).fill(0);for(const n of nums){const i=Math.min(bins-1,Math.floor((n-lo)/(hi-lo)*bins));counts[Math.max(0,i)]++;}const cmax=Math.max(...counts,1);
+ for(let i=0;i<=4;i++){const y=T+ph-i*ph/4;svgLine(svg,L,y,width-R,y,{class:'plot-grid'});svgText(svg,L-9,y+4,number(cmax*i/4,0),{'text-anchor':'end',class:'plot-small'});}
+ counts.forEach((c,i)=>{const x=L+i*pl/bins+.8,y=T+ph-c/cmax*ph,w=pl/bins-1.6;svg.append(make('rect',{x,y,width:w,height:Math.max(0,T+ph-y),fill:'#3a8ca2',rx:1}));});
+ for(let i=0;i<=4;i++){const v=lo+(hi-lo)*i/4;svgText(svg,L+i*pl/4,height-B+19,number(v,3),{'text-anchor':'middle',class:'plot-small'});}
+ svgLine(svg,L,T,L,T+ph,{class:'plot-axis'});svgLine(svg,L,T+ph,width-R,T+ph,{class:'plot-axis'});
+ svgText(svg,L+pl/2,height-13,trait,{'text-anchor':'middle',class:'plot-label'});
+ svgText(svg,18,T+ph/2,'Count',{'text-anchor':'middle',class:'plot-label',transform:`rotate(-90 18 ${T+ph/2})`});
+ if(constant)svgText(svg,width-R-5,T+12,'All values equal',{'text-anchor':'end','font-size':12,fill:'#9a5714'});
+ parent.append(svg);
+}
+function renderBox(s,out,trait){
+ const parent=$('boxPlot');parent.replaceChildren();if(!s.n){parent.innerHTML='<div class="mutedbox">No numeric values available.</div>';return;}
+ const width=600,height=340,L=66,R=25,T=40,B=66,pl=width-L-R,mid=160,svg=makeSvg(width,height);
+ const lo=Math.min(s.min,s.low,s.q1),hi=Math.max(s.max,s.high,s.q3),span=Math.max(1e-9,hi-lo),low=lo-.07*span,high=hi+.07*span,x=v=>L+(v-low)/(high-low)*pl;
+ for(let i=0;i<=4;i++){const v=low+(high-low)*i/4,xx=x(v);svgLine(svg,xx,T,xx,height-B,{class:'plot-grid'});svgText(svg,xx,height-B+20,number(v,3),{'text-anchor':'middle',class:'plot-small'});}
+ const wl=Math.max(s.min,s.low),wh=Math.min(s.max,s.high);
+ svgLine(svg,x(wl),mid,x(wh),mid,{stroke:'#226e84','stroke-width':3});for(const v of [wl,wh])svgLine(svg,x(v),mid-20,x(v),mid+20,{stroke:'#226e84','stroke-width':2});
+ const left=Math.min(x(s.q1),x(s.q3)),w=Math.max(2,Math.abs(x(s.q3)-x(s.q1)));
+ svg.append(make('rect',{x:left,y:mid-34,width:w,height:68,fill:'#d5edf4',stroke:'#226e84','stroke-width':2,rx:2}));svgLine(svg,x(s.median),mid-34,x(s.median),mid+34,{stroke:'#174b5d','stroke-width':3});
+ out.slice(0,150).forEach((o,i)=>{const xx=x(o.n);svg.append(make('circle',{cx:xx,cy:mid+(i%5-2)*8,r:4,fill:'#c17835'}));if(i<8)svgText(svg,xx,mid-53-(i%2)*15,shortId(o.d.target_id),{'text-anchor':'middle','font-size':10,fill:'#865323'});});
+ svgText(svg,L+pl/2,height-17,trait,{'text-anchor':'middle',class:'plot-label'});
+ if(s.min===s.max)svgText(svg,width/2,T+12,'Constant trait values',{'text-anchor':'middle',fill:'#9a5714','font-size':12});
+ parent.append(svg);
+}
+// Compare paired ROWS within one recorded cart pass, never date-wide totals.
+// Exclude non-study windows when plot_key.csv provides planted-position mappings.
+function pointBalance(rows){const totals={left:0,right:0},positions={left:0,right:0};
+ for(const d of rows){const side=String(d.side??'').trim().toLowerCase(),n=val(d.points);if(side in totals&&Number.isFinite(n)&&n>=0){totals[side]+=n;positions[side]++;}}
+ const hi=Math.max(totals.left,totals.right),lo=Math.min(totals.left,totals.right);
+ return {...totals,positions,ratio:lo>0?lo/hi:NaN,smaller:lo===0||totals.left===totals.right?'—':totals.left<totals.right?'Left':'Right'};
+}
+function pairedPassCoverage(data){
+ const grouped=groups(data.filter(isMapped).filter(d=>String(d.scan_name??'').trim()),d=>String(d.scan_name));
+ const passes=[...grouped].map(([name,rows])=>{
+   const bal=pointBalance(rows),positions=groups(rows.filter(d=>Number.isFinite(positionOf(d))),d=>positionOf(d));
+   const shared=[...positions.values()].filter(rr=>Number.isFinite(pointBalance(rr).ratio));
+   const sharedBal=pointBalance(shared.flat());
+   return {name,bal,sharedBal,sharedPositions:shared.length};
+ }).sort((a,b)=>{
+   const aa=Number.isFinite(a.bal.ratio)?a.bal.ratio:Infinity,bb=Number.isFinite(b.bal.ratio)?b.bal.ratio:Infinity;
+   return aa-bb||a.name.localeCompare(b.name,undefined,{numeric:true});
+ });
+ return {passes,stats:calc(passes.map(p=>p.bal.ratio)),sharedStats:calc(passes.map(p=>p.sharedBal.ratio))};
+}
+function renderBalance(){const coverage=pairedPassCoverage(dateRows()),s=coverage.stats,sh=coverage.sharedStats;
+ $('balanceSummary').innerHTML=s.n?`<p class="small"><strong>${s.n}</strong> comparable paired passes · mean ± SD: <strong>${number(s.mean,3)} ± ${number(s.sd,3)}</strong> · min–max: <strong>${number(s.min,3)}–${number(s.max,3)}</strong>.<br>Using overlapping positions only: ${sh.n} passes, mean ${number(sh.mean,3)}.</p>`:'<p class="mutedbox">No valid paired-pass comparisons. Check whether this measurement date was processed on both sides.</p>';
+ $('balancePass').innerHTML=tbody(['Cart pass (row pair)','Left points','Right points','Balance','Lower side','Positions L / R','Shared-position balance'],coverage.passes.map(p=>[p.name,number(p.bal.left,0),number(p.bal.right,0),number(p.bal.ratio,3),p.bal.smaller,`${p.bal.positions.left} / ${p.bal.positions.right}`,number(p.sharedBal.ratio,3)]));
+ const byPosition=groups(dateRows().filter(isMapped).filter(d=>String(d.scan_name??'').trim()),d=>`${d.scan_name}|${positionOf(d)}`);
+ const comparable=[...byPosition].map(([key,rr])=>({key,bal:pointBalance(rr)})).filter(x=>Number.isFinite(x.bal.ratio)).sort((a,b)=>a.bal.ratio-b.bal.ratio);
+ $('balancePosition').innerHTML=comparable.length?tbody(['Pass / position','Left points','Right points','Balance'],comparable.slice(0,75).map(x=>[x.key.replace('|',' • position '),number(x.bal.left,0),number(x.bal.right,0),number(x.bal.ratio,3)])):'<p class="subtle">No positions have valid paired left/right observations in this date.</p>';
+}
+function exportPassQC(){const rows=pairedPassCoverage(dateRows()).passes.map(p=>({pass:p.name,left_points:p.bal.left,right_points:p.bal.right,balance:p.bal.ratio,smaller_side:p.bal.smaller,left_positions:p.bal.positions.left,right_positions:p.bal.positions.right,shared_positions:p.sharedPositions,shared_position_balance:p.sharedBal.ratio}));
+ const cols=['pass','left_points','right_points','balance','smaller_side','left_positions','right_positions','shared_positions','shared_position_balance'];
+ download(`${R.analysis}_${$('dateSelect').value}_pass_qc.csv`,csv(rows,cols),'text/csv;charset=utf-8');
+}
+const associationModes=['breeder','breeder_coords','lidar_coords'];
+const associationLabels={breeder:'Breeder ID',breeder_coords:'Breeder row + column',lidar_coords:'LiDAR row + position'};
+const savedMatchModes=new Map();
+const coordinate=(v)=>{const s=String(v??'').trim(),n=Number(s);return s&&Number.isFinite(n)?String(n):s};
+function lidarTargetType(rows){for(const d of rows){const m=String(d.target_id??'').match(/^\d+_(plant|plot)_\d+$/);if(m)return m[1]}return ''}
+function associationContext(rows){return {
+ keyBreeder:new Map(R.key.map(k=>[String(k.breeder_id??'').trim(),String(k.target_id)])),
+ keyCoord:new Map(R.key.map(k=>[`${coordinate(k.breeder_row)}|${coordinate(k.breeder_range)}`,String(k.target_id)])),
+ available:new Set(rows.map(d=>String(d.target_id))),targetType:lidarTargetType(rows)
+}}
+function associationTarget(r,mode,ctx,cols){
+ if(mode==='breeder')return ctx.keyBreeder.get(String(r[cols.id]??'').trim());
+ if(mode==='breeder_coords')return ctx.keyCoord.get(`${coordinate(r[cols.row])}|${coordinate(r[cols.col])}`);
+ const row=coordinate(r[cols.row]),position=coordinate(r[cols.col]);
+ return row&&position&&ctx.targetType?`${row}_${ctx.targetType}_${position}`:undefined;
+}
+function associationScores(gt,rows){
+ const gdate=$('gtDate').value,gtrs=gt.rows.filter(r=>!gdate||r['.groundtruth_date']===gdate),ctx=associationContext(rows);
+ const cols={id:$('gtId').value,row:$('gtRow').value,col:$('gtCol').value};
+ return associationModes.map(mode=>{const counts=new Map();for(const r of gtrs){const target=associationTarget(r,mode,ctx,cols);if(target&&ctx.available.has(target))counts.set(target,(counts.get(target)||0)+1)}return {mode,unique:[...counts.values()].filter(n=>n===1).length,duplicates:[...counts.values()].filter(n=>n>1).length}});
+}
+function renderAssociationSummary(scores){$('matchModeSummary').textContent='Unique matches with this LiDAR date: '+scores.map(s=>`${associationLabels[s.mode]} ${s.unique}${s.duplicates?` (${s.duplicates} duplicated)`:''}`).join(' · ')}
+function associationSelfCheck(){
+ const ctx={keyBreeder:new Map([['B1','2_plot_3']]),keyCoord:new Map([['7|8','2_plot_3']]),targetType:'plot'};
+ const cols={id:'ID',row:'Row',col:'Col'};
+ console.assert(associationTarget({ID:'B1'},'breeder',ctx,cols)==='2_plot_3','Breeder ID association failed');
+ console.assert(associationTarget({Row:7,Col:8},'breeder_coords',ctx,cols)==='2_plot_3','Breeder coordinate association failed');
+ console.assert(associationTarget({Row:2,Col:3},'lidar_coords',ctx,cols)==='2_plot_3','LiDAR coordinate association failed');
+}
+function activeGt(){const i=Number($('gtDataset').value);return R.groundtruth?.[i]||null;}
+function initGroundtruthDataset(){const gt=activeGt();if(!gt)return;const dates=uniq(gt.rows.map(r=>r['.groundtruth_date']).filter(Boolean)).sort();setOptions($('gtDate'),dates.length?dates.map(d=>[d,d]):[['','No date found']],dates[0]||'');setOptions($('gtX'),gt.traits,gt.traits.find(h=>/height/i.test(h))||gt.traits[0]);
+ const hdr=gt.headers;setOptions($('gtId'),hdr,findHeader(hdr,['breeder_id','ID','plot_id']));setOptions($('gtRow'),hdr,findHeader(hdr,['row','range','breeder_row','lidar_row']));setOptions($('gtCol'),hdr,findHeader(hdr,['col','column','position','plant','plot','breeder_range','lidar_position']));
+ const scores=associationScores(gt,dateRows()),saved=savedMatchModes.get($('gtDataset').value),best=scores.reduce((a,b)=>b.unique>a.unique?b:a,scores[0]);
+ $('matchMode').value=saved||best.mode;renderAssociationSummary(scores);toggleMode();}
+function toggleMode(){const m=$('matchMode').value,coords=m.endsWith('coords');$('coordsRowWrap').hidden=!coords;$('coordsColWrap').hidden=!coords;$('gtId').closest('.control').hidden=coords;}
+function dateGap(a,b){if(!a||!b)return NaN;return Math.round((Date.parse(b+'T12:00:00Z')-Date.parse(a+'T12:00:00Z'))/86400000);}
+function getPairs(){
+ const gt=activeGt();if(!gt)return {pairs:[],warnings:['No groundtruth file selected'],duplicates:0,nomatch:0};
+ const mode=$('matchMode').value,rows=dateRows(),gdate=$('gtDate').value;
+ const gtrs=gt.rows.filter(r=>!gdate||r['.groundtruth_date']===gdate);
+ const m=new Map(),keyByTarget=new Map(R.key.map(k=>[String(k.target_id),k])),ctx=associationContext(rows);
+ const cols={id:$('gtId').value,row:$('gtRow').value,col:$('gtCol').value};
+ let duplicates=0;
+ for(const r of gtrs){const k=associationTarget(r,mode,ctx,cols);if(!k)continue;if(m.has(k)){m.set(k,null);duplicates++;}else m.set(k,r);}
+ const lo=$('rowMin').value===''?NaN:val($('rowMin').value),hi=$('rowMax').value===''?NaN:val($('rowMax').value);const tokens=$('idFilter').value.split(/[\s,;]+/).map(s=>s.trim()).filter(Boolean),filter=new Set(tokens);
+ let nomatch=0,missing=0;const pairs=[];
+ for(const d of rows){const rr=rowOf(d);if(Number.isFinite(lo)&&rr<lo||Number.isFinite(hi)&&rr>hi)continue;
+   const k=keyByTarget.get(String(d.target_id));const id=String(d.breeder_id??k?.breeder_id??'');
+   if(filter.size&&!filter.has(String(d.target_id))&&!filter.has(id)&&!filter.has(shortId(d.target_id)))continue;
+   const gr=m.get(String(d.target_id));if(!gr){nomatch++;continue;}
+   const x=val(gr[$('gtX').value]),y=val(d[$('gtY').value]);if(!Number.isFinite(x)||!Number.isFinite(y)){missing++;continue;}
+   pairs.push({target_id:d.target_id,breeder_id:id,lidar_row:rr,lidar_position:positionOf(d),lidar_date:d.date,groundtruth_date:gr['.groundtruth_date']||'',groundtruth_file:gt.filename,groundtruth_trait:$('gtX').value,lidar_trait:$('gtY').value,x,y,source_scan:d.scan_name,side:d.side});
+ }
+ const warnings=[];if(mode==='breeder'||mode==='breeder_coords'){if(!R.key.length)warnings.push('A plot_key.csv is required for breeder-based matching.');}
+ if(duplicates)warnings.push(`${duplicates} repeated ground-truth target mappings were detected; ambiguous targets were excluded.`);
+ if(missing)warnings.push(`${missing} matching records had a missing or nonnumeric value for one selected trait.`);
+ if(nomatch)warnings.push(`${nomatch} LiDAR observations did not have a matched ground-truth record for the selected identifiers/date.`);
+ return {pairs,warnings,duplicates,nomatch};
+}
+function regression(pairs){const n=pairs.length;if(n<3)return {n,r:NaN,r2:NaN,slope:NaN,intercept:NaN};const mx=pairs.reduce((s,p)=>s+p.x,0)/n,my=pairs.reduce((s,p)=>s+p.y,0)/n;let sxx=0,syy=0,sxy=0;for(const p of pairs){const x=p.x-mx,y=p.y-my;sxx+=x*x;syy+=y*y;sxy+=x*y;}if(!(sxx>0&&syy>0))return {n,r:NaN,r2:NaN,slope:NaN,intercept:NaN};const r=sxy/Math.sqrt(sxx*syy);return {n,r,r2:r*r,slope:sxy/sxx,intercept:my-sxy/sxx*mx};}
+let lastPairs=[],lastSVG=null;
+function renderGT(){
+ if(!R.groundtruth.length||!$('gtApp')||$('gtApp').hidden)return;
+ const gt=activeGt(),d=$('dateSelect').value,gdate=$('gtDate').value,gap=dateGap(d,gdate);
+ renderAssociationSummary(associationScores(gt,dateRows()));
+ const mismatch=gdate&&Number.isFinite(gap)&&gap!==0;
+ $('gtDateMessage').innerHTML=!gdate?'<div class="alert">No valid ground-truth collection date found. Include YYYY_MM_DD in the CSV filename.</div>':gap===0?'<div class="notice">Ground-truth and LiDAR measurements are from the same day.</div>':`<div class="alert"><strong>Different measurement dates:</strong> LiDAR ${enc(d)} vs ground truth ${enc(gdate)} (${Number.isFinite(gap)?Math.abs(gap)+' days apart':'unknown interval'}). A comparison of these dates requires opting in below.</div>`;
+ const blocked=!gdate||(mismatch&&!$('allowDateMismatch').checked);
+ const res=blocked?{pairs:[],warnings:[!gdate?'Ground-truth date is missing.':'Enable different-date comparisons above to explore these temporally mismatched measurements.']}:getPairs(),pairs=res.pairs,reg=regression(pairs);lastPairs=pairs;
+ $('gtStats').innerHTML=[card('Paired observations',number(pairs.length,0),'Finite X and Y'),card('Pearson r',number(reg.r,3),'Linear correlation'),card('R²',number(reg.r2,3),'Squared Pearson r'),card('Slope',number(reg.slope,4),'LiDAR units / reference unit'),card('Intercept',number(reg.intercept,4),'LiDAR units')].join('');
+ $('gtWarnings').innerHTML=res.warnings.map(w=>`<div class="alert">${enc(w)}</div>`).join('');
+ $('scatterTitle').textContent=`${$('gtX').value} (X) vs ${$('gtY').value} (Y)`;
+ $('matchCount').textContent=`${number(pairs.length,0)} matched`;
+ $('pairsTable').innerHTML=pairs.length?tbody(['LiDAR target','Breeder ID','LiDAR row',`X: ${$('gtX').value}`,`Y: ${$('gtY').value}`],pairs.slice(0,50).map(p=>[p.target_id,p.breeder_id,p.lidar_row,number(p.x,5),number(p.y,5)])):'<div class="mutedbox">No usable paired observations with the current date, ID matching, and filters.</div>';
+ $('pointDetails').textContent='Click a point to inspect its identifiers and values.';
+ renderScatter(pairs,reg);
+ $('downloadPairs').disabled=!pairs.length;$('downloadSVG').disabled=!pairs.length;
+}
+function renderScatter(pairs,fit){const par=$('scatterPlot');par.replaceChildren();lastSVG=null;if(!pairs.length){par.innerHTML='<div class="mutedbox">No paired measurements to plot. Check the matching mode, date, and plot key.</div>';return;}
+ const width=840,height=485,L=94,R=28,T=32,B=96,pl=width-L-R,ph=height-T-B,svg=makeSvg(width,height),xr=range(pairs.map(d=>d.x)),yr=range(pairs.map(d=>d.y));const defs=make('defs'),clip=make('clipPath',{id:'scatter-clip'});clip.append(make('rect',{x:L,y:T,width:pl,height:ph}));defs.append(clip);svg.append(defs);const xs=x=>L+(x-xr[0])/(xr[1]-xr[0])*pl,ys=y=>T+ph-(y-yr[0])/(yr[1]-yr[0])*ph;
+ for(let i=0;i<=5;i++){const xx=L+i*pl/5,yy=T+ph-i*ph/5;svgLine(svg,xx,T,xx,T+ph,{class:'plot-grid'});svgLine(svg,L,yy,L+pl,yy,{class:'plot-grid'});svgText(svg,xx,T+ph+22,number(xr[0]+i*(xr[1]-xr[0])/5,3),{'text-anchor':'middle',class:'plot-small'});svgText(svg,L-12,yy+4,number(yr[0]+i*(yr[1]-yr[0])/5,3),{'text-anchor':'end',class:'plot-small'});}
+ svgLine(svg,L,T,L,T+ph,{class:'plot-axis'});svgLine(svg,L,T+ph,L+pl,T+ph,{class:'plot-axis'});
+ if($('showFit').checked&&Number.isFinite(fit.slope)){const a=xr[0],b=xr[1];svgLine(svg,xs(a),ys(fit.slope*a+fit.intercept),xs(b),ys(fit.slope*b+fit.intercept),{stroke:'#c07b37','stroke-width':3,'stroke-dasharray':'8 5','clip-path':'url(#scatter-clip)'});}
+ for(const p of pairs){const c=make('circle',{cx:xs(p.x),cy:ys(p.y),r:4.1,fill:'#2c829b','fill-opacity':.72,stroke:'#fff','stroke-width':.4,class:'dot'});
+ c.append(make('title',{},`${p.breeder_id||p.target_id} • ${p.target_id}\n${$('gtX').value}: ${p.x}\n${$('gtY').value}: ${p.y}`));
+ c.addEventListener('click',()=>{$('pointDetails').textContent=`${p.breeder_id||'No breeder ID'} · ${p.target_id} · reference ${number(p.x,5)} · LiDAR ${number(p.y,5)} · LiDAR ${p.lidar_date} · ground truth ${p.groundtruth_date||'undated'}`;svg.querySelectorAll('.dot').forEach(x=>x.setAttribute('stroke-width','.4'));c.setAttribute('stroke-width','3');});svg.append(c);}
+ svgText(svg,L+pl/2,height-34,$('gtX').value+' (ground truth)',{'text-anchor':'middle',class:'plot-label'});
+ svgText(svg,27,T+ph/2,$('gtY').value+' (LiDAR)',{'text-anchor':'middle',class:'plot-label',transform:`rotate(-90 27 ${T+ph/2})`});
+ svgText(svg,width-R,T-12,`n = ${pairs.length}` ,{'text-anchor':'end',class:'plot-small'});
+ par.append(svg);lastSVG=svg;
+}
+function exportPairs(){if(!lastPairs.length)return;const cols=['target_id','breeder_id','lidar_row','lidar_position','lidar_date','groundtruth_date','groundtruth_file','groundtruth_trait','lidar_trait','x','y','source_scan','side'];download(`${R.analysis}_${$('dateSelect').value}_paired.csv`,csv(lastPairs,cols),'text/csv;charset=utf-8');}
+function exportSvg(){if(!lastSVG)return;download(`${R.analysis}_${$('dateSelect').value}_scatter.svg`,'<?xml version="1.0" encoding="UTF-8"?>\n'+new XMLSerializer().serializeToString(lastSVG),'image/svg+xml;charset=utf-8');}
+associationSelfCheck();
+init();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>LiDAR time course</title>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#152938;background:#f3f7fa;--ink:#152938;--muted:#5a6e7b;--line:#d9e3e9;--teal:#087e88;--blue:#235eb3;--paper:#fff}
+*{box-sizing:border-box}body{margin:0}header{background:#123448;color:white;padding:22px max(20px,calc((100vw - 1240px)/2)) 18px}header h1{font-size:clamp(23px,3vw,35px);margin:2px 0 6px}header p{margin:0;color:#c0d6e0}.eyebrow{text-transform:uppercase;letter-spacing:.14em;font-size:11px;font-weight:750;color:#89d4d8}
+main{max-width:1280px;margin:0 auto;padding:20px}.card{border:1px solid var(--line);background:var(--paper);border-radius:12px;padding:18px;margin:0 0 16px;box-shadow:0 2px 7px #25475a0a}.card h2,.card h3{margin:0 0 10px}.subtle{color:var(--muted);font-size:13px;line-height:1.5}.toolbar{display:grid;grid-template-columns:2.2fr 1fr 1fr 1fr 1.2fr;gap:12px;align-items:end}.toolbar label,.control label{display:block;font-size:12px;font-weight:700;color:#344e5e;margin-bottom:5px}select,input,textarea,button{font:inherit}select,input,textarea{width:100%;border:1px solid #bfcdd7;background:#fff;color:var(--ink);border-radius:8px;padding:9px;min-width:0}button{cursor:pointer}.btn{background:#fff;border:1px solid #adbbc7;border-radius:7px;padding:8px 12px;color:#244457;font-weight:650}.btn:hover{background:#e9f5f7}.btn.primary{background:#0c7480;color:white;border-color:#0c7480}.controls-inline{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.tabs{display:flex;gap:5px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:6px 0 20px}.tab{border:0;background:transparent;border-bottom:3px solid transparent;color:#617986;font-weight:750;padding:12px 18px}.tab[aria-selected="true"]{border-bottom-color:var(--teal);color:#075d66}.panel[hidden]{display:none!important}.section-title{display:flex;justify-content:space-between;align-items:center;gap:15px;flex-wrap:wrap}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}.kpi{padding:14px}.kpi .label{display:block;font-size:12px;color:var(--muted);font-weight:700}.kpi strong{display:block;font-size:25px;margin:5px 0}.kpi small{font-size:11px;color:var(--muted)}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}.plotarea{overflow:auto;min-height:250px}.plotarea svg{display:block;width:100%;height:auto;min-width:560px}.pillbar{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}.pill{display:flex;align-items:center;gap:6px;border:1px solid #bfd9dd;background:#e9f6f7;padding:6px 9px;border-radius:100px;font-size:12px}.pill button{border:0;background:transparent;color:#174b52;font-weight:900}.tablebox{max-height:360px;overflow:auto;border:1px solid var(--line);border-radius:8px}table{border-collapse:collapse;width:100%;font-size:12px}thead{position:sticky;top:0;background:#eaf2f5;z-index:1}th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #e5edf2;white-space:nowrap}th{font-weight:800}tr:hover td{background:#f3f9fa}.note{padding:10px 12px;border-radius:8px;background:#ecf7f7;border-left:4px solid #0c8790;margin:12px 0;color:#1d4a55;font-size:13px}.warn{padding:10px 12px;border-radius:8px;background:#fff6e9;border-left:4px solid #d48a2d;margin:12px 0;color:#77531f;font-size:13px}.searchrow{display:grid;grid-template-columns:1fr auto;gap:9px}.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:#4b6473;margin:8px 0}footer{max-width:1280px;margin:auto;padding:10px 20px 40px;color:#617887;font-size:12px} .smallrow{display:grid;grid-template-columns:repeat(3,1fr);gap:12px} #pairSummary strong{font-size:20px} .badge{padding:4px 8px;border-radius:8px;background:#e8f3f4;color:#14636a;font-size:12px;font-weight:700}
+@media(max-width:950px){.toolbar{grid-template-columns:repeat(2,1fr)}.kpis{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}}
+@media(max-width:570px){.toolbar{grid-template-columns:1fr}.smallrow{grid-template-columns:1fr}.kpis{grid-template-columns:1fr 1fr}.section-title{align-items:flex-start}}
+</style>
+</head>
+<body>
+<header><div class="eyebrow">LiDAR Results / Time course</div><h1 id="reportTitle">Time course</h1><p id="subtitle"></p></header>
+<main>
+<div class="card">
+ <div class="toolbar">
+  <div class="control"><label for="trait">LiDAR trait</label><select id="trait"></select></div>
+  <div class="control"><label for="startDate">First date</label><select id="startDate"></select></div>
+  <div class="control"><label for="endDate">Last date</label><select id="endDate"></select></div>
+  <div class="control"><label for="xAxis">Time axis</label><select id="xAxis"><option value="doy">Day of year</option><option value="date">Calendar date</option><option value="measurement">Measurement number</option></select></div>
+  <div class="control"><label for="cohort">Observations for trends</label><select id="cohort"><option value="common">Same plants on every date</option><option value="all">All available plants</option></select></div>
+ </div>
+ <div class="controls-inline" style="margin-top:12px"><button class="btn primary" id="exportAllCSV">Download all measurements (CSV)</button><span class="subtle">All dates and all cleaned traits; one row per plant or plot per date.</span></div>
+ <div class="controls-inline" style="margin-top:12px"><span class="subtle">Field row:</span><div style="width:105px"><input id="minRow" type="number" min="1" step="1" placeholder="Minimum" aria-label="Minimum field row"/></div><span>to</span><div style="width:105px"><input id="maxRow" type="number" min="1" step="1" placeholder="Maximum" aria-label="Maximum field row"/></div><button id="reset" class="btn">Clear row filter</button><span id="spanNote" class="subtle"></span></div>
+</div>
+<nav class="tabs" aria-label="Time-course views"><button class="tab" data-tab="trends" aria-selected="true">Experiment trends</button><button class="tab" data-tab="individuals" aria-selected="false">Individual trajectories</button><button class="tab" data-tab="paired" aria-selected="false">Compare two dates</button></nav>
+<section id="trends" class="panel">
+ <div id="overviewKpis" class="kpis"></div>
+ <div class="card"><div class="section-title"><h2>Trait across measurement dates</h2><div class="controls-inline"><label class="subtle" for="center">Summary</label><select style="width:165px" id="center"><option value="mean">Mean ± SD</option><option value="median">Median + IQR</option></select><button class="btn" id="exportTrendCSV">Export plotted summary CSV</button><button class="btn" id="exportTrendSVG">Export SVG</button></div></div>
+  <div id="trendNote" class="subtle"></div><div id="trendChart" class="plotarea"></div><div id="trendTable" class="tablebox"></div>
+ </div>
+</section>
+<section id="individuals" class="panel" hidden>
+ <div class="card"><h2>Select plants to follow</h2><p class="subtle">Search by breeder ID (for example, MF25S0038), or enter a field position such as 38-1. Select up to 20 plants or plots; the trait and dates are controlled above.</p>
+  <div class="searchrow"><input id="individualEntry" list="individualOptions" placeholder="Breeder ID or row-position"/><datalist id="individualOptions"></datalist><button class="btn primary" id="addIndividual">Add</button></div>
+  <div id="selectedPills" class="pillbar"></div><div id="individualStatus" class="subtle"></div>
+ </div>
+ <div class="card"><div class="section-title"><h2>Individual trajectories</h2><div class="controls-inline"><button class="btn" id="exportIndividualCSV">Export selected CSV</button><button class="btn" id="exportIndividualSVG">Export SVG</button></div></div><div id="individualChart" class="plotarea"></div><div id="individualTable" class="tablebox"></div></div>
+</section>
+<section id="paired" class="panel" hidden>
+ <div class="card"><h2>Compare the same plants on two dates</h2><p class="subtle">Each dot represents the same field position on the selected dates. No interpolation or matching different plants by row alone.</p>
+ <div class="smallrow"><div class="control"><label for="pairStart">X: first date</label><select id="pairStart"></select></div><div class="control"><label for="pairEnd">Y: second date</label><select id="pairEnd"></select></div><div class="control"><label for="showRegression">Reference lines</label><select id="showRegression"><option value="both">1:1 and fitted regression</option><option value="identity">1:1 only</option><option value="regression">Fitted regression only</option><option value="none">None</option></select></div></div></div>
+ <div id="pairSummary" class="kpis"></div>
+ <div class="card"><div class="section-title"><h2 id="pairTitle">Date-to-date comparison</h2><div class="controls-inline"><button class="btn" id="exportPairCSV">Export matched CSV</button><button class="btn" id="exportPairSVG">Export SVG</button></div></div><div id="pairChart" class="plotarea"></div><div id="pairTable" class="tablebox"></div><p id="pairCaution" class="subtle"></p></div>
+</section>
+</main>
+<footer>Built from the cleaned, researcher-facing within_day/results.csv. time_course/results.csv combines all measurements from every date; changes.csv contains paired changes between consecutive dates. This standalone HTML includes its own plotting data and works offline. Ground-truth files are never altered.</footer>
+<script>window.TIMECOURSE = __EMBEDDED_TIME_COURSE__;</script>
+<script>
+(function(){'use strict';
+const R=window.TIMECOURSE, $=id=>document.getElementById(id), ns='http://www.w3.org/2000/svg';
+const escapeHtml=x=>String(x??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+const num=(x,n=3)=>Number.isFinite(x)?new Intl.NumberFormat('en-US',{maximumFractionDigits:n}).format(x):'—';
+const finite=x=>x!==null&&x!==undefined&&x!==''&&Number.isFinite(Number(x));
+const uniq=a=>[...new Set(a)];
+const days=(a,b)=>Math.round((Date.parse(b+'T12:00:00Z')-Date.parse(a+'T12:00:00Z'))/86400000);
+const options=(id,items,defaultValue)=>{const el=$(id), prev=defaultValue??el.value;el.replaceChildren();for(const [value,label] of items){const opt=document.createElement('option');opt.value=String(value);opt.textContent=String(label);el.append(opt)}if(items.some(x=>String(x[0])===String(prev)))el.value=String(prev)};
+const dateOptions=R.dates.map((d,i)=>[d,`${d} (DOY ${doy(d)}, #${i+1})`]);
+const idOf=d=>d.id&&d.id!=='NA'?String(d.id):`${d.row}-${d[R.kind]}`;
+const positionOf=d=>`${d.row}:${d[R.kind]}`;
+const shortOf=d=>`${d.row}-${d[R.kind]}`;
+function doy(d){const dt=new Date(d+'T12:00:00Z');return Math.floor((dt-new Date(Date.UTC(dt.getUTCFullYear(),0,1)))/86400000)+1}
+function currDates(){const a=$('startDate').value,b=$('endDate').value;return R.dates.filter(x=>x>=a&&x<=b)}
+function rowOK(d){const l=Number($('minRow').value),h=Number($('maxRow').value);return (!Number.isFinite(l)||$('minRow').value===''||d.row>=l)&&(!Number.isFinite(h)||$('maxRow').value===''||d.row<=h)}
+function observations(){const dates=new Set(currDates());return R.records.filter(d=>dates.has(d.date)&&rowOK(d))}
+function validRows(d){return finite(d[$('trait').value])}
+const byDate=rows=>{const map=new Map();for(const r of rows){if(!map.has(r.date))map.set(r.date,[]);map.get(r.date).push(r)}return map};
+function sameCohort(rows,dates,trait){const presence=new Map();for(const d of rows){if(!finite(d[trait]))continue;const k=positionOf(d);if(!presence.has(k))presence.set(k,new Set());presence.get(k).add(d.date)}const required=new Set(dates);const valid=new Set([...presence.entries()].filter(([k,datesPresent])=>[...required].every(date=>datesPresent.has(date))).map(([k])=>k));return rows.filter(d=>valid.has(positionOf(d)))}
+const stats=values=>{const a=values.filter(Number.isFinite).sort((a,b)=>a-b),n=a.length;if(!n)return {n:0,mean:NaN,sd:NaN,median:NaN,q1:NaN,q3:NaN,min:NaN,max:NaN};const mean=a.reduce((t,v)=>t+v,0)/n;const sd=n>1?Math.sqrt(a.reduce((t,v)=>t+(v-mean)**2,0)/(n-1)):NaN;const q=p=>{const at=(n-1)*p,lo=Math.floor(at),hi=Math.ceil(at);return a[lo]+(a[hi]-a[lo])*(at-lo)};return {n,mean,sd,median:q(.5),q1:q(.25),q3:q(.75),min:a[0],max:a[n-1]}};
+function summaryTable(rows,headers,fields){if(!rows.length)return '<p class="subtle" style="padding:12px">No measurements available.</p>';return `<table><thead><tr>${headers.map(x=>`<th>${escapeHtml(x)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${fields.map(f=>`<td>${escapeHtml(typeof f==='function'?f(r):r[f]??'')}</td>`).join('')}</tr>`).join('')}</tbody></table>`}
+function download(filename,text,mime){const b=new Blob([text],{type:mime}),u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download=filename;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1500)}
+function csv(rows,cols){const q=x=>'"'+String(x??'').replaceAll('"','""')+'"';return [cols.map(q).join(','),...rows.map(row=>cols.map(c=>q(row[c])).join(','))].join('\r\n')+'\r\n'}
+function exportSVG(container,name){const e=$(container).querySelector('svg');if(!e)return;let s=new XMLSerializer().serializeToString(e);if(!s.includes('xmlns='))s=s.replace('<svg','<svg xmlns="http://www.w3.org/2000/svg"');download(name,s,'image/svg+xml;charset=utf-8')}
+function el(tag,attrs={},value){const x=document.createElementNS(ns,tag);for(const [key,val] of Object.entries(attrs))x.setAttribute(key,String(val));if(value!==undefined)x.textContent=String(value);return x}
+function add(svg,tag,attrs={},value){const x=el(tag,attrs,value);svg.append(x);return x}
+function line(svg,x1,y1,x2,y2,attrs={}){return add(svg,'line',{x1,y1,x2,y2,...attrs})}
+function text(svg,x,y,value,attrs={}){return add(svg,'text',{x,y,'font-family':'system-ui,Segoe UI,Arial,sans-serif','font-size':'12',fill:'#496271',...attrs},value)}
+function svgStart(container){const w=960,h=470,svg=el('svg',{xmlns:ns,viewBox:`0 0 ${w} ${h}`,width:w,height:h,role:'img'});$(container).replaceChildren(svg);return {svg,w,h,box:{left:100,right:910,top:35,bottom:395}}}
+function extent(arr){const vals=arr.filter(Number.isFinite);if(!vals.length)return [0,1];let lo=Math.min(...vals),hi=Math.max(...vals);if(lo===hi){const delta=Math.max(Math.abs(lo)*.08,.1);return [lo-delta,hi+delta]}const pad=(hi-lo)*.07;return [lo-pad,hi+pad]}
+function axis(ctx,xRange,yRange,xTitle,yTitle,ticks){const {svg,box:b}=ctx,[x0,x1]=xRange,[y0,y1]=yRange;const X=v=>b.left+(v-x0)/(x1-x0)*(b.right-b.left),Y=v=>b.bottom-(v-y0)/(y1-y0)*(b.bottom-b.top);
+ for(let k=0;k<=5;k++){const v=y0+(y1-y0)*k/5,y=Y(v);line(svg,b.left,y,b.right,y,{stroke:'#e3ebef','stroke-width':1});text(svg,b.left-11,y+4,num(v,3),{'text-anchor':'end','font-size':11})}
+ line(svg,b.left,b.bottom,b.right,b.bottom,{stroke:'#78909c'});line(svg,b.left,b.top,b.left,b.bottom,{stroke:'#78909c'});
+ for(const tick of ticks){const x=X(tick.value);line(svg,x,b.bottom,x,b.bottom+6,{stroke:'#718b98'});text(svg,x,b.bottom+23,tick.label,{'text-anchor':'middle','font-size':11})}
+ text(svg,(b.left+b.right)/2,455,xTitle,{'text-anchor':'middle','font-weight':700,'font-size':13});text(svg,18,(b.top+b.bottom)/2,yTitle,{'text-anchor':'middle','font-weight':700,'font-size':13,transform:`rotate(-90 18 ${(b.top+b.bottom)/2})`});
+ return {X,Y};
+}
+function message(container,msg){$(container).innerHTML=`<div class="note">${escapeHtml(msg)}</div>`}
+const card=(title,value,foot)=>`<div class="card kpi"><span class="label">${escapeHtml(title)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(foot||'')}</small></div>`;
+function tickValue(date,idx){const axis=$('xAxis').value;if(axis==='measurement')return idx+1;if(axis==='doy'||axis==='date')return doy(date);return idx+1}
+function tickLabel(date,idx){const axis=$('xAxis').value;if(axis==='measurement')return String(idx+1);if(axis==='doy')return String(doy(date));return date.slice(5)}
+const selectDates=()=>currDates().length;
+let trendData=[],individualData=[],pairData=[],selected=[];
+function renderTrends(){const dates=currDates(),trait=$('trait').value,rows=observations(),common=$('cohort').value==='common',sample=common?sameCohort(rows,dates,trait):rows;const by=byDate(sample),pairs=[];
+ const allMeasured=new Set(rows.filter(validRows).map(positionOf));const commonRows=sameCohort(rows,dates,trait),commonCount=new Set(commonRows.map(positionOf)).size;
+ for(const [idx,date] of dates.entries()) {const a=(by.get(date)||[]).filter(d=>finite(d[trait])).map(d=>Number(d[trait]));pairs.push({date,doy:doy(date),measurement:idx+1,...stats(a)})}
+ trendData=pairs;
+ $('overviewKpis').innerHTML=[card('Measurement dates',dates.length,'Within selected range'),card('Measured positions',allMeasured.size,'At least one measurement'),card('Complete-case positions',commonCount,'Valid trait value on every date'),card('Observations plotted',pairs.reduce((s,p)=>s+p.n,0),common?'Same cohort each date':'Available measurements')].join('');
+ $('trendNote').textContent=common?'Only positions with a valid selected trait on EVERY selected date are used. This prevents changing sample composition from creating an apparent trend.':'All available measurements are used on each date; changes in sample composition can influence the apparent trend.';
+ if(!pairs.some(p=>p.n)) {message('trendChart','No complete observations for the selected trait, dates, and field rows.');$('trendTable').innerHTML='';return}
+ const center=$('center').value,central=center==='mean'?'mean':'median',low=center==='mean'?p=>p.mean-p.sd:p=>p.q1,high=center==='mean'?p=>p.mean+p.sd:p=>p.q3;
+ const {svg,...ctx}=svgStart('trendChart'),full={svg,...ctx};const xs=pairs.map((p,i)=>tickValue(p.date,i)),ys=[];for(const p of pairs){if(p.n){ys.push(p[central]);if(p.n>1||center==='median')ys.push(low(p),high(p));}}
+ const xr=extent(xs),yr=extent(ys),{X,Y}=axis(full,xr,yr,$('xAxis').selectedOptions[0].textContent,trait,pairs.map((p,i)=>({value:xs[i],label:tickLabel(p.date,i)})));
+ let points=[];for(let i=0;i<pairs.length;i++){const p=pairs[i],x=X(xs[i]);if(!p.n)continue;const y=Y(p[central]);if(Number.isFinite(low(p))&&Number.isFinite(high(p))){const lo=Y(low(p)),hi=Y(high(p));line(svg,x,lo,x,hi,{stroke:'#74b2b4','stroke-width':3});line(svg,x-6,lo,x+6,lo,{stroke:'#74b2b4','stroke-width':2});line(svg,x-6,hi,x+6,hi,{stroke:'#74b2b4','stroke-width':2})}points.push([x,y]);}
+ if(points.length>1)add(svg,'polyline',{points:points.map(p=>p.join(',')).join(' '),fill:'none',stroke:'#057b87','stroke-width':3});
+ for(let i=0;i<pairs.length;i++){const p=pairs[i];if(!p.n)continue;const dot=add(svg,'circle',{cx:X(xs[i]),cy:Y(p[central]),r:6,fill:'#057b87',stroke:'#fff','stroke-width':2});dot.append(el('title',{},`${p.date}\n${central}: ${num(p[central],4)}\nn=${p.n}\nSD=${num(p.sd,4)}\nIQR=${num(p.q1,4)} to ${num(p.q3,4)}`));text(svg,X(xs[i]),Y(p[central])-13,`n=${p.n}`,{'text-anchor':'middle','font-size':11,fill:'#446a78'})}
+ $('trendTable').innerHTML=summaryTable(pairs,['Date','DOY','n','Mean','SD','Median','Q1','Q3'],['date','doy','n',p=>num(p.mean,4),p=>num(p.sd,4),p=>num(p.median,4),p=>num(p.q1,4),p=>num(p.q3,4)]);
+}
+function indexIndividuals(){const m=new Map();for(const d of R.records){const k=positionOf(d);if(!m.has(k))m.set(k,{key:k,row:d.row,position:d[R.kind],id:idOf(d),label:`${idOf(d)} (${shortOf(d)})`});}return [...m.values()].sort((a,b)=>a.row-b.row||a.position-b.position)}
+const individuals=indexIndividuals();
+function setIndividuals(){const opts=$('individualOptions');opts.replaceChildren();for(const item of individuals){const a=document.createElement('option');a.value=item.label;opts.append(a)}const b=$('selectedPills');b.replaceChildren();for(const item of selected){const p=document.createElement('span');p.className='pill';p.append(document.createTextNode(item.label));const btn=document.createElement('button');btn.type='button';btn.textContent='×';btn.title='Remove';btn.addEventListener('click',()=>{selected=selected.filter(x=>x.key!==item.key);setIndividuals();renderIndividuals()});p.append(btn);b.append(p)}$('individualStatus').textContent=`${selected.length} selected. Plant ID and field position both identify the same permanent location within this experiment.`;}
+function addIndividual(){let entry=$('individualEntry').value.trim().toLowerCase(),item=individuals.find(x=>x.label.toLowerCase()===entry||x.id.toLowerCase()===entry||`${x.row}-${x.position}`===entry||`${x.row}_${R.kind}_${x.position}`===entry);if(!item){$('individualStatus').textContent='No match. Try a breeder ID such as MF25S0038 or a row-position such as 38-1.';return}if(selected.some(x=>x.key===item.key)){ $('individualEntry').value=''; return}if(selected.length>=20){$('individualStatus').textContent='Maximum 20 individuals per plot.';return}selected.push(item);$('individualEntry').value='';setIndividuals();renderIndividuals()}
+const palette=['#056e80','#b14d50','#568f36','#7452aa','#ca7f18','#2274bf','#b45391','#74603f','#c24935','#177e6e','#6b83a8','#a2713b','#347b34','#8f65aa','#a33a70','#6a959b','#b76a3b','#575f90','#87904e','#4a6071'];
+function renderIndividuals(){const dates=currDates(),trait=$('trait').value,matches=new Set(selected.map(x=>x.key)),rows=observations().filter(d=>matches.has(positionOf(d)));individualData=rows;
+ if(!selected.length){message('individualChart','Select a breeder ID or field position above to display its measurements across dates.');$('individualTable').innerHTML='';return}
+ const {svg,...ctx}=svgStart('individualChart'),full={svg,...ctx},xs=dates.map(tickValue),ys=rows.filter(d=>finite(d[trait])).map(d=>Number(d[trait]));if(!ys.length){message('individualChart','Selected positions have no valid values for this trait in the selected dates.');$('individualTable').innerHTML='';return}
+ const {X,Y}=axis(full,extent(xs),extent(ys),$('xAxis').selectedOptions[0].textContent,trait,dates.map((d,i)=>({value:xs[i],label:tickLabel(d,i)})));
+ selected.forEach((individual,idx)=>{const lookup=new Map(rows.filter(d=>positionOf(d)===individual.key).map(d=>[d.date,d])),color=palette[idx%palette.length];let segment=[];const flush=()=>{if(segment.length>1)add(svg,'polyline',{points:segment.map(p=>p.join(',')).join(' '),fill:'none',stroke:color,'stroke-width':2.5});segment=[]};dates.forEach((date,i)=>{const d=lookup.get(date);if(!d||!finite(d[trait])){flush();return}const x=X(xs[i]),y=Y(Number(d[trait]));segment.push([x,y]);const dot=add(svg,'circle',{cx:x,cy:y,r:5,fill:color,stroke:'#fff','stroke-width':1});dot.append(el('title',{},`${individual.label}\n${date}\n${trait}: ${num(Number(d[trait]),5)}`))});flush();text(svg,full.box.right-8,full.box.top+18+idx*17,individual.id,{fill:color,'font-weight':700,'text-anchor':'end','font-size':11})});
+ $('individualTable').innerHTML=summaryTable(rows.slice().sort((a,b)=>a.row-b.row||a[R.kind]-b[R.kind]||a.date.localeCompare(b.date)),['ID','Row',R.kind,'Date',trait],[d=>idOf(d),'row',R.kind,'date',d=>finite(d[trait])?num(Number(d[trait]),5):'—']);
+}
+function pearson(data){const n=data.length;if(n<3)return {n,r:NaN,slope:NaN,intercept:NaN,r2:NaN};const xm=data.reduce((s,d)=>s+d.x,0)/n,ym=data.reduce((s,d)=>s+d.y,0)/n;let xx=0,yy=0,xy=0;for(const d of data){xx+=(d.x-xm)**2;yy+=(d.y-ym)**2;xy+=(d.x-xm)*(d.y-ym)}const slope=xx>0?xy/xx:NaN;const r=xx>0&&yy>0?xy/Math.sqrt(xx*yy):NaN;return {n,r,slope,intercept:Number.isFinite(slope)?ym-slope*xm:NaN,r2:Number.isFinite(r)?r*r:NaN}}
+function renderPair(){const d0=$('pairStart').value,d1=$('pairEnd').value,trait=$('trait').value;
+ if(d0>=d1){pairData=[];$('pairSummary').innerHTML='';message('pairChart','Select an earlier date for X and a later date for Y.');$('pairTable').innerHTML='';return}
+ const rowData=R.records.filter(rowOK),a=rowData.filter(d=>d.date===d0),b=new Map(rowData.filter(d=>d.date===d1).map(d=>[positionOf(d),d]));const pairs=[];
+ for(const d of a){const e=b.get(positionOf(d));if(!e||!finite(d[trait])||!finite(e[trait]))continue;pairs.push({id:idOf(d),row:d.row,position:d[R.kind],date_start:d0,date_end:d1,x:Number(d[trait]),y:Number(e[trait]),change:Number(e[trait])-Number(d[trait]),per_day:days(d0,d1)>0?(Number(e[trait])-Number(d[trait]))/days(d0,d1):NaN})}
+ pairData=pairs;const fit=pearson(pairs),meanChange=pairs.length?stats(pairs.map(x=>x.change)).mean:NaN;
+ $('pairTitle').textContent=`${trait} — ${d0} vs ${d1}`;
+ $('pairSummary').innerHTML=[card('Matched positions',pairs.length,`With valid ${trait} on both dates`),card('Pearson r',num(fit.r,3),'Association, not agreement'),card('R²',num(fit.r2,3),'Squared Pearson correlation'),card('Mean change',num(meanChange,4),`Over ${days(d0,d1)} days`)].join('');
+ if(!pairs.length){message('pairChart','No positions have valid values on both selected dates.');$('pairTable').innerHTML='';return}
+ const {svg,...ctx}=svgStart('pairChart'),full={svg,...ctx},bounds=extent(pairs.flatMap(d=>[d.x,d.y])),{X,Y}=axis(full,bounds,bounds,`${trait} (${d0})`,`${trait} (${d1})`,Array.from({length:6},(_,i)=>({value:bounds[0]+(bounds[1]-bounds[0])*i/5,label:num(bounds[0]+(bounds[1]-bounds[0])*i/5,3)})));
+ const ref=$('showRegression').value;if(ref==='both'||ref==='identity')line(svg,X(bounds[0]),Y(bounds[0]),X(bounds[1]),Y(bounds[1]),{stroke:'#c07638','stroke-width':2,'stroke-dasharray':'8 6'});
+ if((ref==='both'||ref==='regression')&&Number.isFinite(fit.slope)){line(svg,X(bounds[0]),Y(fit.slope*bounds[0]+fit.intercept),X(bounds[1]),Y(fit.slope*bounds[1]+fit.intercept),{stroke:'#1766b0','stroke-width':2.5})}
+ for(const p of pairs){const c=add(svg,'circle',{cx:X(p.x),cy:Y(p.y),r:3.6,fill:'#0b8a8d',opacity:.68});c.append(el('title',{},`${p.id} (row ${p.row}, ${R.kind} ${p.position})\n${d0}: ${num(p.x,5)}\n${d1}: ${num(p.y,5)}\nChange: ${num(p.change,5)}`))}
+ const sorted=pairs.slice().sort((a,b)=>Math.abs(b.change)-Math.abs(a.change));$('pairTable').innerHTML=summaryTable(sorted,['ID','Row',R.kind,d0,d1,'Change','Change/day'],['id','row','position',d=>num(d.x,5),d=>num(d.y,5),d=>num(d.change,5),d=>num(d.per_day,5)]);
+ $('pairCaution').textContent='The blue line is the ordinary least-squares regression; the dashed orange line is 1:1 agreement (when enabled). Pearson r measures association, not measurement agreement. Date-to-date declines may reflect biological changes or processing differences.';
+}
+function renderAll(){const dates=currDates();$('spanNote').textContent=dates.length?`${dates.length} dates selected · ${R.kind} observations · ${R.records.length.toLocaleString()} total records`:'Select a valid date range';renderTrends();renderIndividuals();renderPair()}
+function activate(id){document.querySelectorAll('.panel').forEach(x=>x.hidden=x.id!==id);document.querySelectorAll('.tab').forEach(x=>x.setAttribute('aria-selected',String(x.dataset.tab===id)))}
+function init(){ $('reportTitle').textContent=R.analysis+' — time course';$('subtitle').textContent=`Experiment: ${R.experiment} · ${R.dates.length} measurement dates · select a trait and explore changes over time`;
+ options('trait',R.traits.map(t=>[t,t]),R.traits.includes('height_m')?'height_m':R.traits[0]);for(const id of ['startDate','endDate','pairStart','pairEnd'])options(id,dateOptions,(id==='startDate'||id==='pairStart')?R.dates[0]:R.dates.at(-1));
+ for(const id of ['trait','startDate','endDate','cohort','xAxis','minRow','maxRow','center','pairStart','pairEnd','showRegression'])$(id).addEventListener(['minRow','maxRow'].includes(id)?'input':'change',renderAll);
+ for(const tab of document.querySelectorAll('.tab'))tab.addEventListener('click',()=>activate(tab.dataset.tab));
+ $('reset').addEventListener('click',()=>{$('minRow').value='';$('maxRow').value='';renderAll()});
+ $('addIndividual').addEventListener('click',addIndividual);$('individualEntry').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();addIndividual()}});
+ $('exportAllCSV').addEventListener('click',()=>download(`${R.analysis}_time_course_results.csv`,csv(R.records,R.columns),'text/csv'));
+ $('exportTrendCSV').addEventListener('click',()=>download(`${R.analysis}_trend_${$('trait').value}.csv`,csv(trendData,['date','doy','measurement','n','mean','sd','median','q1','q3','min','max']),'text/csv'));
+ $('exportTrendSVG').addEventListener('click',()=>exportSVG('trendChart',`${R.analysis}_trends.svg`));
+ $('exportIndividualCSV').addEventListener('click',()=>download(`${R.analysis}_selected_trajectories.csv`,csv(individualData,['date','doy','row',R.kind,'id',$('trait').value]),'text/csv'));
+ $('exportIndividualSVG').addEventListener('click',()=>exportSVG('individualChart',`${R.analysis}_individuals.svg`));
+ $('exportPairCSV').addEventListener('click',()=>download(`${R.analysis}_paired_${$('trait').value}.csv`,csv(pairData,['id','row','position','date_start','date_end','x','y','change','per_day']),'text/csv'));
+ $('exportPairSVG').addEventListener('click',()=>exportSVG('pairChart',`${R.analysis}_date_comparison.svg`));
+ setIndividuals();renderAll();
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
+})();
+</script>
+</body>
+</html>
