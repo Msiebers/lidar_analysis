@@ -1,0 +1,29 @@
+{
+  "scan_01_right": {
+    "density_level": "low",
+    "pair_mean_pai": 3.7938644,
+    "baseline_pai": 4.5654109,
+    "baseline_z_pai": 4.8550468,
+    "baseline_observed": 1073710,
+    "poor_side": "left",
+    "poor_observed": 779482
+  },
+  "scan_05_right": {
+    "density_level": "medium",
+    "pair_mean_pai": 5.25976925,
+    "baseline_pai": 5.7283602,
+    "baseline_z_pai": 6.0756899,
+    "baseline_observed": 1023058,
+    "poor_side": "left",
+    "poor_observed": 979959
+  },
+  "scan_04_left": {
+    "density_level": "high",
+    "pair_mean_pai": 5.6863149,
+    "baseline_pai": 6.7175016,
+    "baseline_z_pai": 7.214498,
+    "baseline_observed": 1214245,
+    "poor_side": "right",
+    "poor_observed": 1129367
+  }
+}

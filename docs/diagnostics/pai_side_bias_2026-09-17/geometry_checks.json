@@ -1,0 +1,8 @@
+{
+  "synthetic_intersection_masks_equal": true,
+  "synthetic_max_entry_difference_m": 0.0,
+  "synthetic_max_exit_difference_m": 0.0,
+  "left_box_width_m": 1.1,
+  "right_box_width_m": 1.1,
+  "fixed_lidar_x_offset_m": 0.0
+}

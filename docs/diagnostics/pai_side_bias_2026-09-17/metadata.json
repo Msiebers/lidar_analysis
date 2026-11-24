@@ -1,0 +1,20 @@
+{
+  "data_root": "/media/central/raw_mirror/al_lai/density_test",
+  "current_scan_names": [
+    "scan_001_multi02_2026_07_23_Additional_Scans",
+    "scan_002_multi02_2026_07_23_Additional_Scans",
+    "scan_003_multi02_2026_07_23_Additional_Scans",
+    "scan_004_multi02_2026_07_23_Additional_Scans",
+    "scan_005_multi02_2026_07_23_Additional_Scans",
+    "scan_006_multi02_2026_07_23_Additional_Scans",
+    "scan_007_multi02_2026_07_23_Additional_Scans",
+    "scan_008_multi02_2026_07_23_Additional_Scans",
+    "scan_009_multi02_2026_07_23_Additional_Scans",
+    "scan_010_multi02_2026_07_23_Additional_Scans"
+  ],
+  "n_result_rows": 20,
+  "n_current_summary_rows": 20,
+  "old_diagnostic_rows_excluded": 2352,
+  "random_seed": 20260917,
+  "algorithm_files_modified": false
+}

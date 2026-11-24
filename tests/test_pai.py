@@ -539,6 +539,8 @@ def test_pipeline_result_row_contains_independent_pai_fields(tmp_path):
     cfg.run_pai = True
     cfg.run_z_pai = True
     cfg.pai_run_layers = False
+    cfg.ray_box_layer_thickness_m = 0.25
+    cfg.pai_layer_thickness_m = 0.50
     cfg.row_width_u = 1.5
     plot = Plot("scan", "1", (0.0, 1000.0), str(tmp_path), scan_base="scan_001")
     plot.side_label = "right"
@@ -560,4 +562,6 @@ def test_pipeline_result_row_contains_independent_pai_fields(tmp_path):
     assert row["pai_x_min_m"] == 0.0
     assert row["pai_x_max_m"] == 1.5
     assert row["z_pai_n_hits"] == 2
+    assert row["pai_layer_thickness_m"] == pytest.approx(0.25)
+    assert row["z_pai_layer_thickness_m"] == pytest.approx(0.25)
     assert "z_pai_m2_m2" in row

@@ -1,0 +1,13 @@
+sample_set,reference,estimator,n_plot_date_means,pearson_r,spearman_rho,raw_rmse_m2_m2
+biomass,dry_biomass_g_m2,conditional,12,0.9535098096894925,0.9300699300699302,
+biomass,dry_biomass_g_m2,exact_first_event,12,0.9496650296884493,0.9230769230769231,
+biomass,destructive_lai,conditional,0,,,
+biomass,destructive_lai,exact_first_event,0,,,
+biomass,destructive_pai,conditional,0,,,
+biomass,destructive_pai,exact_first_event,0,,,
+partition,dry_biomass_g_m2,conditional,12,0.6423086288016796,0.6643356643356644,
+partition,dry_biomass_g_m2,exact_first_event,12,0.681976461142745,0.6643356643356644,
+partition,destructive_lai,conditional,9,0.7619609316291517,0.7666666666666667,2.508120794317708
+partition,destructive_lai,exact_first_event,9,0.7987986181950882,0.7666666666666667,2.9273370771630205
+partition,destructive_pai,conditional,6,0.4148560788726339,0.4285714285714286,2.6992404545847095
+partition,destructive_pai,exact_first_event,6,0.526884629678039,0.4285714285714286,3.2175768467901436

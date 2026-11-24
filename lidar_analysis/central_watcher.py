@@ -372,6 +372,10 @@ def run_processing(
     output_dir: Path,
     log_path: Path,
 ) -> None:
+    import os
+    import signal
+    import time
+
     working_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -400,16 +404,98 @@ def run_processing(
         str(config_path),
     ]
 
+    def process_group_exists(pgid: int) -> bool:
+        try:
+            os.killpg(pgid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+
+    def stop_process_group(proc: subprocess.Popen, log_file, reason: str) -> None:
+        pgid = proc.pid
+
+        log_file.write(
+            f"[WATCHER] stopping processing group pgid={pgid} reason={reason}\n"
+        )
+        log_file.flush()
+
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+
+        deadline = time.monotonic() + 5.0
+        while process_group_exists(pgid) and time.monotonic() < deadline:
+            time.sleep(0.1)
+
+        if process_group_exists(pgid):
+            log_file.write(
+                f"[WATCHER] process group pgid={pgid} did not stop; sending SIGKILL\n"
+            )
+            log_file.flush()
+
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
+
     with open(log_path, "w", encoding="utf-8") as log_file:
         log_file.write(f"$ {' '.join(cmd)}\n")
         log_file.write(f"[WATCHER] input={local_input_dir}\n")
         log_file.write(f"[WATCHER] working={working_dir}\n")
         log_file.write(f"[WATCHER] output={output_dir}\n")
         log_file.flush()
-        proc = subprocess.run(cmd, stdout=log_file, stderr=subprocess.STDOUT, text=True)
 
-    if proc.returncode != 0:
-        raise RuntimeError(f"failed to process {experiment}/{date_name}; see {log_path}")
+        # Give this rerun its own process group.
+        # All multiprocessing workers inherit this group.
+        proc = subprocess.Popen(
+            cmd,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            text=True,
+            start_new_session=True,
+        )
+
+        old_sigterm = signal.getsignal(signal.SIGTERM)
+        old_sighup = signal.getsignal(signal.SIGHUP)
+
+        def stop_signal(signum, frame):
+            raise KeyboardInterrupt
+
+        signal.signal(signal.SIGTERM, stop_signal)
+        signal.signal(signal.SIGHUP, stop_signal)
+
+        try:
+            returncode = proc.wait()
+
+        except KeyboardInterrupt:
+            stop_process_group(proc, log_file, "interrupt")
+            raise
+
+        except BaseException:
+            stop_process_group(proc, log_file, "watcher exception")
+            raise
+
+        finally:
+            signal.signal(signal.SIGTERM, old_sigterm)
+            signal.signal(signal.SIGHUP, old_sighup)
+
+        if returncode != 0:
+            # If the processing parent died abnormally, make sure it did not
+            # leave any multiprocessing workers behind.
+            if process_group_exists(proc.pid):
+                stop_process_group(proc, log_file, f"exit code {returncode}")
+
+            raise RuntimeError(
+                f"failed to process {experiment}/{date_name}; see {log_path}"
+            )
 
 
 def write_input_snapshots(root: Path) -> None:

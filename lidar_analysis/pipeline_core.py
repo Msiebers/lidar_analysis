@@ -24,6 +24,7 @@ try:
         find_marker_file_for_scan,
         marker_buffer_mm,
         marker_count_to_z_mm,
+        plant_window_offsets_mm,
     )
     from .pointcloud_ops import add_local_ground_height, apply_pointcloud_ops, estimate_local_ground_grid, height_agl_filter
     from .analysis_target import AnalysisTarget
@@ -47,6 +48,7 @@ except Exception:
         find_marker_file_for_scan,
         marker_buffer_mm,
         marker_count_to_z_mm,
+        plant_window_offsets_mm,
     )
     from pointcloud_ops import add_local_ground_height, apply_pointcloud_ops, estimate_local_ground_grid, height_agl_filter
     from analysis_target import AnalysisTarget
@@ -1219,6 +1221,14 @@ def _ray_box_value(cfg: AnalysisConfig, name: str, fad_attr: str, pai_attr: str)
     return getattr(cfg, fad_attr if cfg.run_fad or cfg.run_mta else pai_attr)
 
 
+def _ray_box_layer_thickness_m(cfg: AnalysisConfig, legacy_attr: str) -> float | None:
+    value = getattr(cfg, "ray_box_layer_thickness_m", None)
+    if value is not None:
+        return float(value)
+    legacy_value = getattr(cfg, legacy_attr)
+    return None if legacy_value is None else float(legacy_value)
+
+
 def _local_ground_kwargs(cfg: AnalysisConfig) -> dict:
     return {
         "x_bin_size_m": cfg.local_ground_x_bin_m * 1000.0,
@@ -1635,11 +1645,7 @@ def analyze_plot(
         target_id = p.analysis_target.target_id if p.analysis_target is not None else p.name
 
         if cfg.run_fad:
-            fad_layer_thickness = (
-                getattr(cfg, "ray_box_layer_thickness_m", None)
-                if getattr(cfg, "ray_box_layer_thickness_m", None) is not None
-                else cfg.fad_layer_thickness_m
-            )
+            fad_layer_thickness = _ray_box_layer_thickness_m(cfg, "fad_layer_thickness_m")
             fad_traits.update(height_result_to_traits(shared_ray_box.height_result))
             fad_traits.update(compute_fad_traits(
                 origins_m=shared_ray_box.origins_m,
@@ -1688,6 +1694,7 @@ def analyze_plot(
                 p.mta_bin_diagnostics = mta_bins
 
         if cfg.run_pai:
+            pai_layer_thickness = _ray_box_layer_thickness_m(cfg, "pai_layer_thickness_m")
             pai_traits = compute_pai_traits(
                 origins_m=shared_ray_box.origins_m,
                 directions_m=shared_ray_box.directions_m,
@@ -1697,7 +1704,7 @@ def analyze_plot(
                 max_observation_range_m=cfg.mta_max_observation_range_m,
                 box=shared_ray_box.box,
                 g_function=cfg.pai_g_function, g_value=cfg.pai_g_value,
-                layer_thickness_m=cfg.pai_layer_thickness_m,
+                layer_thickness_m=pai_layer_thickness,
                 include_layer_columns=cfg.pai_include_layer_columns,
                 run_conditional_profile=cfg.pai_run_conditional_profile,
                 run_joint_profile=cfg.pai_run_joint_profile,
@@ -1711,6 +1718,7 @@ def analyze_plot(
             )
 
         if cfg.run_z_pai:
+            pai_layer_thickness = _ray_box_layer_thickness_m(cfg, "pai_layer_thickness_m")
             z_pai_traits = compute_z_pai_traits(
                 origins_m=shared_ray_box.origins_m,
                 directions_m=shared_ray_box.directions_m,
@@ -1721,7 +1729,7 @@ def analyze_plot(
                 box=shared_ray_box.box,
                 g_function=cfg.pai_g_function,
                 g_value=cfg.pai_g_value,
-                layer_thickness_m=cfg.pai_layer_thickness_m,
+                layer_thickness_m=pai_layer_thickness,
                 include_layer_columns=cfg.pai_include_layer_columns,
                 diagnostic=cfg.ray_box_diagnostic,
                 normalize_directions=shared_ray_box.normalize_directions,
@@ -2166,12 +2174,19 @@ def process_scan(
             getattr(cfg, "mark_z_buffer_u", 0.0),
             cfg.dim_units,
         )
+        configured_plant_offsets = getattr(cfg, "plant_window_offsets_u", None)
+        plant_offsets_mm = (
+            plant_window_offsets_mm(configured_plant_offsets, cfg.dim_units)
+            if configured_plant_offsets is not None
+            else None
+        )
 
         segments = build_mark_segments(
             marker_path=marker_path,
             step_mm=step_mm,
             lidar_wheel_offset_mm=lidar_wheel_offset_mm,
             z_buffer_mm=z_buffer_mm,
+            plant_window_offsets_mm=plant_offsets_mm,
             target_type=str(getattr(cfg, "mark_target_type", "auto")),
             free_marks_as=str(getattr(cfg, "free_marks_as", "none")),
             zmax_clip=zmax,
@@ -2188,9 +2203,15 @@ def process_scan(
                 print(f"[MARKS][WARN] No usable marker segments for {scan_base}; skipping.")
                 return []
 
+        plant_offsets_note = (
+            f", plant_window_offsets={plant_offsets_mm[0]:.1f}->{plant_offsets_mm[1]:.1f} mm"
+            if plant_offsets_mm is not None
+            and any(str(seg.target_type) == "plant" for seg in segments)
+            else ""
+        )
         print(
             f"[MARKS] {scan_base}: using {len(segments)} segment(s) "
-            f"from {marker_path}, z_buffer={z_buffer_mm:.1f} mm"
+            f"from {marker_path}, z_buffer={z_buffer_mm:.1f} mm{plant_offsets_note}"
         )
         for seg in segments:
             print(

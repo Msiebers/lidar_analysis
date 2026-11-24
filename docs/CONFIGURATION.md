@@ -73,8 +73,6 @@ against a physical ground plane; BNO055 sign conventions are not interchangeable
 | `x_min_u` | `null` | `pipeline_core.apply_global_filters` | Removes points too close to row centerline |
 | `max_y_u` | `null` | `pipeline_core.apply_global_filters` | Removes points above max height |
 | `min_radius_u` | `null` | `pipeline_core.reconstruct_world_points` | Removes LiDAR-frame points too close to the sensor |
-| `fad_x_near_m` | `0.0` | `pipeline_core._fad_x_bounds_for_plot` | Sets the near X face of each side-specific FAD box from the LiDAR centerline; does not filter point-cloud operations |
-| `pai_x_near_m` | `0.0` | `pipeline_core._fad_x_bounds_for_plot` | Independently sets the near X face of the bounded PAI volume |
 | `start_u`, `split_u`, `end_buffer_u` | `0.0`, `0.0`, `0.5` | `pipeline_core.build_plot_ranges` | Controls distance-based target windows |
 
 `use_local_ground_filter` estimates a snapped X-Z ground grid and filters
@@ -111,6 +109,8 @@ analysis:
   marks:
     target_type: auto  # options: auto, plant, plot
     buffer_u: 0.0
+    # Optional plant center-mark [lower, upper] offsets in dim_units.
+    plant_window_offsets_u: null
     missing_file: error  # options: error, skip, distance
     empty_file: skip  # options: skip, error, distance
     free_marks_as: none  # options: none, plant, plot
@@ -122,6 +122,7 @@ analysis:
 | `split_source` | `distance` | `central_runner.resolve_splitting_style`, `pipeline_core.process_scan` | `distance` uses fixed windows; `marks` uses mark-defined windows |
 | `marks.target_type` | `auto` | `mark_splitting.build_mark_segments` | Selects mark rows: `auto`, `plant`, or `plot` |
 | `marks.buffer_u` | `0.0` | `central_runner.resolve_buffer_u`, `mark_splitting.marker_buffer_mm` | Mark window buffer in `dim_units` |
+| `marks.plant_window_offsets_u` | `null` | `central_runner.resolve_plant_window_offsets_u`, `mark_splitting.build_mark_segments` | Optional `[lower, upper]` offsets from plant center marks in `dim_units`; overrides `buffer_u` only for those windows |
 | `marks.dirname` | `markers` | `mark_splitting.find_marker_file_for_scan` | Legacy markers directory name |
 | `marks.missing_file` | `error` | `pipeline_core.process_scan` | `error`, `skip`, or `distance` |
 | `marks.empty_file` | `skip` | `pipeline_core.process_scan` | `skip`, `error`, or `distance` |
@@ -140,13 +141,13 @@ Older configs may still use compatibility aliases such as `splitting_style`, top
 | `run_mta` | `false` | `pipeline_core.analyze_plot`, `lidar_analysis/mta.py` | Adds the plot-bounded `bounded_lang_v1` MTA |
 | `mta_angle_bin_deg` | `5.0` | `lidar_analysis/mta.py` | Angular-bin width; standard fitting bins remain anchored to the complete 25–65 degree interval |
 | `ray_box.diagnostic` | `false` | `central_runner.run_experiment_date` | Writes one `ray_box_diagnostics.csv` containing shared-box summaries, PAI layers, and MTA angular bins |
-| `ray_box` geometry | shared when provided | `central_runner.build_config`, `pipeline_core._build_shared_ray_box` | Defines the single FAD/MTA/PAI/Z_PAI volume; legacy trait-specific geometry is used only when a shared value is omitted |
+| `ray_box` geometry | required as one complete block | `central_runner.build_config`, `pipeline_core._build_shared_ray_box` | Defines the single FAD/MTA/PAI/Z_PAI volume; do not mix it with legacy trait-specific geometry |
 | `ray_box.ground_mode` | `global_y` | `pipeline_core._build_shared_ray_box` | `local_grid` moves only the box bottom using the plot's median local-ground elevation; the canopy top remains the raw-Y PAI top |
+| `ray_box.layer_thickness_m` | `0.10` in templates | `pipeline_core.analyze_plot` | Shared nominal layer thickness for layered FAD, PAI, and Z_PAI |
 | `analyze_one_side` | `false` | `pipeline_core.process_scan` | When true, analyzes and writes only the side selected by `analyze_side` |
 | `analyze_side` | `null` | `pipeline_core.process_scan` | Required as `left` or `right` when `analyze_one_side` is true |
 | `run_pai` | `false` | `pipeline_core.analyze_plot`, `lidar_analysis/pai.py` | Integrates bounded layer PAI increments into the publication value `pai_m2_m2` |
 | `run_z_pai` | `false` | `pipeline_core.analyze_plot`, `lidar_analysis/pai.py` | Adds `z_pai_m2_m2`, the fixed-G Zhao first-event estimate using the same Raybox and height layers |
-| `pai_layer_thickness_m` | `0.10` | `lidar_analysis/pai.py` | Nominal vertical layer thickness in metres |
 | `pai_include_layer_columns` | `false` | `central_runner.run_experiment_date` | Adds one integrated PAI number per vertical layer to `results.csv` |
 | `run_topology` | `false` compatibility shim | legacy branch in `pipeline_core.analyze_plot` | Prefer `pointcloud_ops: [{op: topology_trait}]` |
 
@@ -174,6 +175,10 @@ measured return and verified gaps stop at the layer exit. Empty distance between
 the scanner and Raybox is not canopy exposure. This is the unpenalized,
 piecewise-constant, fixed-G special case of the Zhao first-event likelihood; it
 is mathematically a contact-frequency estimator. Enable it with `run_z_pai: true`.
+
+Older configurations without a `ray_box` geometry block may still use the
+legacy FAD/PAI geometry keys. A configuration that supplies Raybox geometry and
+legacy geometry together is rejected so the active controls are unambiguous.
 
 Supported operation names are defined by `pointcloud_ops._SUPPORTED_OPS`:
 

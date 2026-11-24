@@ -1,0 +1,26 @@
+case,scan_name,collection_date,plot,side,treatment,view,x_near_m,prebox_fraction,pai_reach_fraction,z_pai_m2_m2,pai_whole_box_m2_m2,pai_m2_m2
+July 9 scan 1: control marker 1 and 100%-removal marker 2,scan_001_multi02_2026_07_09_1_Additional_Scans,2026-07-09,1,left,0,Row 2L,0.0,0.0005388829228389438,0.99946112,0.74112764,0.55309432,0.75002357
+July 9 scan 1: control marker 1 and 100%-removal marker 2,scan_001_multi02_2026_07_09_1_Additional_Scans,2026-07-09,1,right,0,Row 1,0.0,5.734641281321261e-05,0.99994265,0.8734126,0.60917426,0.89806466
+July 9 scan 1: control marker 1 and 100%-removal marker 2,scan_001_multi02_2026_07_09_1_Additional_Scans,2026-07-09,2,left,100,Row 2L,0.0,0.00014135429984074083,0.99985865,1.2979698,0.77039324,1.3352265
+July 9 scan 1: control marker 1 and 100%-removal marker 2,scan_001_multi02_2026_07_09_1_Additional_Scans,2026-07-09,2,right,100,Row 1,0.0,0.0006315409599422591,0.99936846,1.5904787,0.85137515,1.7287819
+July 9 scan 1: control marker 1 and 100%-removal marker 2,scan_001_multi02_2026_07_09_1_Additional_Scans,2026-07-09,1,left,0,Row 2L,0.1,0.021905251159878635,0.97809475,1.0503423,0.88078062,1.0787467
+July 9 scan 1: control marker 1 and 100%-removal marker 2,scan_001_multi02_2026_07_09_1_Additional_Scans,2026-07-09,1,right,0,Row 1,0.1,0.006587645844448053,0.99341235,1.368088,1.0641304,1.4488122
+July 9 scan 1: control marker 1 and 100%-removal marker 2,scan_001_multi02_2026_07_09_1_Additional_Scans,2026-07-09,2,left,100,Row 2L,0.1,0.029082729317670582,0.97091727,1.6267838,1.161598,1.6538795
+July 9 scan 1: control marker 1 and 100%-removal marker 2,scan_001_multi02_2026_07_09_1_Additional_Scans,2026-07-09,2,right,100,Row 1,0.1,0.035438499724214007,0.9645615,1.6563127,1.0311242,1.7916358
+July 9 scan 1: control marker 1 and 100%-removal marker 2,scan_001_multi02_2026_07_09_1_Additional_Scans,2026-07-09,1,left,0,Row 2L,0.2,0.053471383376473974,0.94652862,1.3961697,1.1237531,1.4506432
+July 9 scan 1: control marker 1 and 100%-removal marker 2,scan_001_multi02_2026_07_09_1_Additional_Scans,2026-07-09,1,right,0,Row 1,0.2,0.02161106626230009,0.97838893,2.0519444,1.4580252,2.2777996
+July 9 scan 1: control marker 1 and 100%-removal marker 2,scan_001_multi02_2026_07_09_1_Additional_Scans,2026-07-09,2,left,100,Row 2L,0.2,0.18996517980428648,0.81003482,1.6034324,1.0287835,1.6321464
+July 9 scan 1: control marker 1 and 100%-removal marker 2,scan_001_multi02_2026_07_09_1_Additional_Scans,2026-07-09,2,right,100,Row 1,0.2,0.05546747746769465,0.94453252,1.9540838,1.1645418,2.1006675
+July 9 scan 1: control marker 1 and 100%-removal marker 2,scan_001_multi02_2026_07_09_1_Additional_Scans,2026-07-09,1,left,0,Row 2L,0.3,0.04413505706302979,0.95586494,2.2689756,1.5560074,2.3927997
+July 9 scan 1: control marker 1 and 100%-removal marker 2,scan_001_multi02_2026_07_09_1_Additional_Scans,2026-07-09,1,right,0,Row 1,0.3,0.05063441242736867,0.94936559,3.3112113,1.8103373,3.7825767
+July 9 scan 1: control marker 1 and 100%-removal marker 2,scan_001_multi02_2026_07_09_1_Additional_Scans,2026-07-09,2,left,100,Row 2L,0.3,0.3586029260251391,0.64139707,1.439765,0.75577497,1.3988507
+July 9 scan 1: control marker 1 and 100%-removal marker 2,scan_001_multi02_2026_07_09_1_Additional_Scans,2026-07-09,2,right,100,Row 1,0.3,0.07524969621528704,0.9247503,2.1691423,1.1996105,2.1494767
+July 9 scan 1: control marker 1 and 100%-removal marker 2,scan_001_multi02_2026_07_09_1_Additional_Scans,2026-07-09,1,left,0,Row 2L,0.4,0.0891738306862888,0.91082617,4.2803239,1.9546634,4.3281112
+July 9 scan 1: control marker 1 and 100%-removal marker 2,scan_001_multi02_2026_07_09_1_Additional_Scans,2026-07-09,1,right,0,Row 1,0.4,0.19653753923537326,0.80346246,4.0303911,1.658583,4.5318204
+July 9 scan 1: control marker 1 and 100%-removal marker 2,scan_001_multi02_2026_07_09_1_Additional_Scans,2026-07-09,2,left,100,Row 2L,0.4,0.5418145638377971,0.45818544,0.48155588,0.26785907,0.4889568
+July 9 scan 1: control marker 1 and 100%-removal marker 2,scan_001_multi02_2026_07_09_1_Additional_Scans,2026-07-09,2,right,100,Row 1,0.4,0.24468827543424318,0.75531172,1.5404375,0.85003472,1.4750285
+highest true-boundary prebox interception,scan_007_multi02_2026_07_16_Additional_Scans,2026-07-16,3,right,90,Row 1,0.4,0.9498662613093237,0.050133739,1.6488579,1.2134466,1.5332236
+highest true-boundary prebox interception,scan_009_multi02_2026_07_16_Additional_Scans,2026-07-16,3,right,90,Row 1,0.4,0.9458547024314652,0.054145298,1.6313387,1.2093808,1.5719853
+highest true-boundary prebox interception,scan_003_multi02_2026_07_16_Additional_Scans,2026-07-16,3,right,90,Row 1,0.4,0.9431781968326105,0.056821803,1.1286328,0.76193783,1.0732263
+highest true-boundary prebox interception,scan_004_multi02_2026_07_09_1_Additional_Scans,2026-07-09,6,right,100,Row 3,0.4,0.9412679372695366,0.058732063,0.42316724,0.31622125,0.42550635
+highest true-boundary prebox interception,scan_005_multi02_2026_07_16_Additional_Scans,2026-07-16,3,right,90,Row 1,0.4,0.9351363273893347,0.064863673,2.0212639,1.489103,1.8551645

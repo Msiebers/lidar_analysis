@@ -22,6 +22,7 @@ def test_rssi_modes_restricted():
 def test_fad_config_defaults_present():
     analysis = default_analysis_yaml_dict()
 
+    assert analysis["plant_window_offsets_u"] is None
     assert analysis["run_fad"] is False
     assert analysis["fad_height_percentile"] == 99.0
     assert analysis["fad_x_near_m"] == 0.0
@@ -33,6 +34,28 @@ def test_fad_config_defaults_present():
     assert analysis["fad_layer_thickness_m"] == 0.10
     assert analysis["fad_include_layer_columns"] is True
     assert analysis["force_two_sided_targets"] is False
+
+
+def test_plant_window_offsets_config_and_validation(tmp_path):
+    from lidar_analysis.central_runner import build_config
+
+    cfg = build_config(
+        {"marks": {"plant_window_offsets_u": [0.0, 0.5]}},
+        force=False,
+        cart_id="CART",
+        data_dir=tmp_path,
+    )
+    assert cfg.plant_window_offsets_u == (0.0, 0.5)
+
+    invalid_values = ([0.0], [0.5, 0.0], [0.0, float("inf")], [False, 0.5], "0,0.5")
+    for value in invalid_values:
+        with pytest.raises(ValueError, match="plant_window_offsets_u"):
+            build_config(
+                {"marks": {"plant_window_offsets_u": value}},
+                force=False,
+                cart_id="CART",
+                data_dir=tmp_path,
+            )
 
 
 def test_mta_config_defaults_validation_and_legacy_mapping(tmp_path):
@@ -221,13 +244,50 @@ def test_build_config_maps_local_ground_grid_settings(tmp_path):
     cfg = build_config({
         "use_local_ground_filter": True,
         "apply_ground_filter": False,
-        "ray_box": {"ground_mode": "local_grid", "bottom_agl_m": 0.10, "x_near_m": 0.2},
+        "ray_box": {
+            "ground_mode": "local_grid",
+            "bottom_agl_m": 0.10,
+            "x_near_m": 0.2,
+            "height_percentile": 99.0,
+            "height_buffer_m": 0.0,
+            "grubbs_alpha": 0.01,
+            "layer_thickness_m": 0.10,
+        },
     }, force=False, cart_id="CART", data_dir=tmp_path)
     assert cfg.use_local_ground_filter is False
     assert cfg.apply_ground_filter is False
     assert cfg.ray_box_ground_mode == "local_grid"
     assert cfg.ray_box_bottom_agl_m == pytest.approx(0.10)
     assert cfg.ray_box_x_near_m == pytest.approx(0.2)
+
+
+def test_ray_box_geometry_is_complete_and_cannot_mix_with_legacy_controls(tmp_path):
+    from lidar_analysis.central_runner import build_config
+
+    complete = {
+        "ground_mode": "global_y",
+        "bottom_agl_m": 0.10,
+        "x_near_m": 0.0,
+        "height_percentile": 99.0,
+        "height_buffer_m": 0.0,
+        "grubbs_alpha": 0.01,
+        "layer_thickness_m": 0.10,
+    }
+    with pytest.raises(ValueError, match="must be complete"):
+        build_config(
+            {"ray_box": {"bottom_agl_m": 0.10}},
+            force=False, cart_id="CART", data_dir=tmp_path,
+        )
+    with pytest.raises(ValueError, match="cannot be combined"):
+        build_config(
+            {"ray_box": complete, "pai_x_near_m": 0.0},
+            force=False, cart_id="CART", data_dir=tmp_path,
+        )
+    with pytest.raises(ValueError, match="greater than zero"):
+        build_config(
+            {"ray_box": {**complete, "layer_thickness_m": 0.0}},
+            force=False, cart_id="CART", data_dir=tmp_path,
+        )
 
 
 def test_build_config_maps_force_two_sided_targets(tmp_path):

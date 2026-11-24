@@ -29,6 +29,13 @@ def marker_buffer_mm(mark_z_buffer_u: float, dim_units: str) -> float:
     return _to_m_units(float(mark_z_buffer_u), dim_units) * 1000.0
 
 
+def plant_window_offsets_mm(
+    offsets_u: tuple[float, float] | list[float],
+    dim_units: str,
+) -> tuple[float, float]:
+    return tuple(_to_m_units(float(value), dim_units) * 1000.0 for value in offsets_u)
+
+
 def _clean_label(x) -> str:
     if pd.isna(x):
         return ""
@@ -148,6 +155,7 @@ def build_mark_segments(
     step_mm: float,
     lidar_wheel_offset_mm: float,
     z_buffer_mm: float,
+    plant_window_offsets_mm: tuple[float, float] | None = None,
     target_type: str = "auto",
     free_marks_as: str = "none",
     zmax_clip: float | None = None,
@@ -365,8 +373,15 @@ def build_mark_segments(
                     continue
 
                 center = float(row["_z_mm"])
-                lo = max(0.0, center - float(z_buffer_mm))
-                hi = center + float(z_buffer_mm)
+                if str(ttype) == "plant" and plant_window_offsets_mm is not None:
+                    lower_offset_mm, upper_offset_mm = plant_window_offsets_mm
+                    lo = center + float(lower_offset_mm)
+                    hi = center + float(upper_offset_mm)
+                else:
+                    lo = center - float(z_buffer_mm)
+                    hi = center + float(z_buffer_mm)
+
+                lo = max(0.0, lo)
 
                 if zmax_clip is not None:
                     hi = min(float(zmax_clip), hi)

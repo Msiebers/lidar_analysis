@@ -17,7 +17,11 @@ sys.path.insert(0, str(ROOT))
 
 from lidar_analysis.analysis_target import AnalysisTarget
 from lidar_analysis.central_runner import build_config, read_calibration_from_cart_config
-from lidar_analysis.mark_splitting import build_mark_segments, marker_buffer_mm
+from lidar_analysis.mark_splitting import (
+    build_mark_segments,
+    marker_buffer_mm,
+    plant_window_offsets_mm,
+)
 from lidar_analysis.pipeline_core import (
     apply_global_filters,
     choose_fusion_method,
@@ -97,9 +101,15 @@ def _angles(fused: np.ndarray, cfg) -> dict[str, float]:
 
 def _windows(source: Path, scan_base: str, cfg, calib, zmax: float):
     marker = source / cfg.markers_dirname / f"{scan_base}_marker.csv"
+    plant_offsets_mm = (
+        plant_window_offsets_mm(cfg.plant_window_offsets_u, cfg.dim_units)
+        if cfg.plant_window_offsets_u is not None
+        else None
+    )
     return build_mark_segments(
         marker, step_mm=calib["step_mm"], lidar_wheel_offset_mm=calib["lidar_wheel_offset_mm"],
         z_buffer_mm=marker_buffer_mm(cfg.mark_z_buffer_u, cfg.dim_units),
+        plant_window_offsets_mm=plant_offsets_mm,
         target_type=cfg.mark_target_type, free_marks_as=cfg.free_marks_as, zmax_clip=zmax,
     )
 

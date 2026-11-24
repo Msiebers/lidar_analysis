@@ -12,6 +12,7 @@ class AnalysisConfig:
     split_source: str = "distance"
     mark_target_type: str = "auto"
     mark_z_buffer_u: float = 0.0
+    plant_window_offsets_u: tuple[float, float] | None = None
     markers_dirname: str = "markers"
     missing_mark_file: str = "error"
     write_marker_pointcloud: bool = False

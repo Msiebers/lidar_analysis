@@ -251,14 +251,79 @@ def resolve_buffer_u(experiment_config: dict) -> float:
     return 0.0
 
 
+def resolve_plant_window_offsets_u(
+    experiment_config: dict,
+) -> tuple[float, float] | None:
+    """Resolve the optional plant center-window offsets in ``dim_units``."""
+    marks_cfg = experiment_config.get("marks", {}) or {}
+    value = marks_cfg.get(
+        "plant_window_offsets_u",
+        experiment_config.get("plant_window_offsets_u"),
+    )
+    if value is None:
+        return None
+    if (
+        not isinstance(value, (list, tuple))
+        or len(value) != 2
+        or any(isinstance(item, bool) for item in value)
+    ):
+        raise ValueError(
+            "marks.plant_window_offsets_u must contain exactly two numeric offsets"
+        )
+    try:
+        lower, upper = (float(value[0]), float(value[1]))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "marks.plant_window_offsets_u must contain exactly two numeric offsets"
+        ) from exc
+    if not np.isfinite(lower) or not np.isfinite(upper):
+        raise ValueError("marks.plant_window_offsets_u offsets must be finite")
+    if lower >= upper:
+        raise ValueError(
+            "marks.plant_window_offsets_u lower offset must be less than upper offset"
+        )
+    return lower, upper
+
+
 def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: Path) -> AnalysisConfig:
     marks_cfg = experiment_config.get("marks", {}) or {}
     ray_box_cfg = experiment_config.get("ray_box", {}) or {}
     if not isinstance(ray_box_cfg, dict):
         raise ValueError("ray_box must be a mapping")
 
+    ray_box_geometry_keys = {
+        "ground_mode", "bottom_agl_m", "x_near_m", "height_percentile",
+        "height_buffer_m", "grubbs_alpha", "layer_thickness_m",
+    }
+    legacy_ray_box_keys = {
+        "fad_height_percentile", "fad_x_near_m", "fad_y_min_m",
+        "fad_height_buffer_m", "fad_grubbs_alpha", "fad_layer_thickness_m",
+        "pai_height_percentile", "pai_x_near_m", "pai_y_min_m",
+        "pai_height_buffer_m", "pai_grubbs_alpha", "pai_layer_thickness_m",
+    }
+    configured_ray_box_geometry = ray_box_geometry_keys.intersection(ray_box_cfg)
+    if configured_ray_box_geometry:
+        missing = sorted(
+            key for key in ray_box_geometry_keys
+            if key not in ray_box_cfg or ray_box_cfg[key] is None
+        )
+        if missing:
+            raise ValueError(
+                "ray_box geometry must be complete; missing: " + ", ".join(missing)
+            )
+        duplicates = sorted(legacy_ray_box_keys.intersection(experiment_config))
+        if duplicates:
+            raise ValueError(
+                "ray_box geometry cannot be combined with legacy FAD/PAI geometry: "
+                + ", ".join(duplicates)
+            )
+        layer_thickness_m = float(ray_box_cfg["layer_thickness_m"])
+        if not np.isfinite(layer_thickness_m) or layer_thickness_m <= 0.0:
+            raise ValueError("ray_box.layer_thickness_m must be greater than zero")
+
     split_source, mark_target_type = resolve_splitting_style(experiment_config)
     mark_z_buffer_u = resolve_buffer_u(experiment_config)
+    plant_window_offsets_u = resolve_plant_window_offsets_u(experiment_config)
 
     missing_mark_file = marks_cfg.get("missing_file")
     if missing_mark_file is None:
@@ -342,6 +407,7 @@ def build_config(experiment_config: dict, force: bool, cart_id: str, data_dir: P
         split_source=str(split_source),
         mark_target_type=str(mark_target_type),
         mark_z_buffer_u=float(mark_z_buffer_u),
+        plant_window_offsets_u=plant_window_offsets_u,
         markers_dirname=str(marks_cfg.get("dirname", experiment_config.get("markers_dirname", _DEFAULTS["markers_dirname"]))),
         missing_mark_file=str(missing_mark_file),
         write_marker_pointcloud=bool(write_marker_pointcloud),

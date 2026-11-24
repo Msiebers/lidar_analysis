@@ -17,6 +17,10 @@ analysis:
   marks:
     target_type: auto  # options: auto, plant, plot
     buffer_u: 0.0
+    # Plant center-mark window [lower, upper] offsets in dim_units. Negative is
+    # behind and positive is forward along Z. Overrides buffer_u only for plant
+    # center marks. Example: [0.0, 0.5] starts at the mark.
+    plant_window_offsets_u: null
     missing_file: error  # options: error, skip, distance
     empty_file: skip  # options: skip, error, distance
     free_marks_as: none  # options: none, plant, plot
@@ -120,28 +124,16 @@ analysis:
   run_z_pai: false  # options: true, false; exact first-event PAI using the same Raybox/layers
   # run_z_pai: true
 
-  # FAD settings
-  fad_height_percentile: 99.0
-  fad_x_near_m: 0.0
-  fad_y_min_m: 0.03
-  fad_height_buffer_m: 0.0
-  fad_grubbs_alpha: 0.01
+  # FAD estimator/output controls; all box geometry comes from ray_box.
   fad_g_function: spherical
   fad_run_layers: false
   # fad_run_layers: true
-  fad_layer_thickness_m: 0.10
   fad_include_layer_columns: true
   # fad_include_layer_columns: false
 
-  # Bounded PAI settings shared by PAI and Z_PAI (independent of FAD)
+  # PAI/Z_PAI estimator/output controls; geometry and layer thickness come from ray_box.
   pai_g_function: spherical
   pai_g_value: 0.5
-  pai_height_percentile: 99.0
-  pai_grubbs_alpha: 0.01
-  pai_y_min_m: 0.10
-  pai_x_near_m: 0.0
-  pai_height_buffer_m: 0.0
-  pai_layer_thickness_m: 0.10
   pai_include_layer_columns: false
   # pai_include_layer_columns: true  # one PAI and Z_PAI increment per layer in results.csv
 

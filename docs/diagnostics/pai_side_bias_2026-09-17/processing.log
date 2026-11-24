@@ -1,0 +1,345 @@
+[Processing] scan_001_multi02_2026_07_23_Additional_Scans
+/home/central/Documents/lidar_analysis/lidar_analysis/fusion_imu_interp.py:206: RuntimeWarning: fuse_by_imu_interp used endpoint clamping because trim_to_overlap=False. Clamped 15300 query rows in this interpolation call. Set trim_to_overlap=True to drop out-of-overlap rows instead.
+  enc_y, enc_valid, enc_clamped = _interp_columns(
+[DEBUG] X range (mm): -3782.7 to 3843.9
+[DEBUG] X range (m): -3.783 to 3.844
+[DEBUG] After x_max filter: X range (mm): -1500.0 to 1499.8
+[DEBUG] After x_max filter: X range (m): -1.500 to 1.500
+[DEBUG] After x_min filter: kept 754179 / 6409404 points with x_min_mm=400.0
+[RANGES] z0=0.0 mm, zmax=16197.9 mm, usable_zmax=16197.9 mm, start_pad=0.0 mm, split_len_mm=0.0, do_distance=False, n_cap=1
+[RANGES] built 1 distance range(s)
+[PC_OPS] target=scan_1 before=470359 after=470359 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_1 rays=9558900 observed=1073710 pai=4.565410886723407
+[Z_PAI] target=scan_1 rays=9558900 observed=1073710 z_pai=4.855046827527846
+[Traits] scan=scan_001_multi02_2026_07_23_Additional_Scans, plot=scan_1, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=470359, scans=0, angles=0
+[PC_OPS] target=scan_1 before=271123 after=271123 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_1 rays=9558900 observed=779482 pai=3.0223178805776
+[Z_PAI] target=scan_1 rays=9558900 observed=779482 z_pai=3.5582112189044874
+[Traits] scan=scan_001_multi02_2026_07_23_Additional_Scans, plot=scan_1, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=271123, scans=0, angles=0
+Scan scan_001_multi02_2026_07_23_Additional_Scans completed
+[Processing] scan_002_multi02_2026_07_23_Additional_Scans
+[DEBUG] X range (mm): -15048.4 to 10930.7
+[DEBUG] X range (m): -15.048 to 10.931
+[DEBUG] After x_max filter: X range (mm): -1500.0 to 1499.9
+[DEBUG] After x_max filter: X range (m): -1.500 to 1.500
+[DEBUG] After x_min filter: kept 949824 / 6177993 points with x_min_mm=400.0
+[RANGES] z0=0.0 mm, zmax=16929.1 mm, usable_zmax=16929.1 mm, start_pad=0.0 mm, split_len_mm=0.0, do_distance=False, n_cap=1
+[RANGES] built 1 distance range(s)
+[PC_OPS] target=scan_2 before=486125 after=486125 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_2 rays=9522000 observed=1188116 pai=4.1223577369493265
+[Z_PAI] target=scan_2 rays=9522000 observed=1188116 z_pai=4.572991281306311
+[Traits] scan=scan_002_multi02_2026_07_23_Additional_Scans, plot=scan_2, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=486125, scans=0, angles=0
+[PC_OPS] target=scan_2 before=451332 after=451332 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_2 rays=9522000 observed=1089087 pai=4.792084249657068
+[Z_PAI] target=scan_2 rays=9522000 observed=1089087 z_pai=5.400062892010988
+[Traits] scan=scan_002_multi02_2026_07_23_Additional_Scans, plot=scan_2, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=451332, scans=0, angles=0
+Scan scan_002_multi02_2026_07_23_Additional_Scans completed
+[Processing] scan_003_multi02_2026_07_23_Additional_Scans
+[DEBUG] X range (mm): -15284.0 to 17053.8
+[DEBUG] X range (m): -15.284 to 17.054
+[DEBUG] After x_max filter: X range (mm): -1499.8 to 1500.0
+[DEBUG] After x_max filter: X range (m): -1.500 to 1.500
+[DEBUG] After x_min filter: kept 970505 / 6551679 points with x_min_mm=400.0
+[RANGES] z0=0.0 mm, zmax=17257.7 mm, usable_zmax=17257.7 mm, start_pad=0.0 mm, split_len_mm=0.0, do_distance=False, n_cap=1
+[RANGES] built 1 distance range(s)
+[PC_OPS] target=scan_3 before=563127 after=563127 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_3 rays=9986400 observed=1259667 pai=5.624693140303714
+[Z_PAI] target=scan_3 rays=9986400 observed=1259667 z_pai=5.804726562755307
+[Traits] scan=scan_003_multi02_2026_07_23_Additional_Scans, plot=scan_3, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=563127, scans=0, angles=0
+[PC_OPS] target=scan_3 before=398220 after=398220 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_3 rays=9986400 observed=1008270 pai=4.199555330249913
+[Z_PAI] target=scan_3 rays=9986400 observed=1008270 z_pai=4.612941129128273
+[Traits] scan=scan_003_multi02_2026_07_23_Additional_Scans, plot=scan_3, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=398220, scans=0, angles=0
+Scan scan_003_multi02_2026_07_23_Additional_Scans completed
+[Processing] scan_004_multi02_2026_07_23_Additional_Scans
+[DEBUG] X range (mm): -15269.8 to 6859.6
+[DEBUG] X range (m): -15.270 to 6.860
+[DEBUG] After x_max filter: X range (mm): -1499.9 to 1499.9
+[DEBUG] After x_max filter: X range (m): -1.500 to 1.500
+[DEBUG] After x_min filter: kept 1046619 / 6193090 points with x_min_mm=400.0
+[RANGES] z0=0.0 mm, zmax=17544.4 mm, usable_zmax=17544.4 mm, start_pad=0.0 mm, split_len_mm=0.0, do_distance=False, n_cap=1
+[RANGES] built 1 distance range(s)
+[PC_OPS] target=scan_4 before=494947 after=494947 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_4 rays=9543600 observed=1129367 pai=4.655128158173319
+[Z_PAI] target=scan_4 rays=9543600 observed=1129367 z_pai=5.163329340958039
+[Traits] scan=scan_004_multi02_2026_07_23_Additional_Scans, plot=scan_4, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=494947, scans=0, angles=0
+[PC_OPS] target=scan_4 before=541125 after=541125 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_4 rays=9543600 observed=1214245 pai=6.717501597836008
+[Z_PAI] target=scan_4 rays=9543600 observed=1214245 z_pai=7.21449795036606
+[Traits] scan=scan_004_multi02_2026_07_23_Additional_Scans, plot=scan_4, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=541125, scans=0, angles=0
+Scan scan_004_multi02_2026_07_23_Additional_Scans completed
+[Processing] scan_005_multi02_2026_07_23_Additional_Scans
+[DEBUG] X range (mm): -15254.6 to 4549.1
+[DEBUG] X range (m): -15.255 to 4.549
+[DEBUG] After x_max filter: X range (mm): -1499.9 to 1499.8
+[DEBUG] After x_max filter: X range (m): -1.500 to 1.500
+[DEBUG] After x_min filter: kept 880060 / 5859731 points with x_min_mm=400.0
+[RANGES] z0=0.0 mm, zmax=16710.5 mm, usable_zmax=16710.5 mm, start_pad=0.0 mm, split_len_mm=0.0, do_distance=False, n_cap=1
+[RANGES] built 1 distance range(s)
+[PC_OPS] target=scan_5 before=466995 after=466995 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_5 rays=8934300 observed=1023058 pai=5.728360163923889
+[Z_PAI] target=scan_5 rays=8934300 observed=1023058 z_pai=6.075689902727782
+[Traits] scan=scan_005_multi02_2026_07_23_Additional_Scans, plot=scan_5, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=466995, scans=0, angles=0
+[PC_OPS] target=scan_5 before=403847 after=403847 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_5 rays=8934300 observed=979959 pai=4.791178268095365
+[Z_PAI] target=scan_5 rays=8934300 observed=979959 z_pai=5.303437748608467
+[Traits] scan=scan_005_multi02_2026_07_23_Additional_Scans, plot=scan_5, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=403847, scans=0, angles=0
+Scan scan_005_multi02_2026_07_23_Additional_Scans completed
+[Processing] scan_006_multi02_2026_07_23_Additional_Scans
+[DEBUG] X range (mm): -15031.7 to 21320.2
+[DEBUG] X range (m): -15.032 to 21.320
+[DEBUG] After x_max filter: X range (mm): -1499.4 to 1500.0
+[DEBUG] After x_max filter: X range (m): -1.499 to 1.500
+[DEBUG] After x_min filter: kept 973648 / 5471755 points with x_min_mm=400.0
+[RANGES] z0=0.0 mm, zmax=17600.8 mm, usable_zmax=17600.8 mm, start_pad=0.0 mm, split_len_mm=0.0, do_distance=False, n_cap=1
+[RANGES] built 1 distance range(s)
+[PC_OPS] target=scan_6 before=445984 after=445984 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_6 rays=8460000 observed=998313 pai=4.39354140048777
+[Z_PAI] target=scan_6 rays=8460000 observed=998313 z_pai=4.836923316381382
+[Traits] scan=scan_006_multi02_2026_07_23_Additional_Scans, plot=scan_6, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=445984, scans=0, angles=0
+[PC_OPS] target=scan_6 before=521808 after=521808 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_6 rays=8460000 observed=1137346 pai=6.537809874985773
+[Z_PAI] target=scan_6 rays=8460000 observed=1137346 z_pai=6.883628207357604
+[Traits] scan=scan_006_multi02_2026_07_23_Additional_Scans, plot=scan_6, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=521808, scans=0, angles=0
+Scan scan_006_multi02_2026_07_23_Additional_Scans completed
+[Processing] scan_007_multi02_2026_07_23_Additional_Scans
+[DEBUG] X range (mm): -15078.2 to 4061.2
+[DEBUG] X range (m): -15.078 to 4.061
+[DEBUG] After x_max filter: X range (mm): -1499.6 to 1499.9
+[DEBUG] After x_max filter: X range (m): -1.500 to 1.500
+[DEBUG] After x_min filter: kept 931379 / 6119567 points with x_min_mm=400.0
+[RANGES] z0=0.0 mm, zmax=16246.1 mm, usable_zmax=16246.1 mm, start_pad=0.0 mm, split_len_mm=0.0, do_distance=False, n_cap=1
+[RANGES] built 1 distance range(s)
+[PC_OPS] target=scan_7 before=517886 after=517886 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_7 rays=9236700 observed=1121662 pai=6.006715218937743
+[Z_PAI] target=scan_7 rays=9236700 observed=1121662 z_pai=6.231627885320752
+[Traits] scan=scan_007_multi02_2026_07_23_Additional_Scans, plot=scan_7, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=517886, scans=0, angles=0
+[PC_OPS] target=scan_7 before=402456 after=402456 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_7 rays=9236700 observed=973893 pai=4.639326476285952
+[Z_PAI] target=scan_7 rays=9236700 observed=973893 z_pai=5.227962132520453
+[Traits] scan=scan_007_multi02_2026_07_23_Additional_Scans, plot=scan_7, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=402456, scans=0, angles=0
+Scan scan_007_multi02_2026_07_23_Additional_Scans completed
+[Processing] scan_008_multi02_2026_07_23_Additional_Scans
+[DEBUG] X range (mm): -15316.3 to 21596.4
+[DEBUG] X range (m): -15.316 to 21.596
+[DEBUG] After x_max filter: X range (mm): -1499.3 to 1500.0
+[DEBUG] After x_max filter: X range (m): -1.499 to 1.500
+[DEBUG] After x_min filter: kept 907174 / 4947922 points with x_min_mm=400.0
+[RANGES] z0=0.0 mm, zmax=17284.7 mm, usable_zmax=17284.7 mm, start_pad=0.0 mm, split_len_mm=0.0, do_distance=False, n_cap=1
+[RANGES] built 1 distance range(s)
+[PC_OPS] target=scan_8 before=374726 after=374726 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_8 rays=7633800 observed=847214 pai=4.155041170694319
+[Z_PAI] target=scan_8 rays=7633800 observed=847214 z_pai=4.543588967073067
+[Traits] scan=scan_008_multi02_2026_07_23_Additional_Scans, plot=scan_8, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=374726, scans=0, angles=0
+[PC_OPS] target=scan_8 before=527571 after=527571 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_8 rays=7633800 observed=1101808 pai=7.102941025659401
+[Z_PAI] target=scan_8 rays=7633800 observed=1101808 z_pai=7.496949618843962
+[Traits] scan=scan_008_multi02_2026_07_23_Additional_Scans, plot=scan_8, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=527571, scans=0, angles=0
+Scan scan_008_multi02_2026_07_23_Additional_Scans completed
+[Processing] scan_009_multi02_2026_07_23_Additional_Scans
+[DEBUG] X range (mm): -15371.9 to 17156.1
+[DEBUG] X range (m): -15.372 to 17.156
+[DEBUG] After x_max filter: X range (mm): -1499.4 to 1499.8
+[DEBUG] After x_max filter: X range (m): -1.499 to 1.500
+[DEBUG] After x_min filter: kept 1009902 / 6161763 points with x_min_mm=400.0
+[RANGES] z0=0.0 mm, zmax=17830.7 mm, usable_zmax=17830.7 mm, start_pad=0.0 mm, split_len_mm=0.0, do_distance=False, n_cap=1
+[RANGES] built 1 distance range(s)
+[PC_OPS] target=scan_9 before=485060 after=485060 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_9 rays=9377100 observed=1069023 pai=5.105267672960427
+[Z_PAI] target=scan_9 rays=9377100 observed=1069023 z_pai=5.436116159604039
+[Traits] scan=scan_009_multi02_2026_07_23_Additional_Scans, plot=scan_9, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=485060, scans=0, angles=0
+[PC_OPS] target=scan_9 before=513523 after=513523 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_9 rays=9377100 observed=1173350 pai=5.298197382319227
+[Z_PAI] target=scan_9 rays=9377100 observed=1173350 z_pai=5.785108698498806
+[Traits] scan=scan_009_multi02_2026_07_23_Additional_Scans, plot=scan_9, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=513523, scans=0, angles=0
+Scan scan_009_multi02_2026_07_23_Additional_Scans completed
+[Processing] scan_010_multi02_2026_07_23_Additional_Scans
+[DEBUG] X range (mm): -14908.6 to 22677.4
+[DEBUG] X range (m): -14.909 to 22.677
+[DEBUG] After x_max filter: X range (mm): -1499.9 to 1499.9
+[DEBUG] After x_max filter: X range (m): -1.500 to 1.500
+[DEBUG] After x_min filter: kept 901964 / 5037042 points with x_min_mm=400.0
+[RANGES] z0=0.0 mm, zmax=17350.4 mm, usable_zmax=17350.4 mm, start_pad=0.0 mm, split_len_mm=0.0, do_distance=False, n_cap=1
+[RANGES] built 1 distance range(s)
+[PC_OPS] target=scan_10 before=428692 after=428692 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_10 rays=7777800 observed=952497 pai=4.353060124227259
+[Z_PAI] target=scan_10 rays=7777800 observed=952497 z_pai=4.644975440834279
+[Traits] scan=scan_010_multi02_2026_07_23_Additional_Scans, plot=scan_10, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=428692, scans=0, angles=0
+[PC_OPS] target=scan_10 before=471227 after=471227 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_10 rays=7777800 observed=1038029 pai=6.50613922130654
+[Z_PAI] target=scan_10 rays=7777800 observed=1038029 z_pai=7.056195718655738
+[Traits] scan=scan_010_multi02_2026_07_23_Additional_Scans, plot=scan_10, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=471227, scans=0, angles=0
+Scan scan_010_multi02_2026_07_23_Additional_Scans completed
+[Processing] scan_001_multi02_2026_07_23_Additional_Scans
+[DEBUG] X range (mm): -3782.7 to 3843.9
+[DEBUG] X range (m): -3.783 to 3.844
+[DEBUG] After x_max filter: X range (mm): -1500.0 to 1499.8
+[DEBUG] After x_max filter: X range (m): -1.500 to 1.500
+[DEBUG] After x_min filter: kept 754179 / 6409404 points with x_min_mm=400.0
+[MARKS] plot 1: raw=1125.8->2151.9 buffered=1225.8->2051.9 buffer=100.0
+[MARKS] plot 2: raw=3055.0->4012.0 buffered=3155.0->3912.0 buffer=100.0
+[MARKS] plot 3: raw=5036.5->6360.9 buffered=5136.5->6260.9 buffer=100.0
+[MARKS] plot 4: raw=7158.1->8283.9 buffered=7258.1->8183.9 buffer=100.0
+[MARKS] plot 5: raw=9392.9->10231.0 buffered=9492.9->10131.0 buffer=100.0
+[MARKS] plot 6: raw=11280.2->12046.9 buffered=11380.2->11946.9 buffer=100.0
+[MARKS] plot 7: raw=12964.7->13861.0 buffered=13064.7->13761.0 buffer=100.0
+[MARKS] scan_001_multi02_2026_07_23_Additional_Scans: using 7 segment(s) from /media/central/raw_mirror/al_lai/density_test/source/markers/scan_001_multi02_2026_07_23_Additional_Scans_marker.csv, z_buffer=100.0 mm
+[MARKS] plot 1: 1225.8 -> 2051.9 mm
+[MARKS] plot 2: 3155.0 -> 3912.0 mm
+[MARKS] plot 3: 5136.5 -> 6260.9 mm
+[MARKS] plot 4: 7258.1 -> 8183.9 mm
+[MARKS] plot 5: 9492.9 -> 10131.0 mm
+[MARKS] plot 6: 11380.2 -> 11946.9 mm
+[MARKS] plot 7: 13064.7 -> 13761.0 mm
+[PC_OPS] target=scan_1 before=61411 after=61411 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_1 rays=683100 observed=88058 pai=7.74829628511619
+[Z_PAI] target=scan_1 rays=683100 observed=88058 z_pai=7.508270014731815
+[Traits] scan=scan_001_multi02_2026_07_23_Additional_Scans, plot=scan_1, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=61411, scans=0, angles=0
+[PC_OPS] target=scan_1 before=17178 after=17178 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_1 rays=683100 observed=45025 pai=3.4731704930002776
+[Z_PAI] target=scan_1 rays=683100 observed=45025 z_pai=4.281456107535773
+[Traits] scan=scan_001_multi02_2026_07_23_Additional_Scans, plot=scan_1, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=17178, scans=0, angles=0
+[PC_OPS] target=scan_2 before=10284 after=10284 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_2 rays=521100 observed=21746 pai=4.885672342498223
+[Z_PAI] target=scan_2 rays=521100 observed=21746 z_pai=5.758966440366839
+[Traits] scan=scan_001_multi02_2026_07_23_Additional_Scans, plot=scan_2, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=10284, scans=0, angles=0
+[PC_OPS] target=scan_2 before=7901 after=7901 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_2 rays=521100 observed=28494 pai=2.8360721755770957
+[Z_PAI] target=scan_2 rays=521100 observed=28494 z_pai=3.1820025862796117
+[Traits] scan=scan_001_multi02_2026_07_23_Additional_Scans, plot=scan_2, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=7901, scans=0, angles=0
+[PC_OPS] target=scan_3 before=7872 after=7872 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_3 rays=593100 observed=9051 pai=2.2470163954866744
+[Z_PAI] target=scan_3 rays=593100 observed=9051 z_pai=2.5909512148301177
+[Traits] scan=scan_001_multi02_2026_07_23_Additional_Scans, plot=scan_3, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=7872, scans=0, angles=0
+[PC_OPS] target=scan_3 before=11408 after=11408 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_3 rays=593100 observed=36039 pai=2.790881168167771
+[Z_PAI] target=scan_3 rays=593100 observed=36039 z_pai=3.0920786878025828
+[Traits] scan=scan_001_multi02_2026_07_23_Additional_Scans, plot=scan_3, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=11408, scans=0, angles=0
+[PC_OPS] target=scan_4 before=8796 after=8796 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_4 rays=617400 observed=19397 pai=4.1900194298202385
+[Z_PAI] target=scan_4 rays=617400 observed=19397 z_pai=4.539400598807017
+[Traits] scan=scan_001_multi02_2026_07_23_Additional_Scans, plot=scan_4, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=8796, scans=0, angles=0
+[PC_OPS] target=scan_4 before=8017 after=8017 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_4 rays=617400 observed=16478 pai=3.0341896415630885
+[Z_PAI] target=scan_4 rays=617400 observed=16478 z_pai=3.6706887016666467
+[Traits] scan=scan_001_multi02_2026_07_23_Additional_Scans, plot=scan_4, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=8017, scans=0, angles=0
+[PC_OPS] target=scan_5 before=8408 after=8408 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_5 rays=529200 observed=20057 pai=3.3153750399662507
+[Z_PAI] target=scan_5 rays=529200 observed=20057 z_pai=3.802832490830654
+[Traits] scan=scan_001_multi02_2026_07_23_Additional_Scans, plot=scan_5, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=8408, scans=0, angles=0
+[PC_OPS] target=scan_5 before=12957 after=12957 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_5 rays=529200 observed=26113 pai=4.540292288331677
+[Z_PAI] target=scan_5 rays=529200 observed=26113 z_pai=5.8666908694925635
+[Traits] scan=scan_001_multi02_2026_07_23_Additional_Scans, plot=scan_5, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=12957, scans=0, angles=0
+[PC_OPS] target=scan_6 before=12762 after=12762 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_6 rays=341040 observed=27131 pai=3.807974796585625
+[Z_PAI] target=scan_6 rays=341040 observed=27131 z_pai=3.9477376846230885
+[Traits] scan=scan_001_multi02_2026_07_23_Additional_Scans, plot=scan_6, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=12762, scans=0, angles=0
+[PC_OPS] target=scan_6 before=2197 after=2197 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_6 rays=341040 observed=8769 pai=1.1884056337710591
+[Z_PAI] target=scan_6 rays=341040 observed=8769 z_pai=1.3754075767930367
+[Traits] scan=scan_001_multi02_2026_07_23_Additional_Scans, plot=scan_6, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=2197, scans=0, angles=0
+[PC_OPS] target=scan_7 before=23906 after=23906 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_7 rays=344700 observed=42741 pai=6.59162886276788
+[Z_PAI] target=scan_7 rays=344700 observed=42741 z_pai=6.920200482062743
+[Traits] scan=scan_001_multi02_2026_07_23_Additional_Scans, plot=scan_7, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=23906, scans=0, angles=0
+[PC_OPS] target=scan_7 before=5762 after=5762 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_7 rays=344700 observed=12531 pai=2.22320573364756
+[Z_PAI] target=scan_7 rays=344700 observed=12531 z_pai=2.4325222391003885
+[Traits] scan=scan_001_multi02_2026_07_23_Additional_Scans, plot=scan_7, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=5762, scans=0, angles=0
+Scan scan_001_multi02_2026_07_23_Additional_Scans completed
+[Processing] scan_002_multi02_2026_07_23_Additional_Scans
+[DEBUG] X range (mm): -15048.4 to 10930.7
+[DEBUG] X range (m): -15.048 to 10.931
+[DEBUG] After x_max filter: X range (mm): -1500.0 to 1499.9
+[DEBUG] After x_max filter: X range (m): -1.500 to 1.500
+[DEBUG] After x_min filter: kept 949824 / 6177993 points with x_min_mm=400.0
+[MARKS] plot 1: raw=1895.8->3036.0 buffered=1995.8->2936.0 buffer=100.0
+[MARKS] plot 2: raw=3796.0->4568.9 buffered=3896.0->4468.9 buffer=100.0
+[MARKS] plot 3: raw=5536.4->6636.4 buffered=5636.4->6536.4 buffer=100.0
+[MARKS] plot 4: raw=7448.1->8578.7 buffered=7548.1->8478.7 buffer=100.0
+[MARKS] plot 5: raw=9500.8->10427.0 buffered=9600.8->10327.0 buffer=100.0
+[MARKS] plot 6: raw=11810.8->12903.4 buffered=11910.8->12803.4 buffer=100.0
+[MARKS] plot 7: raw=14068.7->14808.3 buffered=14168.7->14708.3 buffer=100.0
+[MARKS] scan_002_multi02_2026_07_23_Additional_Scans: using 7 segment(s) from /media/central/raw_mirror/al_lai/density_test/source/markers/scan_002_multi02_2026_07_23_Additional_Scans_marker.csv, z_buffer=100.0 mm
+[MARKS] plot 1: 1995.8 -> 2936.0 mm
+[MARKS] plot 2: 3896.0 -> 4468.9 mm
+[MARKS] plot 3: 5636.4 -> 6536.4 mm
+[MARKS] plot 4: 7548.1 -> 8478.7 mm
+[MARKS] plot 5: 9600.8 -> 10327.0 mm
+[MARKS] plot 6: 11910.8 -> 12803.4 mm
+[MARKS] plot 7: 14168.7 -> 14708.3 mm
+[PC_OPS] target=scan_1 before=11937 after=11937 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_1 rays=656100 observed=15891 pai=3.341784034291083
+[Z_PAI] target=scan_1 rays=656100 observed=15891 z_pai=3.5538220518052004
+[Traits] scan=scan_002_multi02_2026_07_23_Additional_Scans, plot=scan_1, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=11937, scans=0, angles=0
+[PC_OPS] target=scan_1 before=27001 after=27001 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_1 rays=656100 observed=61809 pai=7.096957737428459
+[Z_PAI] target=scan_1 rays=656100 observed=61809 z_pai=7.31682824066571
+[Traits] scan=scan_002_multi02_2026_07_23_Additional_Scans, plot=scan_1, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=27001, scans=0, angles=0
+[PC_OPS] target=scan_2 before=8540 after=8540 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_2 rays=301500 observed=16676 pai=5.7699281516754315
+[Z_PAI] target=scan_2 rays=301500 observed=16676 z_pai=6.366561085384072
+[Traits] scan=scan_002_multi02_2026_07_23_Additional_Scans, plot=scan_2, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=8540, scans=0, angles=0
+[PC_OPS] target=scan_2 before=15155 after=15155 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_2 rays=301500 observed=23402 pai=8.146211962339313
+[Z_PAI] target=scan_2 rays=301500 observed=23402 z_pai=8.172984144905778
+[Traits] scan=scan_002_multi02_2026_07_23_Additional_Scans, plot=scan_2, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=15155, scans=0, angles=0
+[PC_OPS] target=scan_3 before=15072 after=15072 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_3 rays=459000 observed=40557 pai=4.528252459837442
+[Z_PAI] target=scan_3 rays=459000 observed=40557 z_pai=5.278209721448815
+[Traits] scan=scan_002_multi02_2026_07_23_Additional_Scans, plot=scan_3, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=15072, scans=0, angles=0
+[PC_OPS] target=scan_3 before=30085 after=30085 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_3 rays=459000 observed=48833 pai=8.539453138296775
+[Z_PAI] target=scan_3 rays=459000 observed=48833 z_pai=8.693013032786844
+[Traits] scan=scan_002_multi02_2026_07_23_Additional_Scans, plot=scan_3, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=30085, scans=0, angles=0
+[PC_OPS] target=scan_4 before=10216 after=10216 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_4 rays=522000 observed=26919 pai=3.3564591806202437
+[Z_PAI] target=scan_4 rays=522000 observed=26919 z_pai=3.9323491831642396
+[Traits] scan=scan_002_multi02_2026_07_23_Additional_Scans, plot=scan_4, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=10216, scans=0, angles=0
+[PC_OPS] target=scan_4 before=13756 after=13756 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_4 rays=522000 observed=37108 pai=2.9195990546439163
+[Z_PAI] target=scan_4 rays=522000 observed=37108 z_pai=3.4756797029983946
+[Traits] scan=scan_002_multi02_2026_07_23_Additional_Scans, plot=scan_4, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=13756, scans=0, angles=0
+[PC_OPS] target=scan_5 before=23048 after=23048 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_5 rays=387900 observed=34767 pai=6.48907534350036
+[Z_PAI] target=scan_5 rays=387900 observed=34767 z_pai=7.354878372968129
+[Traits] scan=scan_002_multi02_2026_07_23_Additional_Scans, plot=scan_5, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=23048, scans=0, angles=0
+[PC_OPS] target=scan_5 before=7969 after=7969 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_5 rays=387900 observed=20719 pai=5.185801311958204
+[Z_PAI] target=scan_5 rays=387900 observed=20719 z_pai=5.5069255643777115
+[Traits] scan=scan_002_multi02_2026_07_23_Additional_Scans, plot=scan_5, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=7969, scans=0, angles=0
+[PC_OPS] target=scan_6 before=53286 after=53286 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_6 rays=471600 observed=55915 pai=11.664907376943322
+[Z_PAI] target=scan_6 rays=471600 observed=55915 z_pai=10.864616030767287
+[Traits] scan=scan_002_multi02_2026_07_23_Additional_Scans, plot=scan_6, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=53286, scans=0, angles=0
+[PC_OPS] target=scan_6 before=12116 after=12116 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_6 rays=471600 observed=43937 pai=3.274321400704359
+[Z_PAI] target=scan_6 rays=471600 observed=43937 z_pai=3.7970487445308563
+[Traits] scan=scan_002_multi02_2026_07_23_Additional_Scans, plot=scan_6, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=12116, scans=0, angles=0
+[PC_OPS] target=scan_7 before=15152 after=15152 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_7 rays=423900 observed=15407 pai=3.441695200914503
+[Z_PAI] target=scan_7 rays=423900 observed=15407 z_pai=3.90825487823528
+[Traits] scan=scan_002_multi02_2026_07_23_Additional_Scans, plot=scan_7, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=15152, scans=0, angles=0
+[PC_OPS] target=scan_7 before=29940 after=29940 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id', 'ground_Y', 'height_agl', 'ground_support']
+[PAI] target=scan_7 rays=423900 observed=51726 pai=7.807223870070654
+[Z_PAI] target=scan_7 rays=423900 observed=51726 z_pai=7.733512095332461
+[Traits] scan=scan_002_multi02_2026_07_23_Additional_Scans, plot=scan_7, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=29940, scans=0, angles=0
+Scan scan_002_multi02_2026_07_23_Additional_Scans completed
+[Processing] scan_008_multi02_2026_07_23_Additional_Scans
+[DEBUG] X range (mm): -15191.8 to 20767.7
+[DEBUG] X range (m): -15.192 to 20.768
+[DEBUG] After x_max filter: X range (mm): -1499.7 to 1499.4
+[DEBUG] After x_max filter: X range (m): -1.500 to 1.499
+[DEBUG] After x_min filter: kept 894594 / 4947924 points with x_min_mm=400.0
+[RANGES] z0=0.0 mm, zmax=17462.1 mm, usable_zmax=17462.1 mm, start_pad=0.0 mm, split_len_mm=0.0, do_distance=False, n_cap=1
+[RANGES] built 1 distance range(s)
+[PC_OPS] target=scan_8 before=359336 after=359336 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id']
+[PAI] target=scan_8 rays=7633800 observed=849670 pai=4.142303515771513
+[Z_PAI] target=scan_8 rays=7633800 observed=849670 z_pai=4.5711524446916165
+[Traits] scan=scan_008_multi02_2026_07_23_Additional_Scans, plot=scan_8, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=359336, scans=0, angles=0
+[PC_OPS] target=scan_8 before=530953 after=530953 order=[] scalars_before=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id'] scalars_after=['RSSI', 'source_index', 'time_s', 'phi', 'theta', 'dist_mm', 'range_m', 'encoder', 'roll_deg', 'pitch_deg', 'yaw_deg', 'beam_id']
+[PAI] target=scan_8 rays=7633800 observed=1143915 pai=6.952484986936334
+[Z_PAI] target=scan_8 rays=7633800 observed=1143915 z_pai=7.373238384874834
+[Traits] scan=scan_008_multi02_2026_07_23_Additional_Scans, plot=scan_8, height=nan m, LAI_even=nan, LAI_uneven=nan, stand_topo_count=nan, stand_topo_per_m=nan, count_left=nan, count_right=nan, points=530953, scans=0, angles=0
+Scan scan_008_multi02_2026_07_23_Additional_Scans completed

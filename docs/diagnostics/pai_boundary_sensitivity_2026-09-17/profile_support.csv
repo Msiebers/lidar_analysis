@@ -1,0 +1,6 @@
+x_near_m,n_targets,all_z_profiles_complete,minimum_support_fraction,all_conditional_profiles_complete,all_whole_box_fits_converged,number_whole_box_saturated,direct_layer_sum_check,maximum_abs_layer_sum_minus_z_total
+0.0,546,True,1.0,True,True,0,checked,8.135000006959103e-08
+0.1,546,True,1.0,True,True,0,checked,1.3470000048698694e-07
+0.2,546,True,1.0,True,True,0,checked,1.9600000022990116e-07
+0.3,546,True,1.0,True,True,0,checked,3.1199999916964316e-07
+0.4,546,True,1.0,True,True,0,not separable: appended layer rows lack X-bound identifiers,
